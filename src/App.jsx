@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+ import React, { useState, useEffect, useRef } from 'react';
 import {
   Calendar, MessageSquare, Users, BarChart3, AlertCircle, Plus,
   Send, ArrowLeftRight, Check, X, Clock, Bell, RotateCcw, Settings, Mail, LogOut,
@@ -49,6 +49,32 @@ const EMPTY_DATA = {
   swapRequests: [],
   messages: [],
 };
+
+const CLASS_TYPES = {
+  'Salus Reformer':      { color: '#7a8c5c', bg: '#e8ede0' },
+  'Reformer Beginner':   { color: '#9aae7e', bg: '#eef2e6' },
+  'Reformer Advanced':   { color: '#5b7245', bg: '#dce4d2' },
+  'Reformer Stretch':    { color: '#b3c490', bg: '#f0f3e6' },
+  'Friday Night Flow':   { color: '#c6926a', bg: '#f4e6d8' },
+  'Hyrox':               { color: '#c8442a', bg: '#f5dcd6' },
+  'Hyrox for Beginners': { color: '#d8694f', bg: '#fae3dc' },
+  'Salus Signature':     { color: '#2f4f3a', bg: '#dce4df' },
+  'Salus Strength':      { color: '#1f3528', bg: '#d4dcd6' },
+  'Barbell Strength':    { color: '#4a6f54', bg: '#e0e8e2' },
+  'Salus Sculpt':        { color: '#c89c4a', bg: '#f4ead4' },
+  'Glutes & Abs':        { color: '#b88a3a', bg: '#f0e3cc' },
+  'Arms & Abs':          { color: '#d8ac5a', bg: '#f8efde' },
+  'Power Yoga':          { color: '#8c5b7a', bg: '#ecdce4' },
+};
+
+const STUDIOS = {
+  reformer: { label: 'Reformer Studio', short: 'Reformer' },
+  hybrid:   { label: 'HYBRID',          short: 'Hybrid' },
+};
+
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const DATES = ['2026-05-18', '2026-05-19', '2026-05-20', '2026-05-21', '2026-05-22', '2026-05-23', '2026-05-24'];
+const DAY_LABELS = ['Mon 18', 'Tue 19', 'Wed 20', 'Thu 21', 'Fri 22', 'Sat 23', 'Sun 24'];
 
 
 // ──────────────────────────────────────────────────────────────────────────────
