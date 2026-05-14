@@ -1,0 +1,2941 @@
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Calendar, MessageSquare, Users, BarChart3, AlertCircle, Plus,
+  Send, ArrowLeftRight, Check, X, Clock, Bell, RotateCcw, Settings, Mail, LogOut,
+  ChevronLeft, ChevronRight, TrendingUp, Award, Activity
+} from 'lucide-react';
+import { supabase } from './lib/supabase';
+import {
+  profileFromDb,
+  classFromDb, classToDb,
+  coverReqFromDb,
+  swapReqFromDb,
+  messageFromDb,
+} from './lib/transformers';
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SEED DATA
+// ──────────────────────────────────────────────────────────────────────────────
+
+const DEFAULT_COACH_PREFS = {
+  assignedCover: true,     // Manager assigned me cover for a class
+  coverPosted: false,      // A class is now open for claim
+  classReminder24h: true,  // 24h before each of my classes
+  weeklySummary: false,    // Sunday evening recap
+};
+
+// Cover coaches care about *opportunities*, not their regular schedule (they have none)
+const DEFAULT_COVER_PREFS = {
+  assignedCover: true,           // Manager picked me for a class — urgent
+  coverPosted: true,             // New cover request hit the board — their bread and butter
+  classReminder24h: true,        // Reminder before a cover I've taken
+  notSelected: false,            // Courtesy: someone else got picked from interested list
+  weeklyOpportunities: false,    // Weekly digest of upcoming open shifts
+};
+
+const DEFAULT_MANAGER_PREFS = {
+  ...DEFAULT_COACH_PREFS,
+  classReminder24h: false,  // managers usually aren't teaching
+  newCoverRequest: true,    // Coach requested cover (needs action)
+  coverClaimed: false,      // Someone took a posted class
+  weeklyActivity: true,     // Weekly summary of activity
+};
+
+// Empty data shape. Real data is loaded from Supabase at runtime.
+const EMPTY_DATA = {
+  users: [],
+  classes: [],
+  coverRequests: [],
+  swapRequests: [],
+  messages: [],
+};
+
+
+// ──────────────────────────────────────────────────────────────────────────────
+// HOOKS
+// ──────────────────────────────────────────────────────────────────────────────
+
+function useIsMobile(breakpoint = 768) {
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' && window.innerWidth < breakpoint
+  );
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < breakpoint);
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, [breakpoint]);
+  return isMobile;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// HELPERS
+// ──────────────────────────────────────────────────────────────────────────────
+
+const fmtTime = (ts) => {
+  const d = new Date(ts);
+  const now = new Date();
+  const diff = (now - d) / 1000;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+};
+
+// Urgency for cover requests based on how soon the class is
+const getUrgency = (dateStr) => {
+  if (!dateStr) return { level: 'green', label: '—', color: '#7a8c5c', bg: '#eef1e8', daysLeft: null };
+  const classDate = new Date(dateStr + 'T00:00:00');
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const daysLeft = Math.round((classDate - now) / (1000 * 60 * 60 * 24));
+  if (daysLeft <= 7)  return { level: 'red',   label: 'Urgent',          color: '#c8442a', bg: '#fdebe5', daysLeft };
+  if (daysLeft <= 14) return { level: 'amber', label: 'Soon',            color: '#c89c4a', bg: '#fbf2dd', daysLeft };
+  return { level: 'green', label: 'Plenty of time', color: '#7a8c5c', bg: '#eef1e8', daysLeft };
+};
+
+const endTime = (start, dur) => {
+  const [h, m] = start.split(':').map(Number);
+  const total = h * 60 + m + dur;
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+};
+
+// ──────────────────────────────────────────────────────────────────────────────
+// MAIN APP
+// ──────────────────────────────────────────────────────────────────────────────
+
+export default function SalusStaff() {
+  const isMobile = useIsMobile();
+  const [session, setSession] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [data, setData] = useState(EMPTY_DATA);
+  const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState(null);
+  const [tab, setTab] = useState('timetable');
+  const [tabInitialized, setTabInitialized] = useState(false);
+  const [modal, setModal] = useState(null);
+
+  // Listen for auth state changes (session restore on mount + reactive updates)
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session: s } }) => {
+      setSession(s);
+      setAuthChecked(true);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+      setSession(s);
+      setAuthChecked(true);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Fetch all data once we have a session
+  const reloadData = async () => {
+    if (!session) return;
+    setLoading(true);
+    try {
+      const [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes] = await Promise.all([
+        supabase.from('profiles').select('*'),
+        supabase.from('classes').select('*'),
+        supabase.from('cover_requests').select('*'),
+        supabase.from('swap_requests').select('*'),
+        supabase.from('messages').select('*').order('created_at', { ascending: true }),
+      ]);
+
+      const errors = [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes]
+        .filter(r => r.error)
+        .map(r => r.error.message);
+      if (errors.length) {
+        console.error('Data load errors:', errors);
+      }
+
+      const myEmail = session.user?.email || '';
+      setData({
+        users: (profilesRes.data || []).map(r => profileFromDb(r, r.id === session.user?.id ? myEmail : '')),
+        classes: (classesRes.data || []).map(classFromDb),
+        coverRequests: (coverReqRes.data || []).map(coverReqFromDb),
+        swapRequests: (swapReqRes.data || []).map(swapReqFromDb),
+        messages: (messagesRes.data || []).map(messageFromDb),
+      });
+    } catch (e) {
+      console.error('Failed to load data:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (session) {
+      reloadData();
+    } else {
+      setLoading(false);
+      setData(EMPTY_DATA);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user?.id]);
+
+  // Login handler — real Supabase auth
+  const handleLogin = async (email, password) => {
+    setAuthError(null);
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password,
+    });
+    if (error) {
+      setAuthError(error.message || 'Could not sign in. Check email and password.');
+      return false;
+    }
+    return true;
+  };
+
+  const handleLogout = async () => {
+    setTabInitialized(false);
+    await supabase.auth.signOut();
+  };
+
+  // ─── Loading screens ───────────────────────────────────────────────────────
+  if (!authChecked) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f1e8', fontFamily: 'Geist, sans-serif' }}>
+        <div style={{ color: '#2f4f3a', fontFamily: '"Fraunces", serif', fontSize: 18, letterSpacing: 0.5 }}>Loading Salus Staff…</div>
+      </div>
+    );
+  }
+
+  // Not logged in → show login screen
+  if (!session) {
+    return (
+      <LoginScreen
+        error={authError}
+        onLogin={handleLogin}
+        onClearError={() => setAuthError(null)}
+      />
+    );
+  }
+
+  if (loading) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f1e8', fontFamily: 'Geist, sans-serif' }}>
+        <div style={{ color: '#2f4f3a', fontFamily: '"Fraunces", serif', fontSize: 18, letterSpacing: 0.5 }}>Loading your team…</div>
+      </div>
+    );
+  }
+
+  const currentUserId = session.user?.id;
+
+  // No profile row for this auth user — guide them
+  if (!data.users.find(u => u.id === currentUserId)) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f1e8', fontFamily: 'Geist, sans-serif', padding: 24 }}>
+        <div style={{ maxWidth: 440, background: '#fffdf7', border: '1px solid #e8e0cc', borderRadius: 16, padding: 32, textAlign: 'center' }}>
+          <h2 style={{ fontFamily: '"Fraunces", serif', fontSize: 22, marginTop: 0, color: '#1a2620' }}>Account isn't fully set up yet</h2>
+          <p style={{ fontSize: 14, color: '#5a6258', lineHeight: 1.5 }}>
+            Your login works, but there's no team profile attached to it.
+            The manager needs to add a profile row for your account in Supabase.
+          </p>
+          <button
+            onClick={handleLogout}
+            style={{ marginTop: 16, padding: '10px 18px', borderRadius: 8, border: 'none', background: '#2f4f3a', color: '#fff', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+          >
+            Sign out
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Mutations ─────────────────────────────────────────────────────────────
+  // Pattern: write to Supabase, then reload all data on success.
+
+  const updateUserSettings = async (userId, settings) => {
+    const patch = {};
+    if (settings.emailPrefs !== undefined) patch.email_prefs = settings.emailPrefs;
+    if (Object.keys(patch).length === 0) return;
+    const { error } = await supabase.from('profiles').update(patch).eq('id', userId);
+    if (error) { console.error('updateUserSettings', error); return; }
+    await reloadData();
+  };
+
+  const requestCover = async (classId, reason) => {
+    const { error: er1 } = await supabase.from('cover_requests').insert({
+      class_id: classId,
+      requested_by: currentUserId,
+      reason: reason || '',
+      status: 'pending',
+    });
+    if (er1) { console.error('requestCover', er1); return; }
+    const cls = data.classes.find(c => c.id === classId);
+    await supabase.from('classes').update({ status: 'needsCover', original_coach_id: cls?.coachId }).eq('id', classId);
+    await reloadData();
+  };
+
+  const cancelCoverRequest = async (requestId) => {
+    const req = data.coverRequests.find(r => r.id === requestId);
+    if (!req) return;
+    const { error } = await supabase.from('cover_requests').delete().eq('id', requestId);
+    if (error) { console.error('cancelCoverRequest', error); return; }
+    const origId = data.classes.find(c => c.id === req.classId)?.originalCoachId;
+    await supabase.from('classes').update({ status: 'assigned', original_coach_id: null, coach_id: origId }).eq('id', req.classId);
+    await reloadData();
+  };
+
+  const claimCover = async (requestId, overrideCoachId) => {
+    const req = data.coverRequests.find(r => r.id === requestId);
+    if (!req) return;
+    const coachId = overrideCoachId || currentUserId;
+    const { error: er1 } = await supabase.from('cover_requests').update({ status: 'claimed', claimed_by: coachId }).eq('id', requestId);
+    if (er1) { console.error('claimCover-req', er1); return; }
+    const { error: er2 } = await supabase.from('classes').update({ coach_id: coachId, status: 'covered' }).eq('id', req.classId);
+    if (er2) { console.error('claimCover-class', er2); return; }
+    await reloadData();
+  };
+
+  const approveCoverRequest = async (requestId, action, assignTo) => {
+    const req = data.coverRequests.find(r => r.id === requestId);
+    if (!req) return;
+    if (action === 'decline') {
+      await supabase.from('cover_requests').delete().eq('id', requestId);
+      await supabase.from('classes').update({ status: 'assigned', original_coach_id: null }).eq('id', req.classId);
+    } else if (action === 'assign' && assignTo) {
+      await supabase.from('cover_requests').update({ status: 'assigned', claimed_by: assignTo }).eq('id', requestId);
+      await supabase.from('classes').update({ coach_id: assignTo, status: 'covered' }).eq('id', req.classId);
+    } else if (action === 'post') {
+      await supabase.from('cover_requests').update({ status: 'open' }).eq('id', requestId);
+    }
+    await reloadData();
+  };
+
+  const expressInterest = async (requestId) => {
+    const req = data.coverRequests.find(r => r.id === requestId);
+    if (!req) return;
+    const interested = req.interestedCovers || [];
+    const next = interested.includes(currentUserId)
+      ? interested.filter(id => id !== currentUserId)
+      : [...interested, currentUserId];
+    const { error } = await supabase.from('cover_requests').update({ interested_covers: next }).eq('id', requestId);
+    if (error) { console.error('expressInterest', error); return; }
+    await reloadData();
+  };
+
+  const saveClass = async (classData) => {
+    if (classData.id) {
+      const { error } = await supabase.from('classes').update(classToDb(classData)).eq('id', classData.id);
+      if (error) console.error('updateClass', error);
+    } else {
+      const { error } = await supabase.from('classes').insert(classToDb(classData));
+      if (error) console.error('insertClass', error);
+    }
+    await reloadData();
+  };
+
+  const deleteClass = async (classId) => {
+    const { error } = await supabase.from('classes').delete().eq('id', classId);
+    if (error) console.error('deleteClass', error);
+    await reloadData();
+  };
+
+  const sendMessage = async (text) => {
+    if (!text || !text.trim()) return;
+    const { error } = await supabase.from('messages').insert({
+      user_id: currentUserId,
+      text: text.trim(),
+    });
+    if (error) console.error('sendMessage', error);
+    await reloadData();
+  };
+
+  // Reset is now a no-op for safety. (In dev, manager can wipe data via Supabase.)
+  const resetData = async () => { setModal(null); };
+
+  // Legacy persist alias used by some inner components. Routes to reloadData.
+  const persist = async () => { await reloadData(); };
+
+  const currentUser = data.users.find(u => u.id === currentUserId);
+  const isManager = currentUser.role === 'manager';
+  const pendingCount = data.coverRequests.filter(r => r.status === 'pending').length;
+  const openCount = data.coverRequests.filter(r => r.status === 'open').length;
+  const badgeCount = isManager ? pendingCount : openCount;
+  const badgeLabel = isManager ? 'pending approval' : 'on the board';
+
+  // Drop cover coaches onto the Cover Board (their main action surface).
+  // Everyone else gets the Timetable. Only runs once per sign-in.
+  if (!tabInitialized && currentUser) {
+    if (currentUser.coachType === 'cover') {
+      setTab('cover');
+    } else {
+      setTab('timetable');
+    }
+    setTabInitialized(true);
+  }
+
+  // Wrappers that match the names the inner components expect
+  const assignCoverDirectly = (requestId, coachId) =>
+    approveCoverRequest(requestId, 'assign', coachId);
+
+  const postCoverToBoard = (requestId) =>
+    approveCoverRequest(requestId, 'post');
+
+  const declineCoverRequest = (requestId) =>
+    approveCoverRequest(requestId, 'decline');
+
+  const addClass = (classData) => saveClass({ ...classData, id: null });
+  const updateClass = (classId, updates) => {
+    const existing = data.classes.find(c => c.id === classId);
+    if (!existing) return Promise.resolve();
+    return saveClass({ ...existing, ...updates, id: classId });
+  };
+
+  const proposeSwap = async (fromClassId, toClassId) => {
+    const toClass = data.classes.find(c => c.id === toClassId);
+    if (!toClass) return;
+    const { error } = await supabase.from('swap_requests').insert({
+      class_a_id: fromClassId,
+      class_b_id: toClassId,
+      from_coach: currentUserId,
+      to_coach: toClass.coachId,
+      status: 'pending',
+    });
+    if (error) console.error('proposeSwap', error);
+    await reloadData();
+  };
+
+  const respondToSwap = async (swapId, accept) => {
+    const swap = data.swapRequests.find(s => s.id === swapId);
+    if (!swap) return;
+    if (accept) {
+      const classA = data.classes.find(c => c.id === swap.classAId);
+      const classB = data.classes.find(c => c.id === swap.classBId);
+      await supabase.from('classes').update({ coach_id: classB.coachId }).eq('id', swap.classAId);
+      await supabase.from('classes').update({ coach_id: classA.coachId }).eq('id', swap.classBId);
+      await supabase.from('swap_requests').update({ status: 'accepted' }).eq('id', swapId);
+    } else {
+      await supabase.from('swap_requests').update({ status: 'declined' }).eq('id', swapId);
+    }
+    await reloadData();
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  return (
+    <div style={styles.app}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Geist:wght@300;400;500;600;700&display=swap');
+        * { box-sizing: border-box; }
+        body { margin: 0; background: #f5f1e8; }
+        .salus-btn { transition: all 0.15s ease; cursor: pointer; }
+        .salus-btn:hover { transform: translateY(-1px); }
+        .salus-card { transition: all 0.2s ease; }
+        .salus-card:hover { box-shadow: 0 4px 12px rgba(47, 79, 58, 0.08); }
+        .salus-tab { transition: all 0.2s ease; }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .salus-modal-content { animation: slideUp 0.22s ease; }
+        .salus-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+        .salus-scroll::-webkit-scrollbar-track { background: transparent; }
+        .salus-scroll::-webkit-scrollbar-thumb { background: #d4cdb8; border-radius: 3px; }
+        .salus-input:focus { outline: none; border-color: #2f4f3a !important; }
+
+        /* Mobile-specific overrides */
+        @media (max-width: 768px) {
+          .salus-header { padding: 14px 16px !important; }
+          .salus-header-right { gap: 8px !important; }
+          .salus-nav { padding: 12px 8px 0 !important; gap: 2px !important; }
+          .salus-nav-tab { padding: 8px 10px !important; font-size: 12px !important; }
+          .salus-main { padding: 16px !important; }
+          .salus-section-header { gap: 12px !important; }
+          .salus-modal-card { max-width: 100% !important; border-radius: 12px !important; }
+          .salus-stats-table { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+          .salus-stats-table > div { min-width: 540px; }
+          .salus-h2 { font-size: 22px !important; }
+        }
+
+        /* Touch-friendly active states */
+        @media (hover: none) {
+          .salus-btn:active { transform: scale(0.98); }
+        }
+      `}</style>
+
+      {/* Header */}
+      <header className="salus-header" style={styles.header}>
+        <div style={styles.headerLeft}>
+          <div style={styles.logo}>
+            <div style={styles.logoMark}>S</div>
+            <div>
+              <div style={styles.logoText}>Salus Staff</div>
+              <div style={styles.logoSub}>Salus House · Sidcup</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="salus-header-right" style={styles.headerRight}>
+          {badgeCount > 0 && (
+            <button
+              onClick={() => setTab('cover')}
+              className="salus-btn"
+              style={styles.alertBadge}
+            >
+              <Bell size={14} />
+              <span>{badgeCount}{!isMobile && ` ${badgeLabel}`}</span>
+            </button>
+          )}
+
+          <div style={styles.userSelector}>
+            <div style={{ ...styles.miniAvatar, width: 28, height: 28, fontSize: 11, background: currentUser.color }}>
+              {currentUser.initials}
+            </div>
+            {!isMobile && (
+              <div>
+                <div style={styles.userSelectorName}>{currentUser.name.split(' ')[0]}</div>
+                <div style={styles.userSelectorRole}>
+                  {currentUser.role === 'manager'
+                    ? 'Manager'
+                    : currentUser.coachType === 'cover'
+                      ? 'Cover coach'
+                      : 'Coach'}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={() => setModal({ type: 'settings' })}
+            className="salus-btn"
+            style={styles.iconBtn}
+            title="Email notification settings"
+          >
+            <Settings size={16} />
+          </button>
+
+          <button
+            onClick={handleLogout}
+            className="salus-btn"
+            style={styles.iconBtn}
+            title="Sign out"
+          >
+            <LogOut size={16} />
+          </button>
+
+        </div>
+      </header>
+
+      {/* Nav */}
+      <nav className="salus-nav" style={styles.nav}>
+        <NavTab icon={Calendar}     label="Timetable"   active={tab==='timetable'} onClick={() => setTab('timetable')} isMobile={isMobile} />
+        <NavTab icon={ArrowLeftRight} label="Cover Board" active={tab==='cover'}    onClick={() => setTab('cover')} badge={badgeCount} isMobile={isMobile} />
+        <NavTab icon={MessageSquare}  label="Team Chat"   active={tab==='chat'}     onClick={() => setTab('chat')} isMobile={isMobile} />
+        <NavTab icon={BarChart3}      label={isManager ? 'Team Stats' : 'My Stats'} active={tab==='stats'} onClick={() => setTab('stats')} isMobile={isMobile} />
+      </nav>
+
+      {/* Main */}
+      <main className="salus-main" style={styles.main}>
+        {(tab === 'timetable' || tab === 'cover') && (
+          <StatusBar
+            data={data}
+            currentUser={currentUser}
+            isManager={isManager}
+            onJumpTo={setTab}
+          />
+        )}
+
+        {tab === 'timetable' && (
+          <Timetable
+            data={data}
+            currentUser={currentUser}
+            isManager={isManager}
+            isMobile={isMobile}
+            onClassClick={(classId) => setModal({ type: 'classDetail', classId })}
+            onAddClass={() => setModal({ type: 'editClass', classId: null })}
+          />
+        )}
+        {tab === 'cover' && (
+          <CoverBoard
+            data={data}
+            currentUser={currentUser}
+            isManager={isManager}
+            isCoverCoach={currentUser.coachType === 'cover'}
+            onClaim={claimCover}
+            onCancel={cancelCoverRequest}
+            onManage={(requestId) => setModal({ type: 'manageCover', requestId })}
+            onExpressInterest={expressInterest}
+          />
+        )}
+        {tab === 'chat' && (
+          <Chat data={data} currentUser={currentUser} onSend={sendMessage} />
+        )}
+        {tab === 'stats' && (
+          isManager
+            ? <ManagerStats data={data} />
+            : <CoachStats data={data} currentUser={currentUser} />
+        )}
+      </main>
+
+      {/* Modals */}
+      {modal?.type === 'classDetail' && (
+        <ClassDetailModal
+          classObj={data.classes.find(c => c.id === modal.classId)}
+          data={data}
+          currentUser={currentUser}
+          isManager={isManager}
+          onClose={() => setModal(null)}
+          onRequestCover={(reason) => { requestCover(modal.classId, reason); setModal(null); }}
+          onProposeSwap={(toClassId) => { proposeSwap(modal.classId, toClassId); setModal(null); }}
+          onEdit={() => setModal({ type: 'editClass', classId: modal.classId })}
+          onDelete={() => setModal({ type: 'confirmDelete', classId: modal.classId })}
+        />
+      )}
+      {modal?.type === 'editClass' && (
+        <EditClassModal
+          classObj={modal.classId ? data.classes.find(c => c.id === modal.classId) : null}
+          data={data}
+          onClose={() => setModal(null)}
+          onSave={(classData) => {
+            if (modal.classId) updateClass(modal.classId, classData);
+            else addClass(classData);
+            setModal(null);
+          }}
+        />
+      )}
+      {modal?.type === 'manageCover' && (
+        <ManageCoverModal
+          request={data.coverRequests.find(r => r.id === modal.requestId)}
+          data={data}
+          onClose={() => setModal(null)}
+          onAssign={(coachId) => { assignCoverDirectly(modal.requestId, coachId); setModal(null); }}
+          onPost={() => { postCoverToBoard(modal.requestId); setModal(null); }}
+          onDecline={() => { declineCoverRequest(modal.requestId); setModal(null); }}
+        />
+      )}
+      {modal?.type === 'confirmDelete' && (
+        <ConfirmModal
+          title="Delete this class?"
+          message="This will remove the class from the timetable and cancel any related cover or swap requests."
+          confirmLabel="Delete"
+          onConfirm={() => { deleteClass(modal.classId); setModal(null); }}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal?.type === 'settings' && (
+        <SettingsModal
+          user={currentUser}
+          isManager={isManager}
+          onClose={() => setModal(null)}
+          onSave={(settings) => { updateUserSettings(currentUser.id, settings); setModal(null); }}
+        />
+      )}
+      {modal?.type === 'reset' && (
+        <ConfirmModal
+          title="Reset demo data?"
+          message="This will restore the original sample classes, cover requests, and chat messages."
+          confirmLabel="Reset"
+          onConfirm={resetData}
+          onClose={() => setModal(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// NAV TAB
+// ──────────────────────────────────────────────────────────────────────────────
+
+function NavTab({ icon: Icon, label, active, onClick, badge, isMobile }) {
+  // Shorten labels on mobile
+  const mobileLabel = isMobile
+    ? label.replace('Team ', '').replace(' Board', '').replace('Timetable', 'Week')
+    : label;
+  return (
+    <button
+      onClick={onClick}
+      className="salus-tab salus-btn salus-nav-tab"
+      style={{
+        ...styles.navTab,
+        ...(active ? styles.navTabActive : {}),
+      }}
+    >
+      <Icon size={isMobile ? 14 : 16} />
+      <span>{mobileLabel}</span>
+      {badge > 0 && (
+        <span style={styles.navBadge}>{badge}</span>
+      )}
+    </button>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// TIMETABLE
+// ──────────────────────────────────────────────────────────────────────────────
+
+// ──────────────────────────────────────────────────────────────────────────────
+// LOGIN SCREEN
+// ──────────────────────────────────────────────────────────────────────────────
+
+function LoginScreen({ error, onLogin, onClearError }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [accepted, setAccepted] = useState(false);
+  const [termsOpen, setTermsOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  const canSubmit = email.trim().length > 3 && password.length >= 6 && accepted && !submitting;
+
+  const handleSubmit = async (e) => {
+    e?.preventDefault?.();
+    if (!canSubmit) return;
+    setSubmitting(true);
+    try {
+      await onLogin(email, password);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div style={styles.loginWrap}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Geist:wght@300;400;500;600;700&display=swap');
+        body { margin: 0; background: #f5f1e8; }
+      `}</style>
+
+      <form onSubmit={handleSubmit} style={styles.loginCard}>
+        <div style={styles.loginLogo}>
+          <div style={styles.loginLogoMark}>S</div>
+        </div>
+
+        <h1 style={styles.loginTitle}>Salus Staff</h1>
+        <p style={styles.loginSub}>Sign in to access your team's timetable, cover board, and chat.</p>
+
+        <div style={styles.loginField}>
+          <label style={styles.label}>Email address</label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => { setEmail(e.target.value); if (error) onClearError(); }}
+            placeholder="you@salus.house"
+            className="salus-input"
+            style={styles.loginInput}
+            autoFocus
+            autoComplete="email"
+          />
+        </div>
+
+        <div style={styles.loginField}>
+          <label style={styles.label}>Password</label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => { setPassword(e.target.value); if (error) onClearError(); }}
+            placeholder="Your password"
+            className="salus-input"
+            style={styles.loginInput}
+            autoComplete="current-password"
+          />
+        </div>
+
+        {error && (
+          <div style={styles.loginError}>{error}</div>
+        )}
+
+        <div
+          style={styles.termsRow}
+          onClick={() => setAccepted(!accepted)}
+          role="button"
+        >
+          <div style={{ ...styles.checkbox, ...(accepted ? styles.checkboxActive : {}) }}>
+            {accepted && <Check size={12} strokeWidth={3} />}
+          </div>
+          <span>
+            I agree to the{' '}
+            <span style={styles.termsLink} onClick={(e) => { e.stopPropagation(); setTermsOpen(true); }}>
+              Terms &amp; Conditions
+            </span>
+            {' '}and consent to receiving operational emails about cover requests and my classes.
+          </span>
+        </div>
+
+        <button
+          type="submit"
+          className="salus-btn"
+          style={{ ...styles.loginBtn, ...(!canSubmit ? styles.loginBtnDisabled : {}) }}
+          disabled={!canSubmit}
+        >
+          {submitting ? 'Signing in…' : 'Sign in'}
+        </button>
+
+        <div style={styles.loginFoot}>
+          Trouble signing in? Contact your manager.
+        </div>
+      </form>
+
+      {termsOpen && (
+        <Modal onClose={() => setTermsOpen(false)}>
+          <div style={{ padding: 28 }}>
+            <div style={styles.modalDayBadge}>Salus Staff</div>
+            <h2 style={{ ...styles.h2, marginTop: 6, marginBottom: 16 }}>Terms &amp; Conditions</h2>
+            <div style={{ fontSize: 13, color: '#5a6258', lineHeight: 1.6 }}>
+              <p><strong>1. Purpose.</strong> Salus Staff is provided by Salus House as an internal tool for coaches and managers to coordinate the studio timetable, cover requests, and team communications.</p>
+              <p><strong>2. Account use.</strong> Your account is for your personal professional use only. Don't share login details with anyone else, including other team members.</p>
+              <p><strong>3. Emails.</strong> By signing in you consent to receive operational emails about your classes, cover requests, schedule changes, and team announcements at the address you signed in with. You can adjust which emails you receive in Settings at any time.</p>
+              <p><strong>4. Conduct in team chat.</strong> Keep team chat professional and respectful. Manager has full visibility of all messages.</p>
+              <p><strong>5. Cover &amp; swap conduct.</strong> Cover requests must be made in good faith. Once you've agreed to cover a class, you're responsible for teaching it or finding alternative cover with your manager's approval.</p>
+              <p><strong>6. Data.</strong> Salus House holds your name, email, and activity in this app for the purposes of running the studio. Data is not shared with third parties beyond essential service providers (email, hosting).</p>
+              <p><strong>7. Termination.</strong> Access to Salus Staff ends when your contracted relationship with Salus House ends.</p>
+              <p style={{ fontSize: 12, color: '#a8a895', marginTop: 16 }}>By signing in you confirm you've read and agreed to these terms.</p>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
+              <button onClick={() => setTermsOpen(false)} className="salus-btn" style={styles.btnPrimary}>Got it</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAddClass }) {
+  const [filter, setFilter] = useState('all'); // all | mine | needsCover
+  const [studioFilter, setStudioFilter] = useState('all'); // all | reformer | hybrid
+  const [selectedDay, setSelectedDay] = useState(0); // for mobile day-selector
+
+  let classes = data.classes;
+  if (filter === 'mine') classes = classes.filter(c => c.coachId === currentUser.id);
+  if (filter === 'needsCover') classes = classes.filter(c => c.status === 'needsCover');
+  if (studioFilter !== 'all') classes = classes.filter(c => c.studio === studioFilter);
+
+  const byDay = DAYS.map((_, i) =>
+    classes
+      .filter(c => c.day === i)
+      .sort((a, b) => a.time.localeCompare(b.time))
+  );
+
+  // Renders a single class card — used in both desktop and mobile views
+  const renderClassCard = (cls, variant = 'compact') => {
+    const coach = data.users.find(u => u.id === cls.coachId);
+    const typeCfg = CLASS_TYPES[cls.type];
+    const isMine = cls.coachId === currentUser.id;
+    const needsCover = cls.status === 'needsCover';
+    const isMobileVariant = variant === 'mobile';
+    return (
+      <button
+        key={cls.id}
+        onClick={() => onClassClick(cls.id)}
+        className="salus-card salus-btn"
+        style={{
+          ...styles.classCard,
+          ...(isMobileVariant ? styles.classCardMobile : {}),
+          borderLeft: `4px solid ${typeCfg.color}`,
+          background: needsCover ? '#fef3e2' : '#fff',
+          ...(isMine && !needsCover ? { background: '#f0eee4' } : {}),
+        }}
+      >
+        {isMobileVariant ? (
+          <>
+            <div style={styles.mobileCardLeft}>
+              <div style={styles.mobileCardTime}>{cls.time}</div>
+              <div style={styles.mobileCardDur}>{cls.dur}m</div>
+            </div>
+            <div style={styles.mobileCardMid}>
+              <div style={styles.mobileCardType}>{cls.type}</div>
+              <div style={styles.mobileCardMeta}>
+                <div style={{ ...styles.miniAvatar, background: coach?.color || '#ccc', width: 18, height: 18, fontSize: 8 }}>
+                  {coach?.initials}
+                </div>
+                <span style={styles.mobileCardCoach}>{coach?.name || 'Unassigned'}</span>
+                <span style={styles.mobileCardStudio}>· {STUDIOS[cls.studio]?.short}</span>
+              </div>
+            </div>
+            {needsCover && (
+              <div style={{ ...styles.coverBadge, marginRight: 4 }}>
+                <AlertCircle size={10} />
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div style={styles.classCardTop}>
+              <div style={styles.classTime}>{cls.time}</div>
+              {needsCover && (
+                <div style={styles.coverBadge}>
+                  <AlertCircle size={10} /> Cover
+                </div>
+              )}
+            </div>
+            <div style={styles.classType}>{cls.type}</div>
+            <div style={styles.classCoach}>
+              <div style={{ ...styles.miniAvatar, background: coach?.color || '#ccc' }}>
+                {coach?.initials}
+              </div>
+              <span style={styles.classCoachName}>
+                {coach?.name?.split(' ')[0] || 'Unassigned'}
+              </span>
+            </div>
+            <div style={styles.studioTag}>{STUDIOS[cls.studio]?.short}</div>
+          </>
+        )}
+      </button>
+    );
+  };
+
+  return (
+    <div>
+      <div className="salus-section-header" style={styles.sectionHeader}>
+        <div>
+          <h2 className="salus-h2" style={styles.h2}>{isMobile ? 'This Week' : `Week of ${DAY_LABELS[0]}–${DAY_LABELS[6]} May`}</h2>
+          <p style={styles.subtitle}>
+            {classes.length} classes · {data.classes.filter(c => c.status === 'needsCover').length} need cover
+          </p>
+        </div>
+        <div style={styles.filterRow}>
+          <FilterPill label="All" active={filter==='all'} onClick={() => setFilter('all')} />
+          {!isManager && <FilterPill label="Mine" active={filter==='mine'} onClick={() => setFilter('mine')} />}
+          <FilterPill label="Cover" active={filter==='needsCover'} onClick={() => setFilter('needsCover')} />
+          {isManager && (
+            <button onClick={onAddClass} className="salus-btn" style={styles.btnPrimary}>
+              <Plus size={14} /> {isMobile ? 'Add' : 'Add class'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Studio toggle */}
+      <div style={styles.studioToggle}>
+        <button
+          onClick={() => setStudioFilter('all')}
+          className="salus-btn"
+          style={{ ...styles.studioPill, ...(studioFilter==='all' ? styles.studioPillActive : {}) }}
+        >
+          All studios
+        </button>
+        <button
+          onClick={() => setStudioFilter('reformer')}
+          className="salus-btn"
+          style={{ ...styles.studioPill, ...(studioFilter==='reformer' ? styles.studioPillActive : {}) }}
+        >
+          {isMobile ? 'Reformer' : 'Reformer Studio'}
+        </button>
+        <button
+          onClick={() => setStudioFilter('hybrid')}
+          className="salus-btn"
+          style={{ ...styles.studioPill, ...(studioFilter==='hybrid' ? styles.studioPillActive : {}) }}
+        >
+          HYBRID
+        </button>
+      </div>
+
+      {/* MOBILE: day selector + single day list */}
+      {isMobile ? (
+        <>
+          <div style={styles.daySelector} className="salus-scroll">
+            {DAYS.map((day, i) => {
+              const isActive = i === selectedDay;
+              return (
+                <button
+                  key={day}
+                  onClick={() => setSelectedDay(i)}
+                  className="salus-btn"
+                  style={{ ...styles.dayPill, ...(isActive ? styles.dayPillActive : {}) }}
+                >
+                  <div style={styles.dayPillDay}>{day}</div>
+                  <div style={styles.dayPillDate}>{DAY_LABELS[i].split(' ')[1]}</div>
+                  {byDay[i].length > 0 && <div style={{ ...styles.dayPillDot, background: isActive ? '#fff' : '#2f4f3a' }} />}
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={styles.mobileDayHeader}>
+            <div>
+              <div style={styles.mobileDayHeaderDay}>{DAYS[selectedDay]} {DAY_LABELS[selectedDay].split(' ')[1]} May</div>
+              <div style={styles.subtitle}>
+                {byDay[selectedDay].length} class{byDay[selectedDay].length === 1 ? '' : 'es'}
+              </div>
+            </div>
+          </div>
+
+          <div style={styles.mobileDayList}>
+            {byDay[selectedDay].length === 0 ? (
+              <div style={{ ...styles.emptyState, padding: '32px 16px' }}>
+                <div style={styles.emptyTitle}>No classes</div>
+                <div style={styles.emptyText}>Nothing scheduled for this day with the current filters.</div>
+              </div>
+            ) : (
+              byDay[selectedDay].map(cls => renderClassCard(cls, 'mobile'))
+            )}
+          </div>
+        </>
+      ) : (
+        /* DESKTOP: full 7-day grid */
+        <div style={styles.weekGrid}>
+          {DAYS.map((day, i) => (
+            <div key={day} style={styles.dayColumn}>
+              <div style={styles.dayHeader}>
+                <div>
+                  <div style={styles.dayName}>{day}</div>
+                  <div style={styles.dayDate}>{DAY_LABELS[i].split(' ')[1]} May</div>
+                </div>
+                <div style={styles.dayCount}>{byDay[i].length}</div>
+              </div>
+              <div style={styles.dayClasses}>
+                {byDay[i].length === 0 && (
+                  <div style={styles.emptyDay}>No classes</div>
+                )}
+                {byDay[i].map(cls => renderClassCard(cls, 'compact'))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Legend — hide on mobile to save space */}
+      {!isMobile && (
+        <div style={styles.legend}>
+          {Object.entries(CLASS_TYPES).map(([name, cfg]) => (
+            <div key={name} style={styles.legendItem}>
+              <div style={{ ...styles.legendDot, background: cfg.color }} />
+              <span>{name}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FilterPill({ label, active, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className="salus-btn"
+      style={{
+        ...styles.filterPill,
+        ...(active ? styles.filterPillActive : {}),
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// COVER BOARD
+// ──────────────────────────────────────────────────────────────────────────────
+
+function UrgencyBadge({ urgency }) {
+  const labelText = urgency.daysLeft === null
+    ? urgency.label
+    : urgency.daysLeft <= 0 ? 'Today'
+    : urgency.daysLeft === 1 ? 'Tomorrow'
+    : `${urgency.daysLeft} days`;
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 4,
+      fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5,
+      color: urgency.color, background: urgency.bg,
+      padding: '4px 8px', borderRadius: 10,
+      border: `1px solid ${urgency.color}33`,
+      whiteSpace: 'nowrap',
+    }}>
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: urgency.color }} />
+      {labelText}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// STATUS BAR — personalized "what matters right now" at the top
+// ──────────────────────────────────────────────────────────────────────────────
+
+function StatusBar({ data, currentUser, isManager, onJumpTo }) {
+  // Find the user's next teaching commitment
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const upcomingForMe = data.classes
+    .filter(c => c.coachId === currentUser.id && c.date)
+    .map(c => ({ ...c, when: new Date(c.date + 'T' + c.time + ':00') }))
+    .filter(c => c.when >= today)
+    .sort((a, b) => a.when - b.when);
+  const nextClass = upcomingForMe[0];
+
+  let content;
+
+  if (isManager) {
+    const pending = data.coverRequests.filter(r => r.status === 'pending').length;
+    const needsCover = data.classes.filter(c => c.status === 'needsCover').length;
+    const covered = data.coverRequests.filter(r => r.status === 'claimed' || r.status === 'assigned').length;
+
+    if (pending > 0) {
+      content = {
+        accent: '#c8442a',
+        title: `${pending} cover ${pending === 1 ? 'request needs' : 'requests need'} your decision`,
+        sub: `${needsCover} class${needsCover === 1 ? '' : 'es'} still need cover · ${covered} sorted this week`,
+        actionLabel: 'Review',
+        action: () => onJumpTo('cover'),
+      };
+    } else {
+      content = {
+        accent: '#2f4f3a',
+        title: 'All caught up',
+        sub: `${needsCover} class${needsCover === 1 ? '' : 'es'} need cover · ${covered} sorted this week`,
+      };
+    }
+  } else if (currentUser.coachType === 'cover') {
+    const open = data.coverRequests.filter(r => r.status === 'open').length;
+    const myInterested = data.coverRequests.filter(r => (r.interestedCovers || []).includes(currentUser.id)).length;
+
+    if (nextClass) {
+      content = {
+        accent: currentUser.color,
+        title: `Up next: ${DAYS[nextClass.day]} ${nextClass.date.slice(8)} May · ${nextClass.time} · ${nextClass.type}`,
+        sub: `${STUDIOS[nextClass.studio]?.label} · ${open} more cover ${open === 1 ? 'opportunity' : 'opportunities'} on the board`,
+        actionLabel: 'View board',
+        action: () => onJumpTo('cover'),
+      };
+    } else if (open > 0) {
+      content = {
+        accent: currentUser.color,
+        title: `${open} cover ${open === 1 ? 'opportunity' : 'opportunities'} available`,
+        sub: myInterested > 0
+          ? `You've marked yourself available for ${myInterested} · waiting on the manager`
+          : 'Mark yourself available for any shift you can take',
+        actionLabel: 'View board',
+        action: () => onJumpTo('cover'),
+      };
+    } else {
+      content = {
+        accent: currentUser.color,
+        title: 'No open shifts right now',
+        sub: "We'll email you when new cover opportunities open up",
+      };
+    }
+  } else {
+    // Permanent coach
+    const mineThisWeek = data.classes.filter(c => c.coachId === currentUser.id).length;
+    const needsCoverThisWeek = data.classes.filter(c => c.status === 'needsCover').length;
+
+    if (nextClass) {
+      content = {
+        accent: currentUser.color,
+        title: `Up next: ${DAYS[nextClass.day]} ${nextClass.date.slice(8)} May · ${nextClass.time} · ${nextClass.type}`,
+        sub: `${STUDIOS[nextClass.studio]?.label} · ${mineThisWeek} class${mineThisWeek === 1 ? '' : 'es'} this week${needsCoverThisWeek > 0 ? ` · ${needsCoverThisWeek} need cover` : ''}`,
+        actionLabel: needsCoverThisWeek > 0 ? 'See cover board' : null,
+        action: needsCoverThisWeek > 0 ? () => onJumpTo('cover') : null,
+      };
+    } else {
+      content = {
+        accent: currentUser.color,
+        title: 'No upcoming classes this week',
+        sub: needsCoverThisWeek > 0 ? `${needsCoverThisWeek} class${needsCoverThisWeek === 1 ? '' : 'es'} need cover — could you help out?` : 'Enjoy a quiet week',
+        actionLabel: needsCoverThisWeek > 0 ? 'See cover board' : null,
+        action: needsCoverThisWeek > 0 ? () => onJumpTo('cover') : null,
+      };
+    }
+  }
+
+  return (
+    <div style={{ ...styles.statusBar, borderLeftColor: content.accent }}>
+      <div style={styles.statusBarContent}>
+        <div style={styles.statusBarTitle}>{content.title}</div>
+        {content.sub && <div style={styles.statusBarSub}>{content.sub}</div>}
+      </div>
+      {content.action && (
+        <button onClick={content.action} className="salus-btn" style={styles.statusBarBtn}>
+          {content.actionLabel}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCancel, onManage, onExpressInterest }) {
+  const sortByDay = (a, b) => {
+    const ca = data.classes.find(c => c.id === a.classId);
+    const cb = data.classes.find(c => c.id === b.classId);
+    if (ca.day !== cb.day) return ca.day - cb.day;
+    return ca.time.localeCompare(cb.time);
+  };
+
+  const allPending = data.coverRequests.filter(r => r.status === 'pending').sort(sortByDay);
+  const myPending = allPending.filter(r => r.requestedBy === currentUser.id);
+  const openRequests = data.coverRequests.filter(r => r.status === 'open').sort(sortByDay);
+  const resolvedRequests = data.coverRequests.filter(r => r.status === 'claimed' || r.status === 'assigned');
+
+  const totalActive = (isManager ? allPending.length : myPending.length) + openRequests.length;
+
+  return (
+    <div>
+      <div style={styles.sectionHeader}>
+        <div>
+          <h2 style={styles.h2}>Cover Board</h2>
+          <p style={styles.subtitle}>
+            {isManager
+              ? `${allPending.length} awaiting your decision · ${openRequests.length} on the board`
+              : `${myPending.length} of yours pending · ${openRequests.length} on the board`
+            }
+          </p>
+        </div>
+      </div>
+
+      {/* Manager: pending approvals */}
+      {isManager && allPending.length > 0 && (
+        <div style={{ marginBottom: 32 }}>
+          <h3 style={{ ...styles.h3, marginTop: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Bell size={16} color="#c8442a" />
+            Awaiting your decision
+          </h3>
+          <div style={styles.coverList}>
+            {allPending.map(req => {
+              const cls = data.classes.find(c => c.id === req.classId);
+              const requester = data.users.find(u => u.id === req.requestedBy);
+              const typeCfg = CLASS_TYPES[cls.type];
+              const urgency = getUrgency(cls.date);
+              return (
+                <div key={req.id} className="salus-card" style={{ ...styles.coverCard, background: '#fffaf2' }}>
+                  <div style={{ ...styles.coverCardStripe, background: urgency.color }} />
+                  <div style={styles.coverCardBody}>
+                    <div style={styles.coverCardTop}>
+                      <div>
+                        <div style={styles.coverCardDay}>{DAYS[cls.day]} {cls.date?.slice(8)} May · {cls.time}–{endTime(cls.time, cls.dur)}</div>
+                        <div style={styles.coverCardType}>{cls.type}</div>
+                        <div style={styles.coverCardSub}>
+                          <span style={{ ...styles.studioTagInline, color: typeCfg.color }}>{STUDIOS[cls.studio]?.label}</span>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+                        <UrgencyBadge urgency={urgency} />
+                        <div style={styles.coverCardMeta}>
+                          <div style={{ ...styles.miniAvatar, background: requester.color }}>{requester.initials}</div>
+                          <div>
+                            <div style={styles.coverCardRequester}>{requester.name.split(' ')[0]}</div>
+                            <div style={styles.coverCardTime}>{fmtTime(req.timestamp)}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div style={styles.coverCardReason}>
+                      <span style={styles.reasonLabel}>Reason</span>
+                      <span>{req.reason}</span>
+                    </div>
+                    <div style={styles.coverCardActions}>
+                      <button onClick={() => onManage(req.id)} className="salus-btn" style={styles.btnPrimary}>
+                        Review &amp; decide
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Coach: my own pending requests */}
+      {!isManager && myPending.length > 0 && (
+        <div style={{ marginBottom: 32 }}>
+          <h3 style={{ ...styles.h3, marginTop: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Clock size={16} color="#7a8270" />
+            Your pending requests
+          </h3>
+          <div style={styles.coverList}>
+            {myPending.map(req => {
+              const cls = data.classes.find(c => c.id === req.classId);
+              const typeCfg = CLASS_TYPES[cls.type];
+              const urgency = getUrgency(cls.date);
+              return (
+                <div key={req.id} className="salus-card" style={styles.coverCard}>
+                  <div style={{ ...styles.coverCardStripe, background: urgency.color }} />
+                  <div style={styles.coverCardBody}>
+                    <div style={styles.coverCardTop}>
+                      <div>
+                        <div style={styles.coverCardDay}>{DAYS[cls.day]} {cls.date?.slice(8)} May · {cls.time}–{endTime(cls.time, cls.dur)}</div>
+                        <div style={styles.coverCardType}>{cls.type}</div>
+                        <div style={styles.coverCardSub}>
+                          <span style={{ ...styles.studioTagInline, color: typeCfg.color }}>{STUDIOS[cls.studio]?.label}</span>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+                        <UrgencyBadge urgency={urgency} />
+                        <div style={styles.pendingBadge}>
+                          <Clock size={11} /> Awaiting manager
+                        </div>
+                      </div>
+                    </div>
+                    <div style={styles.coverCardReason}>
+                      <span style={styles.reasonLabel}>Your reason</span>
+                      <span>{req.reason}</span>
+                    </div>
+                    <div style={styles.coverCardActions}>
+                      <button onClick={() => onCancel(req.id)} className="salus-btn" style={styles.btnGhost}>
+                        Cancel request
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Everyone: open on board */}
+      {openRequests.length > 0 && (
+        <div style={{ marginBottom: 32 }}>
+          <h3 style={{ ...styles.h3, marginTop: 0 }}>On the board</h3>
+          <div style={styles.coverList}>
+            {openRequests.map(req => {
+              const cls = data.classes.find(c => c.id === req.classId);
+              const requester = data.users.find(u => u.id === req.requestedBy);
+              const typeCfg = CLASS_TYPES[cls.type];
+              const isMine = req.requestedBy === currentUser.id;
+              const urgency = getUrgency(cls.date);
+              return (
+                <div key={req.id} className="salus-card" style={styles.coverCard}>
+                  <div style={{ ...styles.coverCardStripe, background: urgency.color }} />
+                  <div style={styles.coverCardBody}>
+                    <div style={styles.coverCardTop}>
+                      <div>
+                        <div style={styles.coverCardDay}>{DAYS[cls.day]} {cls.date?.slice(8)} May · {cls.time}–{endTime(cls.time, cls.dur)}</div>
+                        <div style={styles.coverCardType}>{cls.type}</div>
+                        <div style={styles.coverCardSub}>
+                          <span style={{ ...styles.studioTagInline, color: typeCfg.color }}>{STUDIOS[cls.studio]?.label}</span>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+                        <UrgencyBadge urgency={urgency} />
+                        <div style={styles.coverCardMeta}>
+                          <div style={{ ...styles.miniAvatar, background: requester.color }}>{requester.initials}</div>
+                          <div>
+                            <div style={styles.coverCardRequester}>{requester.name.split(' ')[0]}</div>
+                            <div style={styles.coverCardTime}>{fmtTime(req.timestamp)}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div style={styles.coverCardReason}>
+                      <span style={styles.reasonLabel}>Reason</span>
+                      <span>{req.reason}</span>
+                    </div>
+
+                    {/* Interested coaches (cover + permanent who might be available) */}
+                    {(req.interestedCovers && req.interestedCovers.length > 0) && (
+                      <div style={styles.interestedSection}>
+                        <div style={styles.interestedLabel}>Coaches available</div>
+                        <div style={styles.interestedList}>
+                          {req.interestedCovers.map(cid => {
+                            const cv = data.users.find(u => u.id === cid);
+                            if (!cv) return null;
+                            const isCoverCv = cv.coachType === 'cover';
+                            return (
+                              <div key={cid} style={styles.interestedChip}>
+                                <div style={{ ...styles.miniAvatar, background: cv.color, width: 22, height: 22, fontSize: 9 }}>{cv.initials}</div>
+                                <span>{cv.name.split(' ')[0]}</span>
+                                <span style={{ ...styles.chipTypeTag, ...(isCoverCv ? styles.chipTypeCover : styles.chipTypePermanent) }}>
+                                  {isCoverCv ? 'Cover' : 'Perm'}
+                                </span>
+                                {isManager && (
+                                  <button
+                                    onClick={() => onClaim(req.id, cid)}
+                                    className="salus-btn"
+                                    style={styles.assignChipBtn}
+                                  >
+                                    Assign
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    <div style={styles.coverCardActions}>
+                      {isMine ? (
+                        <button onClick={() => onCancel(req.id)} className="salus-btn" style={styles.btnGhost}>
+                          Cancel request
+                        </button>
+                      ) : isManager ? (
+                        <span style={styles.hint}>Posted to the team — waiting for a coach to claim</span>
+                      ) : isCoverCoach ? (
+                        (() => {
+                          const interested = (req.interestedCovers || []).includes(currentUser.id);
+                          return (
+                            <button
+                              onClick={() => onExpressInterest(req.id)}
+                              className="salus-btn"
+                              style={interested ? styles.btnSecondary : styles.btnPrimary}
+                            >
+                              {interested ? (
+                                <><Check size={14} /> You've marked yourself available</>
+                              ) : (
+                                <>I'm available for this</>
+                              )}
+                            </button>
+                          );
+                        })()
+                      ) : (
+                        // Permanent coach — both options
+                        (() => {
+                          const interested = (req.interestedCovers || []).includes(currentUser.id);
+                          return (
+                            <>
+                              <button onClick={() => onClaim(req.id)} className="salus-btn" style={styles.btnPrimary}>
+                                <Check size={14} /> I'll cover this
+                              </button>
+                              <button
+                                onClick={() => onExpressInterest(req.id)}
+                                className="salus-btn"
+                                style={styles.btnSecondary}
+                              >
+                                {interested
+                                  ? <><Check size={14} /> Marked available</>
+                                  : 'I might be available'}
+                              </button>
+                            </>
+                          );
+                        })()
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Empty state */}
+      {totalActive === 0 && (
+        <div style={styles.emptyState}>
+          <Check size={32} color="#7a8c5c" />
+          <div style={styles.emptyTitle}>All clear</div>
+          <div style={styles.emptyText}>No cover requests right now.</div>
+        </div>
+      )}
+
+      {/* Recently resolved */}
+      {resolvedRequests.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <h3 style={styles.h3}>Recently covered</h3>
+          <div style={styles.coverList}>
+            {resolvedRequests.slice(-5).reverse().map(req => {
+              const cls = data.classes.find(c => c.id === req.classId);
+              const claimer = data.users.find(u => u.id === req.claimedBy);
+              const requester = data.users.find(u => u.id === req.requestedBy);
+              const wasAssigned = req.status === 'assigned';
+              return (
+                <div key={req.id} style={{ ...styles.coverCard, opacity: 0.65 }}>
+                  <div style={{ ...styles.coverCardStripe, background: '#7a8c5c' }} />
+                  <div style={styles.coverCardBody}>
+                    <div style={styles.coverCardTop}>
+                      <div>
+                        <div style={styles.coverCardDay}>{DAYS[cls.day]} · {cls.time} · {cls.type}</div>
+                        <div style={styles.coveredText}>
+                          <span style={{ color: '#7a8c5c', fontWeight: 600 }}>{claimer?.name.split(' ')[0]}</span>
+                          {wasAssigned ? ' assigned by manager' : ' covering'} for {requester.name.split(' ')[0]}
+                        </div>
+                      </div>
+                      <Check size={20} color="#7a8c5c" />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// CHAT
+// ──────────────────────────────────────────────────────────────────────────────
+
+function Chat({ data, currentUser, onSend }) {
+  const [text, setText] = useState('');
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [data.messages.length]);
+
+  const handleSend = () => {
+    if (!text.trim()) return;
+    onSend(text);
+    setText('');
+  };
+
+  return (
+    <div style={styles.chatContainer}>
+      <div style={styles.chatHeader}>
+        <h2 style={styles.h2}>Team Salus</h2>
+        <p style={styles.subtitle}>{data.users.length} members · everyone</p>
+      </div>
+
+      <div ref={scrollRef} className="salus-scroll" style={styles.messagesList}>
+        {data.messages.map((msg, i) => {
+          const user = data.users.find(u => u.id === msg.userId);
+          const prevMsg = data.messages[i - 1];
+          const showHeader = !prevMsg || prevMsg.userId !== msg.userId ||
+                             (msg.timestamp - prevMsg.timestamp) > 600000;
+          const isMine = msg.userId === currentUser.id;
+          return (
+            <div key={msg.id} style={{ ...styles.message, ...(isMine ? styles.messageMine : {}) }}>
+              {showHeader && (
+                <div style={styles.messageHeader}>
+                  <div style={{ ...styles.miniAvatar, background: user.color, width: 28, height: 28, fontSize: 11 }}>
+                    {user.initials}
+                  </div>
+                  <span style={styles.messageName}>{user.name}{user.role === 'manager' ? ' · Manager' : ''}</span>
+                  <span style={styles.messageTime}>{fmtTime(msg.timestamp)}</span>
+                </div>
+              )}
+              <div style={{ ...styles.messageBubble, marginLeft: showHeader ? 36 : 36 }}>
+                {msg.text}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={styles.chatInputRow}>
+        <input
+          type="text"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+          placeholder={`Message as ${currentUser.name.split(' ')[0]}…`}
+          className="salus-input"
+          style={styles.chatInput}
+        />
+        <button onClick={handleSend} className="salus-btn" style={styles.sendBtn}>
+          <Send size={16} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// MANAGER STATS
+// ──────────────────────────────────────────────────────────────────────────────
+
+function ManagerStats({ data }) {
+  const allCoaches = data.users.filter(u => u.role === 'coach');
+  const permanentCoaches = allCoaches.filter(c => (c.coachType || 'permanent') === 'permanent');
+  const coverCoaches = allCoaches.filter(c => c.coachType === 'cover');
+
+  const computeStats = (coach) => {
+    const myClasses = data.classes.filter(c => c.coachId === coach.id);
+    const totalHours = myClasses.reduce((sum, c) => sum + c.dur / 60, 0);
+    const coverRequested = data.coverRequests.filter(r => r.requestedBy === coach.id).length;
+    const coverTaken = data.coverRequests.filter(r => r.claimedBy === coach.id).length;
+    const interestExpressed = data.coverRequests.filter(r => (r.interestedCovers || []).includes(coach.id)).length;
+    return { coach, classes: myClasses.length, hours: totalHours, coverRequested, coverTaken, interestExpressed };
+  };
+
+  const permStats = permanentCoaches.map(computeStats).sort((a, b) => b.classes - a.classes);
+  const coverStats = coverCoaches.map(computeStats).sort((a, b) => b.coverTaken - a.coverTaken);
+
+  const totalClasses = data.classes.length;
+  const totalHours = permStats.reduce((s, x) => s + x.hours, 0);
+  const needsCover = data.classes.filter(c => c.status === 'needsCover').length;
+  const covered = data.coverRequests.filter(r => r.status === 'claimed' || r.status === 'assigned').length;
+
+  return (
+    <div>
+      <div style={styles.sectionHeader}>
+        <div>
+          <h2 style={styles.h2}>Team Stats · This Week</h2>
+          <p style={styles.subtitle}>Workload breakdown and cover activity</p>
+        </div>
+      </div>
+
+      {/* Summary cards */}
+      <div style={styles.statGrid}>
+        <StatCard icon={Activity} label="Total classes" value={totalClasses} accent="#2f4f3a" />
+        <StatCard icon={Clock} label="Total hours" value={totalHours.toFixed(1)} accent="#b85c38" />
+        <StatCard icon={AlertCircle} label="Need cover" value={needsCover} accent="#c8442a" />
+        <StatCard icon={Check} label="Covered" value={covered} accent="#7a8c5c" />
+      </div>
+
+      {/* Permanent coach breakdown */}
+      <h3 style={{ ...styles.h3, display: 'flex', alignItems: 'center', gap: 10 }}>
+        Permanent coaches
+        <span style={{ ...styles.coachTypeBadge, ...styles.coachTypePermanent }}>On the timetable</span>
+      </h3>
+      <div className="salus-stats-table" style={styles.coachStatsCard}>
+        <div style={styles.coachStatsHeader}>
+          <div>Coach</div>
+          <div style={{ textAlign: 'right' }}>Classes</div>
+          <div style={{ textAlign: 'right' }}>Hours</div>
+          <div style={{ textAlign: 'right' }}>Cover asked</div>
+          <div style={{ textAlign: 'right' }}>Cover taken</div>
+        </div>
+        {permStats.map(({ coach, classes, hours, coverRequested, coverTaken }) => {
+          const maxClasses = Math.max(...permStats.map(s => s.classes), 1);
+          const barWidth = (classes / maxClasses) * 100;
+          return (
+            <div key={coach.id} style={styles.coachStatsRow}>
+              <div style={styles.coachStatsName}>
+                <div style={{ ...styles.miniAvatar, background: coach.color }}>{coach.initials}</div>
+                <div>
+                  <div style={{ fontWeight: 500 }}>{coach.name}</div>
+                  <div style={styles.barWrap}>
+                    <div style={{ ...styles.bar, width: `${barWidth}%`, background: coach.color }} />
+                  </div>
+                </div>
+              </div>
+              <div style={styles.coachStatsValue}>{classes}</div>
+              <div style={styles.coachStatsValue}>{hours.toFixed(1)}h</div>
+              <div style={styles.coachStatsValue}>{coverRequested}</div>
+              <div style={styles.coachStatsValue}>{coverTaken}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Cover coach breakdown */}
+      {coverStats.length > 0 && (
+        <>
+          <h3 style={{ ...styles.h3, display: 'flex', alignItems: 'center', gap: 10, marginTop: 30 }}>
+            Cover coaches
+            <span style={{ ...styles.coachTypeBadge, ...styles.coachTypeCover }}>On standby</span>
+          </h3>
+          <div className="salus-stats-table" style={styles.coachStatsCard}>
+            <div style={{ ...styles.coachStatsHeader, gridTemplateColumns: '2fr 1.5fr 1fr 1fr 1fr' }}>
+              <div>Coach</div>
+              <div>Qualified to teach</div>
+              <div style={{ textAlign: 'right' }}>Hours</div>
+              <div style={{ textAlign: 'right' }}>Interest shown</div>
+              <div style={{ textAlign: 'right' }}>Cover taken</div>
+            </div>
+            {coverStats.map(({ coach, hours, coverTaken, interestExpressed }) => (
+              <div key={coach.id} style={{ ...styles.coachStatsRow, gridTemplateColumns: '2fr 1.5fr 1fr 1fr 1fr' }}>
+                <div style={styles.coachStatsName}>
+                  <div style={{ ...styles.miniAvatar, background: coach.color }}>{coach.initials}</div>
+                  <div>
+                    <div style={{ fontWeight: 500 }}>{coach.name}</div>
+                  </div>
+                </div>
+                <div style={{ fontSize: 11, color: '#7a8270', lineHeight: 1.4 }}>
+                  {(coach.qualifications || []).join(', ') || '—'}
+                </div>
+                <div style={styles.coachStatsValue}>{hours.toFixed(1)}h</div>
+                <div style={styles.coachStatsValue}>{interestExpressed}</div>
+                <div style={styles.coachStatsValue}>{coverTaken}</div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Cover alerts */}
+      {needsCover > 0 && (
+        <div style={{ ...styles.alertPanel, marginTop: 24 }}>
+          <div style={styles.alertPanelHeader}>
+            <AlertCircle size={18} color="#c8442a" />
+            <span>Classes still needing cover</span>
+          </div>
+          <div>
+            {data.classes.filter(c => c.status === 'needsCover').map(c => {
+              const originalCoach = data.users.find(u => u.id === c.originalCoachId);
+              return (
+                <div key={c.id} style={styles.alertRow}>
+                  <span style={{ fontWeight: 500 }}>{DAYS[c.day]} {c.time}</span>
+                  <span>{c.type}</span>
+                  <span style={{ color: '#666' }}>was {originalCoach?.name.split(' ')[0]}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatCard({ icon: Icon, label, value, accent }) {
+  return (
+    <div className="salus-card" style={styles.statCard}>
+      <div style={{ ...styles.statIcon, background: accent + '15', color: accent }}>
+        <Icon size={18} />
+      </div>
+      <div style={styles.statValue}>{value}</div>
+      <div style={styles.statLabel}>{label}</div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// COACH STATS
+// ──────────────────────────────────────────────────────────────────────────────
+
+function CoachStats({ data, currentUser }) {
+  const myClasses = data.classes.filter(c => c.coachId === currentUser.id);
+  const totalHours = myClasses.reduce((sum, c) => sum + c.dur / 60, 0);
+  const coverRequested = data.coverRequests.filter(r => r.requestedBy === currentUser.id).length;
+  const coverTaken = data.coverRequests.filter(r => r.claimedBy === currentUser.id).length;
+  const byType = {};
+  myClasses.forEach(c => { byType[c.type] = (byType[c.type] || 0) + 1; });
+
+  return (
+    <div>
+      <div style={styles.sectionHeader}>
+        <div>
+          <h2 style={styles.h2}>My Stats · This Week</h2>
+          <p style={styles.subtitle}>Your teaching activity and cover history</p>
+        </div>
+      </div>
+
+      <div style={styles.statGrid}>
+        <StatCard icon={Activity} label="Your classes" value={myClasses.length} accent={currentUser.color} />
+        <StatCard icon={Clock} label="Teaching hours" value={totalHours.toFixed(1)} accent="#b85c38" />
+        <StatCard icon={ArrowLeftRight} label="Cover requested" value={coverRequested} accent="#c8442a" />
+        <StatCard icon={Award} label="Cover taken" value={coverTaken} accent="#7a8c5c" />
+      </div>
+
+      <div style={styles.coachStatsCard}>
+        <h3 style={{ ...styles.h3, marginTop: 0 }}>Classes by type</h3>
+        {Object.entries(byType).map(([type, count]) => {
+          const cfg = CLASS_TYPES[type];
+          const max = Math.max(...Object.values(byType));
+          return (
+            <div key={type} style={styles.typeRow}>
+              <div style={styles.typeLabel}>
+                <div style={{ ...styles.legendDot, background: cfg.color }} />
+                <span>{type}</span>
+              </div>
+              <div style={styles.typeBarWrap}>
+                <div style={{ ...styles.typeBar, width: `${(count/max)*100}%`, background: cfg.color }} />
+              </div>
+              <div style={styles.typeCount}>{count}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// MODALS
+// ──────────────────────────────────────────────────────────────────────────────
+
+function ClassDetailModal({ classObj, data, currentUser, isManager, onClose, onRequestCover, onProposeSwap, onEdit, onDelete }) {
+  const [mode, setMode] = useState('view'); // view | requestCover | swap
+  const [reason, setReason] = useState('');
+  const [swapTarget, setSwapTarget] = useState('');
+
+  const coach = data.users.find(u => u.id === classObj.coachId);
+  const typeCfg = CLASS_TYPES[classObj.type];
+  const isMine = classObj.coachId === currentUser.id;
+  const needsCover = classObj.status === 'needsCover';
+
+  // Swappable: my classes that aren't this one
+  const myOtherClasses = data.classes.filter(c =>
+    c.coachId === currentUser.id && c.id !== classObj.id && c.status !== 'needsCover'
+  );
+
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ borderTop: `4px solid ${typeCfg.color}`, padding: 24 }}>
+        <div style={styles.modalDayBadge}>{DAYS[classObj.day]} · {classObj.time}–{endTime(classObj.time, classObj.dur)}</div>
+        <h2 style={{ ...styles.h2, marginTop: 8 }}>{classObj.type}</h2>
+
+        <div style={styles.detailRow}>
+          <span style={styles.detailLabel}>Coach</span>
+          <div style={styles.detailValue}>
+            <div style={{ ...styles.miniAvatar, background: coach.color }}>{coach.initials}</div>
+            <span>{coach.name}</span>
+            {isMine && <span style={styles.youBadge}>You</span>}
+          </div>
+        </div>
+
+        <div style={styles.detailRow}>
+          <span style={styles.detailLabel}>Duration</span>
+          <span>{classObj.dur} minutes</span>
+        </div>
+
+        <div style={styles.detailRow}>
+          <span style={styles.detailLabel}>Studio</span>
+          <span>{STUDIOS[classObj.studio]?.label || '—'}</span>
+        </div>
+
+        <div style={styles.detailRow}>
+          <span style={styles.detailLabel}>Status</span>
+          <span style={{ color: needsCover ? '#c8442a' : '#2f4f3a', fontWeight: 500 }}>
+            {needsCover ? 'Needs cover' : classObj.status === 'covered' ? 'Covered' : 'Assigned'}
+          </span>
+        </div>
+
+        {mode === 'view' && (
+          <div style={{ marginTop: 24, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {isManager && (
+              <>
+                <button onClick={onEdit} className="salus-btn" style={styles.btnPrimary}>
+                  Edit class
+                </button>
+                <button onClick={onDelete} className="salus-btn" style={styles.btnDanger}>
+                  Delete
+                </button>
+              </>
+            )}
+            {!isManager && isMine && !needsCover && (
+              <>
+                <button onClick={() => setMode('requestCover')} className="salus-btn" style={styles.btnPrimary}>
+                  <AlertCircle size={14} /> Request cover
+                </button>
+                {myOtherClasses.length > 0 && (
+                  <button onClick={() => setMode('swap')} className="salus-btn" style={styles.btnSecondary}>
+                    <ArrowLeftRight size={14} /> Propose swap
+                  </button>
+                )}
+              </>
+            )}
+            {!isManager && !isMine && !needsCover && data.classes.filter(c => c.coachId === currentUser.id).length > 0 && (
+              <button onClick={() => setMode('swap')} className="salus-btn" style={styles.btnSecondary}>
+                <ArrowLeftRight size={14} /> Propose swap
+              </button>
+            )}
+            <button onClick={onClose} className="salus-btn" style={styles.btnGhost}>Close</button>
+          </div>
+        )}
+
+        {mode === 'requestCover' && (
+          <div style={{ marginTop: 24 }}>
+            <label style={styles.label}>Reason for needing cover</label>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="e.g. Medical appointment, family commitment…"
+              className="salus-input"
+              style={styles.textarea}
+              rows={3}
+            />
+            <p style={styles.hint}>This will be sent to the manager, who'll either assign someone to cover or post it to the team.</p>
+            <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+              <button onClick={() => onRequestCover(reason)} className="salus-btn" style={styles.btnPrimary}>
+                Send to manager
+              </button>
+              <button onClick={() => setMode('view')} className="salus-btn" style={styles.btnGhost}>Back</button>
+            </div>
+          </div>
+        )}
+
+        {mode === 'swap' && (
+          <div style={{ marginTop: 24 }}>
+            <label style={styles.label}>Swap this for one of your classes</label>
+            <select
+              value={swapTarget}
+              onChange={(e) => setSwapTarget(e.target.value)}
+              className="salus-input"
+              style={styles.select}
+            >
+              <option value="">Choose a class…</option>
+              {(isMine
+                ? data.classes.filter(c => c.coachId !== currentUser.id && c.status !== 'needsCover')
+                : myOtherClasses
+              ).map(c => (
+                <option key={c.id} value={c.id}>
+                  {DAYS[c.day]} {c.time} · {c.type} · {data.users.find(u => u.id === c.coachId)?.name.split(' ')[0]}
+                </option>
+              ))}
+            </select>
+            <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+              <button
+                onClick={() => swapTarget && onProposeSwap(swapTarget)}
+                disabled={!swapTarget}
+                className="salus-btn"
+                style={{ ...styles.btnPrimary, opacity: swapTarget ? 1 : 0.5 }}
+              >
+                Send swap request
+              </button>
+              <button onClick={() => setMode('view')} className="salus-btn" style={styles.btnGhost}>Back</button>
+            </div>
+            <p style={styles.hint}>The other coach will be notified and can accept or decline.</p>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function ManageCoverModal({ request, data, onClose, onAssign, onPost, onDecline }) {
+  const [assignTo, setAssignTo] = useState('');
+  const cls = data.classes.find(c => c.id === request.classId);
+  const requester = data.users.find(u => u.id === request.requestedBy);
+  const typeCfg = CLASS_TYPES[cls.type];
+  const otherCoaches = data.users.filter(u =>
+    u.role === 'coach' && u.id !== request.requestedBy
+  );
+
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ borderTop: `4px solid ${typeCfg.color}`, padding: 24 }}>
+        <div style={styles.modalDayBadge}>Cover request · {fmtTime(request.timestamp)}</div>
+        <h2 style={{ ...styles.h2, marginTop: 8 }}>{cls.type}</h2>
+
+        <div style={styles.detailRow}>
+          <span style={styles.detailLabel}>When</span>
+          <span>{DAYS[cls.day]} · {cls.time}–{endTime(cls.time, cls.dur)}</span>
+        </div>
+        <div style={styles.detailRow}>
+          <span style={styles.detailLabel}>Requested by</span>
+          <div style={styles.detailValue}>
+            <div style={{ ...styles.miniAvatar, background: requester.color }}>{requester.initials}</div>
+            <span>{requester.name}</span>
+          </div>
+        </div>
+        <div style={{ ...styles.coverCardReason, marginTop: 16 }}>
+          <span style={styles.reasonLabel}>Reason</span>
+          <span>{request.reason}</span>
+        </div>
+
+        <div style={{ marginTop: 24 }}>
+          <label style={styles.label}>Option 1 · Assign directly to a coach</label>
+          <select
+            value={assignTo}
+            onChange={(e) => setAssignTo(e.target.value)}
+            className="salus-input"
+            style={styles.select}
+          >
+            <option value="">Choose a coach…</option>
+            {otherCoaches.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+          <button
+            onClick={() => assignTo && onAssign(assignTo)}
+            disabled={!assignTo}
+            className="salus-btn"
+            style={{ ...styles.btnPrimary, marginTop: 10, opacity: assignTo ? 1 : 0.5 }}
+          >
+            Assign &amp; notify
+          </button>
+        </div>
+
+        <div style={styles.orDivider}>
+          <span>or</span>
+        </div>
+
+        <div>
+          <label style={styles.label}>Option 2 · Post to the cover board</label>
+          <p style={{ ...styles.hint, marginTop: 0, marginBottom: 10 }}>
+            All coaches will be able to claim it. First to volunteer takes the class.
+          </p>
+          <button onClick={onPost} className="salus-btn" style={styles.btnSecondary}>
+            Post to cover board
+          </button>
+        </div>
+
+        <div style={styles.orDivider}>
+          <span>or</span>
+        </div>
+
+        <div>
+          <label style={styles.label}>Option 3 · Decline this request</label>
+          <p style={{ ...styles.hint, marginTop: 0, marginBottom: 10 }}>
+            The class stays with {requester.name.split(' ')[0]}. Worth a quick chat with them.
+          </p>
+          <button onClick={onDecline} className="salus-btn" style={styles.btnDanger}>
+            Decline request
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function EditClassModal({ classObj, data, onClose, onSave }) {
+  const isNew = !classObj;
+  const [day, setDay] = useState(classObj?.day ?? 0);
+  const [time, setTime] = useState(classObj?.time ?? '09:00');
+  const [dur, setDur] = useState(classObj?.dur ?? 45);
+  const [type, setType] = useState(classObj?.type ?? Object.keys(CLASS_TYPES)[0]);
+  const [studio, setStudio] = useState(classObj?.studio ?? 'reformer');
+  const [coachId, setCoachId] = useState(classObj?.coachId ?? data.users.find(u => u.role === 'coach')?.id);
+
+  const coaches = data.users.filter(u => u.role === 'coach');
+  const typeCfg = CLASS_TYPES[type];
+
+  const handleSave = () => {
+    if (!time || !type || !coachId || !studio) return;
+    const dayNum = Number(day);
+    onSave({
+      day: dayNum,
+      date: DATES[dayNum],
+      time,
+      dur: Number(dur),
+      type,
+      coachId,
+      studio,
+    });
+  };
+
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ borderTop: `4px solid ${typeCfg.color}`, padding: 24 }}>
+        <div style={styles.modalDayBadge}>{isNew ? 'New class' : 'Edit class'}</div>
+        <h2 style={{ ...styles.h2, marginTop: 8, marginBottom: 20 }}>
+          {isNew ? 'Add to timetable' : type}
+        </h2>
+
+        <div style={styles.formGrid}>
+          <div>
+            <label style={styles.label}>Day</label>
+            <select value={day} onChange={(e) => setDay(e.target.value)} className="salus-input" style={styles.select}>
+              {DAYS.map((d, i) => <option key={d} value={i}>{DAY_LABELS[i]} May</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={styles.label}>Time</label>
+            <input
+              type="time"
+              value={time}
+              onChange={(e) => setTime(e.target.value)}
+              className="salus-input"
+              style={styles.select}
+            />
+          </div>
+        </div>
+
+        <div style={styles.formGrid}>
+          <div>
+            <label style={styles.label}>Duration</label>
+            <select value={dur} onChange={(e) => setDur(e.target.value)} className="salus-input" style={styles.select}>
+              <option value={30}>30 min</option>
+              <option value={45}>45 min</option>
+              <option value={60}>60 min</option>
+              <option value={75}>75 min</option>
+              <option value={90}>90 min</option>
+            </select>
+          </div>
+          <div>
+            <label style={styles.label}>Studio</label>
+            <select value={studio} onChange={(e) => setStudio(e.target.value)} className="salus-input" style={styles.select}>
+              {Object.entries(STUDIOS).map(([id, s]) => <option key={id} value={id}>{s.label}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 16 }}>
+          <label style={styles.label}>Class type</label>
+          <select value={type} onChange={(e) => setType(e.target.value)} className="salus-input" style={styles.select}>
+            {Object.keys(CLASS_TYPES).map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+
+        <div>
+          <label style={styles.label}>Coach</label>
+          <select value={coachId} onChange={(e) => setCoachId(e.target.value)} className="salus-input" style={styles.select}>
+            {coaches.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 24 }}>
+          <button onClick={handleSave} className="salus-btn" style={styles.btnPrimary}>
+            {isNew ? 'Add class' : 'Save changes'}
+          </button>
+          <button onClick={onClose} className="salus-btn" style={styles.btnGhost}>Cancel</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function SettingsModal({ user, isManager, onClose, onSave }) {
+  const isCoverCoach = user.coachType === 'cover';
+  const defaults = isManager ? DEFAULT_MANAGER_PREFS : isCoverCoach ? DEFAULT_COVER_PREFS : DEFAULT_COACH_PREFS;
+
+  const [email, setEmail] = useState(user.email || '');
+  const [prefs, setPrefs] = useState({ ...defaults, ...(user.emailPrefs || {}) });
+
+  const togglePref = (key) => setPrefs({ ...prefs, [key]: !prefs[key] });
+
+  const handleSave = () => onSave({ email, emailPrefs: prefs });
+
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ padding: 24 }}>
+        <div style={styles.modalDayBadge}>
+          Settings · {user.name}
+          {isCoverCoach && <span style={{ ...styles.coachTypeBadge, ...styles.coachTypeCover, marginLeft: 8 }}>Cover coach</span>}
+        </div>
+        <h2 style={{ ...styles.h2, marginTop: 8, marginBottom: 4 }}>Email notifications</h2>
+        <p style={{ ...styles.subtitle, marginBottom: 24 }}>
+          {isCoverCoach
+            ? "We'll email you when cover opportunities open up."
+            : 'Choose when we should email you. Settings save instantly.'}
+        </p>
+
+        <div style={{ marginBottom: 24 }}>
+          <label style={styles.label}>Your email</label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="salus-input"
+            style={styles.select}
+            placeholder="you@salus.house"
+          />
+        </div>
+
+        {/* COVER COACH VIEW — different priorities */}
+        {isCoverCoach && (
+          <>
+            <div style={styles.prefsSection}>
+              <div style={styles.prefsHeader}>Cover opportunities</div>
+
+              <PrefToggle
+                label="When a new cover request is posted"
+                hint="The main reason you're here — get notified as soon as a shift opens up"
+                checked={prefs.coverPosted}
+                onChange={() => togglePref('coverPosted')}
+              />
+
+              <PrefToggle
+                label="When the manager assigns me a class"
+                hint="Urgent — you've just been picked to cover"
+                checked={prefs.assignedCover}
+                onChange={() => togglePref('assignedCover')}
+              />
+
+              <PrefToggle
+                label="When someone else is picked for a class I marked available"
+                hint="Courtesy heads-up so you know the slot is filled"
+                checked={prefs.notSelected}
+                onChange={() => togglePref('notSelected')}
+              />
+            </div>
+
+            <div style={styles.prefsSection}>
+              <div style={styles.prefsHeader}>Reminders</div>
+
+              <PrefToggle
+                label="24 hours before classes I'm covering"
+                hint="A heads-up the day before"
+                checked={prefs.classReminder24h}
+                onChange={() => togglePref('classReminder24h')}
+              />
+            </div>
+
+            <div style={styles.prefsSection}>
+              <div style={styles.prefsHeader}>Summaries</div>
+
+              <PrefToggle
+                label="Weekly summary of available shifts"
+                hint="Every Sunday evening — all open requests for the coming week in one email"
+                checked={prefs.weeklyOpportunities}
+                onChange={() => togglePref('weeklyOpportunities')}
+              />
+            </div>
+          </>
+        )}
+
+        {/* PERMANENT COACH VIEW */}
+        {!isManager && !isCoverCoach && (
+          <>
+            <div style={styles.prefsSection}>
+              <div style={styles.prefsHeader}>Cover &amp; schedule</div>
+
+              <PrefToggle
+                label="When the manager assigns me cover"
+                hint="Urgent — you've just been put on a class"
+                checked={prefs.assignedCover}
+                onChange={() => togglePref('assignedCover')}
+              />
+              <PrefToggle
+                label="When a class is posted to the cover board"
+                hint="So you can claim it before someone else does"
+                checked={prefs.coverPosted}
+                onChange={() => togglePref('coverPosted')}
+              />
+              <PrefToggle
+                label="24 hours before my classes"
+                hint="A quick heads-up the day before"
+                checked={prefs.classReminder24h}
+                onChange={() => togglePref('classReminder24h')}
+              />
+            </div>
+
+            <div style={styles.prefsSection}>
+              <div style={styles.prefsHeader}>Summaries</div>
+              <PrefToggle
+                label="Weekly schedule summary"
+                hint="Every Sunday evening — your classes for the week ahead"
+                checked={prefs.weeklySummary}
+                onChange={() => togglePref('weeklySummary')}
+              />
+            </div>
+          </>
+        )}
+
+        {/* MANAGER VIEW */}
+        {isManager && (
+          <>
+            <div style={styles.prefsSection}>
+              <div style={styles.prefsHeader}>Cover requests</div>
+
+              <PrefToggle
+                label="When a coach requests cover"
+                hint="Sent to you so you can review and decide"
+                checked={prefs.newCoverRequest}
+                onChange={() => togglePref('newCoverRequest')}
+              />
+              <PrefToggle
+                label="When a coach claims a posted cover request"
+                hint="Nice to know who's stepping up"
+                checked={prefs.coverClaimed}
+                onChange={() => togglePref('coverClaimed')}
+              />
+            </div>
+
+            <div style={styles.prefsSection}>
+              <div style={styles.prefsHeader}>Summaries</div>
+              <PrefToggle
+                label="Weekly activity summary"
+                hint="Every Sunday evening — covers, swaps, hours per coach"
+                checked={prefs.weeklyActivity}
+                onChange={() => togglePref('weeklyActivity')}
+              />
+            </div>
+          </>
+        )}
+
+        <div style={styles.infoBox}>
+          <Mail size={14} style={{ marginTop: 1, flexShrink: 0 }} />
+          <span>
+            Emails will be sent to the address above once Phase 2 deployment is complete.
+            Your preferences are saved now and will apply automatically on first email.
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 22 }}>
+          <button onClick={handleSave} className="salus-btn" style={styles.btnPrimary}>
+            Save settings
+          </button>
+          <button onClick={onClose} className="salus-btn" style={styles.btnGhost}>Cancel</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function PrefToggle({ label, hint, checked, onChange }) {
+  return (
+    <button onClick={onChange} className="salus-btn" style={styles.prefRow}>
+      <div style={{ flex: 1, textAlign: 'left' }}>
+        <div style={styles.prefLabel}>{label}</div>
+        {hint && <div style={styles.prefHint}>{hint}</div>}
+      </div>
+      <div style={{
+        ...styles.toggleTrack,
+        background: checked ? '#ede4cf' : 'rgba(245,241,232,0.12)',
+      }}>
+        <div style={{
+          ...styles.toggleKnob,
+          transform: checked ? 'translateX(18px)' : 'translateX(0)',
+          background: checked ? '#1a1714' : 'rgba(245,241,232,0.6)',
+        }} />
+      </div>
+    </button>
+  );
+}
+
+function ConfirmModal({ title, message, confirmLabel, onConfirm, onClose }) {
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ padding: 24 }}>
+        <h3 style={{ ...styles.h3, marginTop: 0 }}>{title}</h3>
+        <p style={{ color: '#666', lineHeight: 1.5 }}>{message}</p>
+        <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
+          <button onClick={onConfirm} className="salus-btn" style={styles.btnPrimary}>{confirmLabel}</button>
+          <button onClick={onClose} className="salus-btn" style={styles.btnGhost}>Cancel</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function Modal({ children, onClose }) {
+  return (
+    <div style={styles.modalOverlay} onClick={onClose}>
+      <div className="salus-modal-content salus-modal-card" style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+        <button onClick={onClose} style={styles.modalClose}><X size={18} /></button>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// STYLES
+// ──────────────────────────────────────────────────────────────────────────────
+
+const styles = {
+  app: {
+    minHeight: '100vh',
+    background: '#f5f1e8',
+    fontFamily: '"Geist", -apple-system, sans-serif',
+    color: '#1a2620',
+    paddingBottom: 40,
+  },
+  header: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '20px 32px',
+    background: '#fffdf7',
+    borderBottom: '1px solid #e8e0cc',
+  },
+  headerLeft: { display: 'flex', alignItems: 'center', gap: 16 },
+  headerRight: { display: 'flex', alignItems: 'center', gap: 12 },
+  logo: { display: 'flex', alignItems: 'center', gap: 12 },
+  logoMark: {
+    width: 38, height: 38, borderRadius: 10,
+    background: '#2f4f3a', color: '#f5f1e8',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontFamily: '"Fraunces", serif', fontSize: 22, fontWeight: 600,
+  },
+  logoText: { fontFamily: '"Fraunces", serif', fontSize: 20, fontWeight: 500, lineHeight: 1.1, color: '#1a2620' },
+  logoSub: { fontSize: 10, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 1.2, marginTop: 4 },
+  alertBadge: {
+    display: 'flex', alignItems: 'center', gap: 6,
+    padding: '6px 12px', borderRadius: 20,
+    background: '#fef3e2', color: '#b85c38',
+    border: '1px solid #f3d8b8', fontSize: 12, fontWeight: 500,
+  },
+  userSelector: { display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px 6px 12px', borderRadius: 24, background: '#f5f1e8', border: '1px solid #e8e0cc' },
+  userSelectorName: { fontSize: 13, fontWeight: 500, color: '#1a2620' },
+  userSelectorRole: { fontSize: 10, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 1 },
+  iconBtn: {
+    padding: 8, borderRadius: 8, border: '1px solid #d4cdb8',
+    background: '#fffdf7', color: '#7a8270', display: 'flex',
+  },
+
+  nav: {
+    display: 'flex', gap: 4, padding: '16px 32px 0',
+    borderBottom: '1px solid #e8e0cc', background: '#fffdf7',
+  },
+  navTab: {
+    display: 'flex', alignItems: 'center', gap: 8,
+    padding: '10px 16px', border: 'none', background: 'transparent',
+    fontFamily: 'inherit', fontSize: 13, color: '#7a8270',
+    borderBottom: '2px solid transparent', marginBottom: -1,
+    fontWeight: 500,
+  },
+  navTabActive: {
+    color: '#2f4f3a', borderBottom: '2px solid #2f4f3a',
+  },
+  navBadge: {
+    background: '#c8442a', color: '#fff', fontSize: 10, fontWeight: 600,
+    padding: '2px 6px', borderRadius: 10, minWidth: 18, textAlign: 'center',
+  },
+
+  main: { padding: '28px 32px', maxWidth: 1400, margin: '0 auto' },
+
+  sectionHeader: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end',
+    marginBottom: 20, gap: 16, flexWrap: 'wrap',
+  },
+  h2: {
+    fontFamily: '"Fraunces", serif', fontSize: 30, fontWeight: 500,
+    margin: 0, color: '#1a2620', lineHeight: 1.15, letterSpacing: -0.3,
+  },
+  h3: {
+    fontFamily: '"Fraunces", serif', fontSize: 18, fontWeight: 500,
+    margin: '20px 0 12px', color: '#1a2620',
+  },
+  subtitle: { fontSize: 13, color: '#7a8270', marginTop: 6 },
+
+  filterRow: { display: 'flex', gap: 6, flexWrap: 'wrap' },
+  filterPill: {
+    padding: '7px 13px', borderRadius: 20, border: '1px solid #d4cdb8',
+    background: '#fffdf7', fontSize: 12, fontFamily: 'inherit', color: '#7a8270',
+    fontWeight: 500,
+  },
+  filterPillActive: {
+    background: '#2f4f3a', color: '#fff', borderColor: '#2f4f3a',
+  },
+
+  // Studio toggle (segmented control)
+  studioToggle: {
+    display: 'inline-flex', gap: 0, marginBottom: 20,
+    padding: 3, background: '#f0eee4', borderRadius: 10,
+    border: '1px solid #e8e0cc',
+  },
+  studioPill: {
+    padding: '8px 16px', borderRadius: 7, border: 'none',
+    background: 'transparent', fontSize: 12, fontFamily: 'inherit',
+    color: '#7a8270', fontWeight: 500,
+  },
+  studioPillActive: {
+    background: '#fffdf7', color: '#2f4f3a', fontWeight: 600,
+    boxShadow: '0 1px 2px rgba(47, 79, 58, 0.08)',
+  },
+
+  // Studio tag on class cards
+  studioTag: {
+    position: 'absolute', top: 10, right: 10,
+    fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6,
+    color: '#a8a895',
+  },
+  studioTagInline: {
+    fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6,
+  },
+  coverCardSub: { marginTop: 6 },
+
+  // Day header date
+  dayDate: { fontSize: 10, color: '#a8a895', marginTop: 2, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.6 },
+
+  weekGrid: {
+    display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)',
+    gap: 10, marginTop: 8,
+  },
+  dayColumn: {
+    background: '#fffdf7', borderRadius: 12, padding: 12,
+    border: '1px solid #e8e0cc', minHeight: 200,
+  },
+  dayHeader: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+    paddingBottom: 10, borderBottom: '1px solid #e8e0cc', marginBottom: 10,
+  },
+  dayName: { fontFamily: '"Fraunces", serif', fontSize: 15, fontWeight: 500, color: '#1a2620' },
+  dayCount: {
+    fontSize: 10, color: '#7a8270', background: '#f0eee4',
+    padding: '3px 8px', borderRadius: 10, fontWeight: 500,
+  },
+  dayClasses: { display: 'flex', flexDirection: 'column', gap: 8 },
+  emptyDay: {
+    fontSize: 11, color: '#a8a895', textAlign: 'center',
+    padding: '24px 0', fontStyle: 'italic',
+  },
+  classCard: {
+    padding: '12px 12px 12px 14px', borderRadius: 8, background: '#fff',
+    border: '1px solid #e8e0cc', borderLeft: '3px solid #ccc',
+    fontFamily: 'inherit', textAlign: 'left', width: '100%',
+    cursor: 'pointer', position: 'relative',
+  },
+  classCardTop: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    marginBottom: 6,
+  },
+  classTime: { fontSize: 15, fontWeight: 600, color: '#1a2620', letterSpacing: -0.2 },
+  classType: { fontSize: 12, fontWeight: 500, marginBottom: 8, color: '#1a2620', lineHeight: 1.3 },
+  classCoach: { display: 'flex', alignItems: 'center', gap: 6 },
+  classCoachName: { fontSize: 10, color: '#7a8270' },
+  miniAvatar: {
+    width: 20, height: 20, borderRadius: '50%',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    color: '#fff', fontSize: 9, fontWeight: 700, flexShrink: 0,
+  },
+  coverBadge: {
+    display: 'flex', alignItems: 'center', gap: 3,
+    fontSize: 9, fontWeight: 600, color: '#b85c38',
+    background: '#fef3e2', padding: '2px 6px', borderRadius: 10,
+    textTransform: 'uppercase', letterSpacing: 0.3,
+  },
+
+  legend: {
+    display: 'flex', flexWrap: 'wrap', gap: 14, marginTop: 28,
+    padding: 18, background: '#fffdf7', borderRadius: 12, border: '1px solid #e8e0cc',
+  },
+  legendItem: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#5a6258' },
+  legendDot: { width: 9, height: 9, borderRadius: 2 },
+
+  // Cover board
+  coverList: { display: 'flex', flexDirection: 'column', gap: 12 },
+  coverCard: {
+    display: 'flex', background: '#fffdf7', borderRadius: 12,
+    border: '1px solid #e8e0cc', overflow: 'hidden',
+  },
+  coverCardStripe: { width: 4, flexShrink: 0 },
+  coverCardBody: { padding: 18, flex: 1 },
+  coverCardTop: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+    gap: 16, marginBottom: 14,
+  },
+  coverCardDay: { fontSize: 11, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: 500 },
+  coverCardType: {
+    fontFamily: '"Fraunces", serif', fontSize: 22, fontWeight: 500,
+    marginTop: 4, color: '#1a2620', letterSpacing: -0.3,
+  },
+  coverCardMeta: { display: 'flex', alignItems: 'center', gap: 10 },
+  coverCardRequester: { fontSize: 13, fontWeight: 500, color: '#1a2620' },
+  coverCardTime: { fontSize: 11, color: '#7a8270' },
+  coverCardReason: {
+    background: '#f5f1e8', padding: '12px 14px', borderRadius: 8,
+    fontSize: 13, marginBottom: 14, color: '#5a6258',
+  },
+  reasonLabel: {
+    fontSize: 10, fontWeight: 600, color: '#7a8270',
+    textTransform: 'uppercase', letterSpacing: 0.8, marginRight: 10,
+  },
+  coverCardActions: { display: 'flex', gap: 8 },
+  coveredText: { fontSize: 13, marginTop: 4, color: '#5a6258' },
+
+  emptyState: {
+    background: '#fffdf7', borderRadius: 12, padding: '56px 24px',
+    textAlign: 'center', border: '1px solid #e8e0cc',
+  },
+  emptyTitle: {
+    fontFamily: '"Fraunces", serif', fontSize: 20, fontWeight: 500,
+    marginTop: 14, color: '#1a2620',
+  },
+  emptyText: { fontSize: 13, color: '#7a8270', marginTop: 8 },
+
+  // Chat
+  chatContainer: {
+    background: '#fffdf7', borderRadius: 12, border: '1px solid #e8e0cc',
+    display: 'flex', flexDirection: 'column', height: 'calc(100vh - 200px)',
+    minHeight: 500, overflow: 'hidden',
+  },
+  chatHeader: {
+    padding: 22, borderBottom: '1px solid #e8e0cc',
+  },
+  messagesList: {
+    flex: 1, overflowY: 'auto', padding: '18px 22px',
+    display: 'flex', flexDirection: 'column', gap: 4,
+  },
+  message: { display: 'flex', flexDirection: 'column' },
+  messageMine: {},
+  messageHeader: {
+    display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, marginBottom: 4,
+  },
+  messageName: { fontSize: 13, fontWeight: 500, color: '#1a2620' },
+  messageTime: { fontSize: 11, color: '#a8a895' },
+  messageBubble: {
+    fontSize: 14, lineHeight: 1.55, color: '#1a2620',
+    padding: '2px 0',
+  },
+  chatInputRow: {
+    display: 'flex', gap: 8, padding: 16,
+    borderTop: '1px solid #e8e0cc', background: '#fffdf7',
+  },
+  chatInput: {
+    flex: 1, padding: '12px 16px', borderRadius: 24,
+    border: '1px solid #d4cdb8', background: '#f5f1e8',
+    fontFamily: 'inherit', fontSize: 14, color: '#1a2620',
+  },
+  sendBtn: {
+    width: 42, height: 42, borderRadius: '50%', border: 'none',
+    background: '#2f4f3a', color: '#fff',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  },
+
+  // Stats
+  statGrid: {
+    display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+    gap: 12, marginBottom: 24,
+  },
+  statCard: {
+    background: '#fffdf7', borderRadius: 12, padding: 22,
+    border: '1px solid #e8e0cc',
+  },
+  statIcon: {
+    width: 36, height: 36, borderRadius: 10,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    marginBottom: 14,
+  },
+  statValue: {
+    fontFamily: '"Fraunces", serif', fontSize: 34, fontWeight: 500,
+    lineHeight: 1, color: '#1a2620', letterSpacing: -0.5,
+  },
+  statLabel: { fontSize: 12, color: '#7a8270', marginTop: 6 },
+
+  coachStatsCard: {
+    background: '#fffdf7', borderRadius: 12, padding: 22,
+    border: '1px solid #e8e0cc', marginBottom: 16,
+  },
+  coachStatsHeader: {
+    display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr',
+    gap: 12, padding: '0 0 12px',
+    borderBottom: '1px solid #e8e0cc',
+    fontSize: 10, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 0.8,
+    fontWeight: 500,
+  },
+  coachStatsRow: {
+    display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr',
+    gap: 12, padding: '14px 0',
+    borderBottom: '1px solid #f0eee4',
+    alignItems: 'center',
+  },
+  coachStatsName: { display: 'flex', alignItems: 'center', gap: 12, color: '#1a2620' },
+  coachStatsValue: { textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontSize: 14, color: '#1a2620' },
+  barWrap: {
+    height: 3, background: '#f0eee4', borderRadius: 2,
+    marginTop: 4, width: 140, overflow: 'hidden',
+  },
+  bar: { height: '100%', borderRadius: 2 },
+
+  alertPanel: {
+    background: '#fef3e2', border: '1px solid #f3d8b8',
+    borderRadius: 12, padding: 22,
+  },
+  alertPanelHeader: {
+    display: 'flex', alignItems: 'center', gap: 8,
+    fontFamily: '"Fraunces", serif', fontSize: 17, fontWeight: 500,
+    marginBottom: 14, color: '#1a2620',
+  },
+  alertRow: {
+    display: 'flex', gap: 16, padding: '10px 0',
+    fontSize: 13, color: '#5a6258',
+    borderTop: '1px solid #f3d8b8',
+  },
+
+  typeRow: {
+    display: 'grid', gridTemplateColumns: '140px 1fr 40px',
+    gap: 12, alignItems: 'center', padding: '10px 0',
+  },
+  typeLabel: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#1a2620' },
+  typeBarWrap: {
+    height: 8, background: '#f0eee4', borderRadius: 4, overflow: 'hidden',
+  },
+  typeBar: { height: '100%', borderRadius: 4 },
+  typeCount: { textAlign: 'right', fontSize: 13, fontWeight: 500, color: '#1a2620' },
+
+  // Modal
+  modalOverlay: {
+    position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.45)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    padding: 16, zIndex: 100,
+    backdropFilter: 'blur(2px)',
+  },
+  modalCard: {
+    background: '#fffdf7', borderRadius: 16, maxWidth: 520, width: '100%',
+    maxHeight: '90vh', overflow: 'auto', position: 'relative',
+    boxShadow: '0 20px 50px rgba(26, 38, 32, 0.15)',
+  },
+  modalClose: {
+    position: 'absolute', top: 16, right: 16,
+    width: 32, height: 32, borderRadius: 8, border: 'none',
+    background: '#f5f1e8', cursor: 'pointer', color: '#7a8270',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    zIndex: 1,
+  },
+  modalDayBadge: {
+    fontSize: 11, color: '#7a8270', textTransform: 'uppercase',
+    letterSpacing: 0.8, fontWeight: 500,
+  },
+  detailRow: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    padding: '14px 0', borderBottom: '1px solid #f0eee4', fontSize: 14,
+    color: '#1a2620',
+  },
+  detailLabel: { color: '#7a8270', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.8 },
+  detailValue: { display: 'flex', alignItems: 'center', gap: 8 },
+  youBadge: {
+    background: '#2f4f3a', color: '#fff', fontSize: 10, fontWeight: 700,
+    padding: '2px 6px', borderRadius: 4, textTransform: 'uppercase', letterSpacing: 0.5,
+  },
+
+  label: {
+    display: 'block', fontSize: 11, color: '#7a8270',
+    textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8, fontWeight: 500,
+  },
+  textarea: {
+    width: '100%', padding: 12, borderRadius: 8,
+    border: '1px solid #d4cdb8', background: '#fff',
+    fontFamily: 'inherit', fontSize: 14, resize: 'vertical',
+    color: '#1a2620',
+  },
+  select: {
+    width: '100%', padding: 12, borderRadius: 8,
+    border: '1px solid #d4cdb8', background: '#fff',
+    fontFamily: 'inherit', fontSize: 14, color: '#1a2620',
+  },
+  hint: { fontSize: 12, color: '#7a8270', marginTop: 12, fontStyle: 'italic' },
+
+  // Buttons
+  btnPrimary: {
+    display: 'flex', alignItems: 'center', gap: 6,
+    padding: '10px 18px', borderRadius: 8, border: 'none',
+    background: '#2f4f3a', color: '#fff', fontFamily: 'inherit',
+    fontSize: 13, fontWeight: 600, letterSpacing: 0.2,
+  },
+  btnSecondary: {
+    display: 'flex', alignItems: 'center', gap: 6,
+    padding: '10px 18px', borderRadius: 8,
+    border: '1px solid #2f4f3a', background: 'transparent',
+    color: '#2f4f3a', fontFamily: 'inherit', fontSize: 13, fontWeight: 500,
+  },
+  btnGhost: {
+    display: 'flex', alignItems: 'center', gap: 6,
+    padding: '10px 18px', borderRadius: 8,
+    border: '1px solid #d4cdb8', background: 'transparent',
+    color: '#5a6258', fontFamily: 'inherit', fontSize: 13, fontWeight: 500,
+  },
+  btnDanger: {
+    display: 'flex', alignItems: 'center', gap: 6,
+    padding: '10px 18px', borderRadius: 8,
+    border: '1px solid #e8c4bd', background: 'transparent',
+    color: '#c8442a', fontFamily: 'inherit', fontSize: 13, fontWeight: 500,
+  },
+  formGrid: {
+    display: 'grid', gridTemplateColumns: '1fr 1fr',
+    gap: 12, marginBottom: 16,
+  },
+  pendingBadge: {
+    display: 'flex', alignItems: 'center', gap: 4,
+    fontSize: 11, fontWeight: 500, color: '#7a8270',
+    background: '#f0eee4', padding: '4px 10px', borderRadius: 12,
+  },
+  orDivider: {
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    margin: '20px 0 14px', position: 'relative', color: '#a8a895',
+    fontSize: 10, textTransform: 'uppercase', letterSpacing: 2,
+  },
+
+  // Settings modal toggles
+  prefsSection: {
+    marginBottom: 22, borderTop: '1px solid #f0eee4',
+    paddingTop: 18,
+  },
+  prefsHeader: {
+    fontSize: 10, fontWeight: 600, color: '#7a8270',
+    textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 12,
+  },
+  prefRow: {
+    display: 'flex', alignItems: 'center', gap: 16,
+    padding: '14px 0', width: '100%',
+    background: 'transparent', border: 'none', borderBottom: '1px solid #f0eee4',
+    fontFamily: 'inherit', cursor: 'pointer',
+  },
+  prefLabel: { fontSize: 14, color: '#1a2620', fontWeight: 500, lineHeight: 1.3 },
+  prefHint: { fontSize: 12, color: '#7a8270', marginTop: 3, lineHeight: 1.4 },
+  toggleTrack: {
+    width: 38, height: 20, borderRadius: 12,
+    padding: 2, transition: 'background 0.18s ease', flexShrink: 0,
+  },
+  toggleKnob: {
+    width: 16, height: 16, borderRadius: '50%',
+    transition: 'transform 0.18s ease, background 0.18s ease',
+  },
+  infoBox: {
+    display: 'flex', alignItems: 'flex-start', gap: 10,
+    background: '#f4ead4', border: '1px solid #e8d8a8',
+    borderRadius: 10, padding: '12px 14px', marginTop: 8,
+    fontSize: 12, color: '#7a6238', lineHeight: 1.5,
+  },
+
+  // Login screen
+  loginWrap: {
+    minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    background: '#f5f1e8', padding: 24, fontFamily: '"Geist", -apple-system, sans-serif',
+  },
+  loginCard: {
+    background: '#fffdf7', borderRadius: 16, padding: '40px 36px',
+    maxWidth: 420, width: '100%', border: '1px solid #e8e0cc',
+    boxShadow: '0 8px 32px rgba(26, 38, 32, 0.06)',
+  },
+  loginLogo: {
+    display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'center',
+    marginBottom: 28,
+  },
+  loginLogoMark: {
+    width: 44, height: 44, borderRadius: 12,
+    background: '#2f4f3a', color: '#f5f1e8',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontFamily: '"Fraunces", serif', fontSize: 26, fontWeight: 600,
+  },
+  loginTitle: {
+    fontFamily: '"Fraunces", serif', fontSize: 28, fontWeight: 500,
+    color: '#1a2620', textAlign: 'center', marginBottom: 6, letterSpacing: -0.3,
+  },
+  loginSub: {
+    fontSize: 13, color: '#7a8270', textAlign: 'center', marginBottom: 28,
+  },
+  loginField: { marginBottom: 16 },
+  loginInput: {
+    width: '100%', padding: '12px 14px', borderRadius: 8,
+    border: '1px solid #d4cdb8', background: '#fff',
+    fontFamily: 'inherit', fontSize: 14, color: '#1a2620',
+  },
+  loginError: {
+    fontSize: 12, color: '#c8442a', marginTop: 8, padding: '8px 12px',
+    background: '#fdebe5', borderRadius: 6, border: '1px solid #f3c8bd',
+  },
+  termsRow: {
+    display: 'flex', alignItems: 'flex-start', gap: 10,
+    padding: '14px 0 18px', cursor: 'pointer',
+    fontSize: 13, color: '#5a6258', lineHeight: 1.5,
+  },
+  checkbox: {
+    width: 18, height: 18, borderRadius: 4,
+    border: '1.5px solid #d4cdb8', background: '#fff',
+    flexShrink: 0, marginTop: 1,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  },
+  checkboxActive: {
+    background: '#2f4f3a', borderColor: '#2f4f3a', color: '#fff',
+  },
+  termsLink: { color: '#2f4f3a', textDecoration: 'underline', cursor: 'pointer' },
+  loginBtn: {
+    width: '100%', padding: '12px 18px', borderRadius: 8, border: 'none',
+    background: '#2f4f3a', color: '#fff', fontFamily: 'inherit',
+    fontSize: 14, fontWeight: 600, cursor: 'pointer', letterSpacing: 0.2,
+    transition: 'all 0.18s ease',
+  },
+  loginBtnDisabled: { opacity: 0.4, cursor: 'not-allowed' },
+  loginFoot: {
+    marginTop: 20, fontSize: 11, color: '#a8a895', textAlign: 'center', lineHeight: 1.5,
+  },
+  loginHint: {
+    marginTop: 14, padding: 12, background: '#f5f1e8', borderRadius: 8,
+    fontSize: 11, color: '#7a8270', lineHeight: 1.5,
+  },
+
+  // Interested cover coaches section on a cover card
+  interestedSection: {
+    background: '#eef1e8',
+    border: '1px solid #d8e0c8',
+    borderRadius: 8,
+    padding: '10px 12px',
+    marginBottom: 14,
+  },
+  interestedLabel: {
+    fontSize: 10, fontWeight: 600, color: '#5b7245',
+    textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8,
+  },
+  interestedList: { display: 'flex', flexWrap: 'wrap', gap: 8 },
+  interestedChip: {
+    display: 'inline-flex', alignItems: 'center', gap: 6,
+    background: '#fff', padding: '4px 4px 4px 8px',
+    borderRadius: 14, border: '1px solid #d8e0c8',
+    fontSize: 12, color: '#1a2620',
+  },
+  assignChipBtn: {
+    padding: '4px 10px', borderRadius: 10, border: 'none',
+    background: '#2f4f3a', color: '#fff', fontFamily: 'inherit',
+    fontSize: 11, fontWeight: 600, marginLeft: 4,
+  },
+  chipTypeTag: {
+    fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5,
+    padding: '2px 5px', borderRadius: 3,
+  },
+  chipTypePermanent: { background: '#dce4df', color: '#2f4f3a' },
+  chipTypeCover: { background: '#f0e3cc', color: '#8c5b3a' },
+
+  // Personalized status bar at top of main content
+  statusBar: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    gap: 16, padding: '16px 22px',
+    background: '#fffdf7',
+    borderLeft: '4px solid #2f4f3a',
+    borderRadius: 12,
+    border: '1px solid #e8e0cc',
+    borderLeftWidth: 4,
+    marginBottom: 24,
+    flexWrap: 'wrap',
+  },
+  statusBarContent: { flex: 1, minWidth: 200 },
+  statusBarTitle: {
+    fontFamily: '"Fraunces", serif', fontSize: 16, fontWeight: 500,
+    color: '#1a2620', lineHeight: 1.3, letterSpacing: -0.1,
+  },
+  statusBarSub: {
+    fontSize: 12, color: '#7a8270', marginTop: 4,
+  },
+  statusBarBtn: {
+    padding: '8px 16px', borderRadius: 8, border: 'none',
+    background: '#2f4f3a', color: '#fff', fontFamily: 'inherit',
+    fontSize: 12, fontWeight: 600, letterSpacing: 0.2,
+    flexShrink: 0,
+  },
+
+  // Mobile: horizontal day selector
+  daySelector: {
+    display: 'flex', gap: 8, overflowX: 'auto',
+    paddingBottom: 12, marginBottom: 16,
+    WebkitOverflowScrolling: 'touch',
+  },
+  dayPill: {
+    flexShrink: 0, padding: '10px 16px', borderRadius: 12,
+    border: '1px solid #e8e0cc', background: '#fffdf7',
+    fontFamily: 'inherit', cursor: 'pointer', position: 'relative',
+    display: 'flex', flexDirection: 'column', alignItems: 'center',
+    minWidth: 64,
+  },
+  dayPillActive: {
+    background: '#2f4f3a', borderColor: '#2f4f3a', color: '#fff',
+  },
+  dayPillDay: {
+    fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
+    letterSpacing: 0.6, color: 'inherit', opacity: 0.7,
+  },
+  dayPillDate: {
+    fontFamily: '"Fraunces", serif', fontSize: 20, fontWeight: 500,
+    color: 'inherit', marginTop: 2, lineHeight: 1,
+  },
+  dayPillDot: {
+    position: 'absolute', bottom: 6, width: 4, height: 4, borderRadius: '50%',
+  },
+  mobileDayHeader: {
+    marginBottom: 12,
+  },
+  mobileDayHeaderDay: {
+    fontFamily: '"Fraunces", serif', fontSize: 20, fontWeight: 500,
+    color: '#1a2620', letterSpacing: -0.2,
+  },
+  mobileDayList: {
+    display: 'flex', flexDirection: 'column', gap: 8,
+  },
+
+  // Mobile-variant class card (horizontal layout, full width)
+  classCardMobile: {
+    display: 'flex', alignItems: 'center', gap: 14,
+    padding: '14px 14px 14px 16px',
+    width: '100%',
+  },
+  mobileCardLeft: {
+    display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
+    minWidth: 52, flexShrink: 0,
+  },
+  mobileCardTime: {
+    fontFamily: '"Fraunces", serif', fontSize: 18, fontWeight: 500,
+    color: '#1a2620', lineHeight: 1, letterSpacing: -0.2,
+  },
+  mobileCardDur: {
+    fontSize: 10, color: '#7a8270', marginTop: 4, fontWeight: 500,
+    textTransform: 'uppercase', letterSpacing: 0.6,
+  },
+  mobileCardMid: { flex: 1, minWidth: 0 },
+  mobileCardType: {
+    fontSize: 14, fontWeight: 500, color: '#1a2620',
+    marginBottom: 4, lineHeight: 1.3,
+  },
+  mobileCardMeta: {
+    display: 'flex', alignItems: 'center', gap: 6,
+    fontSize: 11, color: '#7a8270',
+  },
+  mobileCardCoach: { whiteSpace: 'nowrap' },
+  mobileCardStudio: { color: '#a8a895' },
+
+  // Coach type badge (Permanent / Cover) on stats and elsewhere
+  coachTypeBadge: {
+    display: 'inline-block', fontSize: 9, fontWeight: 600,
+    textTransform: 'uppercase', letterSpacing: 0.6,
+    padding: '2px 6px', borderRadius: 3, marginLeft: 6,
+  },
+  coachTypePermanent: { background: '#dce4df', color: '#2f4f3a' },
+  coachTypeCover: { background: '#f0e3cc', color: '#8c5b3a' },
+
+  // Demo quick sign-in section on login screen
+  demoSection: {
+    marginTop: 24, paddingTop: 22, borderTop: '1px dashed #d4cdb8',
+  },
+  demoLabel: {
+    fontSize: 10, fontWeight: 600, color: '#a8a895',
+    textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 12,
+    textAlign: 'center',
+  },
+  demoButtons: { display: 'flex', flexDirection: 'column', gap: 8 },
+  demoBtn: {
+    display: 'flex', alignItems: 'center', gap: 10,
+    padding: '9px 12px', borderRadius: 8,
+    border: '1px solid #e8e0cc', background: '#fffdf7',
+    fontFamily: 'inherit', cursor: 'pointer', width: '100%',
+  },
+  demoBtnName: { fontSize: 13, fontWeight: 500, color: '#1a2620' },
+  demoBtnRole: { fontSize: 10, color: '#7a8270', marginTop: 1, textTransform: 'uppercase', letterSpacing: 0.6 },
+};
