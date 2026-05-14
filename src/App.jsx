@@ -1,4 +1,4 @@
- import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Calendar, MessageSquare, Users, BarChart3, AlertCircle, Plus,
   Send, ArrowLeftRight, Check, X, Clock, Bell, RotateCcw, Settings, Mail, LogOut,
@@ -198,6 +198,22 @@ export default function SalusStaff() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user?.id]);
 
+  // Real-time updates: listen for any change in our five tables and refetch.
+  // This is what makes a new message or cover request show up on everyone's screen instantly.
+  useEffect(() => {
+    if (!session) return;
+    const channel = supabase
+      .channel('salus-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => reloadData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'classes' }, () => reloadData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cover_requests' }, () => reloadData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'swap_requests' }, () => reloadData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => reloadData())
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user?.id]);
+
   // Login handler — real Supabase auth
   const handleLogin = async (email, password) => {
     setAuthError(null);
@@ -207,6 +223,54 @@ export default function SalusStaff() {
     });
     if (error) {
       setAuthError(error.message || 'Could not sign in. Check email and password.');
+      return false;
+    }
+    return true;
+  };
+
+  // Signup handler — create auth user + profile in one shot.
+  // New users default to 'coach' / 'permanent'. Manager can change later.
+  const handleSignup = async (email, password, fullName) => {
+    setAuthError(null);
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanName = (fullName || '').trim();
+    if (!cleanName) {
+      setAuthError('Please enter your full name.');
+      return false;
+    }
+
+    const { data: signupData, error: signupErr } = await supabase.auth.signUp({
+      email: cleanEmail,
+      password,
+    });
+    if (signupErr) {
+      setAuthError(signupErr.message || 'Could not create account.');
+      return false;
+    }
+
+    const newUserId = signupData.user?.id;
+    if (!newUserId) {
+      setAuthError('Account created but no user ID returned. Check your email for confirmation, or contact your manager.');
+      return false;
+    }
+
+    // Generate initials and pick a colour from a palette
+    const initials = cleanName.split(' ').slice(0, 2).map(p => p[0]?.toUpperCase() || '').join('');
+    const palette = ['#b85c38', '#7a8c5c', '#5b7a8c', '#c89c4a', '#4a6b3a', '#8c5b7a', '#a8703a', '#6b7a8c', '#8c4a5c', '#7a6b8c', '#8c8c4a', '#4a5c8c', '#7a8c8c', '#6b5c3a', '#5c7a6b'];
+    const color = palette[Math.floor(Math.random() * palette.length)];
+
+    const { error: profErr } = await supabase.from('profiles').insert({
+      id: newUserId,
+      name: cleanName,
+      role: 'coach',
+      coach_type: 'permanent',
+      color,
+      initials: initials || '?',
+      email_prefs: { assignedCover: true, coverPosted: false, classReminder24h: true, weeklySummary: false },
+      terms_accepted_at: new Date().toISOString(),
+    });
+    if (profErr) {
+      setAuthError('Account created but profile setup failed: ' + (profErr.message || 'unknown error'));
       return false;
     }
     return true;
@@ -232,6 +296,7 @@ export default function SalusStaff() {
       <LoginScreen
         error={authError}
         onLogin={handleLogin}
+        onSignup={handleSignup}
         onClearError={() => setAuthError(null)}
       />
     );
@@ -693,24 +758,45 @@ function NavTab({ icon: Icon, label, active, onClick, badge, isMobile }) {
 // LOGIN SCREEN
 // ──────────────────────────────────────────────────────────────────────────────
 
-function LoginScreen({ error, onLogin, onClearError }) {
+function LoginScreen({ error, onLogin, onSignup, onClearError }) {
+  const [mode, setMode] = useState('signin'); // 'signin' or 'signup'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
   const [accepted, setAccepted] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [successMsg, setSuccessMsg] = useState(null);
 
-  const canSubmit = email.trim().length > 3 && password.length >= 6 && accepted && !submitting;
+  const canSubmit = email.trim().length > 3
+    && password.length >= 6
+    && accepted
+    && !submitting
+    && (mode === 'signin' || fullName.trim().length > 0);
 
   const handleSubmit = async (e) => {
     e?.preventDefault?.();
     if (!canSubmit) return;
     setSubmitting(true);
+    setSuccessMsg(null);
     try {
-      await onLogin(email, password);
+      if (mode === 'signin') {
+        await onLogin(email, password);
+      } else {
+        const ok = await onSignup(email, password, fullName);
+        if (ok) {
+          setSuccessMsg("Account created! You're signed in.");
+        }
+      }
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const switchMode = (next) => {
+    setMode(next);
+    onClearError?.();
+    setSuccessMsg(null);
   };
 
   return (
@@ -726,7 +812,44 @@ function LoginScreen({ error, onLogin, onClearError }) {
         </div>
 
         <h1 style={styles.loginTitle}>Salus Staff</h1>
-        <p style={styles.loginSub}>Sign in to access your team's timetable, cover board, and chat.</p>
+        <p style={styles.loginSub}>
+          {mode === 'signin'
+            ? "Sign in to access your team's timetable, cover board, and chat."
+            : "Create your account — your manager will assign your role once you're in."}
+        </p>
+
+        {/* Mode toggle */}
+        <div style={styles.modeToggle}>
+          <button
+            type="button"
+            onClick={() => switchMode('signin')}
+            style={{ ...styles.modeToggleBtn, ...(mode === 'signin' ? styles.modeToggleBtnActive : {}) }}
+          >
+            Sign in
+          </button>
+          <button
+            type="button"
+            onClick={() => switchMode('signup')}
+            style={{ ...styles.modeToggleBtn, ...(mode === 'signup' ? styles.modeToggleBtnActive : {}) }}
+          >
+            Sign up
+          </button>
+        </div>
+
+        {mode === 'signup' && (
+          <div style={styles.loginField}>
+            <label style={styles.label}>Full name</label>
+            <input
+              type="text"
+              value={fullName}
+              onChange={(e) => { setFullName(e.target.value); if (error) onClearError(); }}
+              placeholder="e.g. Tilly Ould"
+              className="salus-input"
+              style={styles.loginInput}
+              autoComplete="name"
+            />
+          </div>
+        )}
 
         <div style={styles.loginField}>
           <label style={styles.label}>Email address</label>
@@ -737,7 +860,7 @@ function LoginScreen({ error, onLogin, onClearError }) {
             placeholder="you@salus.house"
             className="salus-input"
             style={styles.loginInput}
-            autoFocus
+            autoFocus={mode === 'signin'}
             autoComplete="email"
           />
         </div>
@@ -748,15 +871,18 @@ function LoginScreen({ error, onLogin, onClearError }) {
             type="password"
             value={password}
             onChange={(e) => { setPassword(e.target.value); if (error) onClearError(); }}
-            placeholder="Your password"
+            placeholder={mode === 'signin' ? 'Your password' : 'At least 6 characters'}
             className="salus-input"
             style={styles.loginInput}
-            autoComplete="current-password"
+            autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
           />
         </div>
 
         {error && (
           <div style={styles.loginError}>{error}</div>
+        )}
+        {successMsg && (
+          <div style={{ ...styles.loginError, background: '#e8ede0', borderColor: '#c2d0a8', color: '#4a6b3a' }}>{successMsg}</div>
         )}
 
         <div
@@ -782,11 +908,15 @@ function LoginScreen({ error, onLogin, onClearError }) {
           style={{ ...styles.loginBtn, ...(!canSubmit ? styles.loginBtnDisabled : {}) }}
           disabled={!canSubmit}
         >
-          {submitting ? 'Signing in…' : 'Sign in'}
+          {submitting
+            ? (mode === 'signin' ? 'Signing in…' : 'Creating account…')
+            : (mode === 'signin' ? 'Sign in' : 'Create account')}
         </button>
 
         <div style={styles.loginFoot}>
-          Trouble signing in? Contact your manager.
+          {mode === 'signin'
+            ? <>Don't have an account yet? <span style={styles.termsLink} onClick={() => switchMode('signup')}>Sign up</span></>
+            : <>Already have an account? <span style={styles.termsLink} onClick={() => switchMode('signin')}>Sign in</span></>}
         </div>
       </form>
 
@@ -2801,6 +2931,22 @@ const styles = {
     background: '#2f4f3a', color: '#fff', fontFamily: 'inherit',
     fontSize: 14, fontWeight: 600, cursor: 'pointer', letterSpacing: 0.2,
     transition: 'all 0.18s ease',
+  },
+
+  // Sign in / Sign up toggle on login screen
+  modeToggle: {
+    display: 'flex', gap: 0, marginBottom: 20,
+    padding: 3, background: '#f0eee4', borderRadius: 10,
+    border: '1px solid #e8e0cc',
+  },
+  modeToggleBtn: {
+    flex: 1, padding: '8px 12px', borderRadius: 7, border: 'none',
+    background: 'transparent', fontSize: 13, fontFamily: 'inherit',
+    color: '#7a8270', fontWeight: 500, cursor: 'pointer',
+  },
+  modeToggleBtnActive: {
+    background: '#fffdf7', color: '#2f4f3a', fontWeight: 600,
+    boxShadow: '0 1px 2px rgba(47, 79, 58, 0.08)',
   },
   loginBtnDisabled: { opacity: 0.4, cursor: 'not-allowed' },
   loginFoot: {
