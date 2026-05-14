@@ -328,11 +328,13 @@ export default function SalusStaff() {
   };
 
   const requestCover = async (classId, reason) => {
+    // Managers' own requests skip the pending stage and go straight to the board.
+    const initialStatus = isManager ? 'open' : 'pending';
     const { error: er1 } = await supabase.from('cover_requests').insert({
       class_id: classId,
       requested_by: currentUserId,
       reason: reason || '',
-      status: 'pending',
+      status: initialStatus,
     });
     if (er1) { console.error('requestCover', er1); return; }
     const cls = data.classes.find(c => c.id === classId);
@@ -425,8 +427,35 @@ export default function SalusStaff() {
   const isManager = currentUser.role === 'manager';
   const pendingCount = data.coverRequests.filter(r => r.status === 'pending').length;
   const openCount = data.coverRequests.filter(r => r.status === 'open').length;
-  const badgeCount = isManager ? pendingCount : openCount;
-  const badgeLabel = isManager ? 'pending approval' : 'on the board';
+
+  // Unread tracking — per device, per user
+  const LAST_VIEWED_KEY = `salus-last-viewed-${currentUserId}`;
+  const [lastViewed, setLastViewed] = useState(() => {
+    try {
+      const raw = localStorage.getItem(LAST_VIEWED_KEY);
+      return raw ? JSON.parse(raw) : { chat: 0, cover: 0 };
+    } catch { return { chat: 0, cover: 0 }; }
+  });
+
+  // When the user switches to chat or cover, update the timestamp
+  useEffect(() => {
+    if (tab !== 'chat' && tab !== 'cover') return;
+    const next = { ...lastViewed, [tab]: Date.now() };
+    setLastViewed(next);
+    try { localStorage.setItem(LAST_VIEWED_KEY, JSON.stringify(next)); } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  // Unread = items created after lastViewed timestamp, excluding the user's own actions
+  const chatUnread = data.messages.filter(m =>
+    m.userId !== currentUserId && m.timestamp > (lastViewed.chat || 0)
+  ).length;
+
+  const coverUnread = data.coverRequests.filter(r =>
+    r.requestedBy !== currentUserId &&
+    (r.status === 'pending' || r.status === 'open') &&
+    r.timestamp > (lastViewed.cover || 0)
+  ).length;
 
   // Drop cover coaches onto the Cover Board (their main action surface).
   // Everyone else gets the Timetable. Only runs once per sign-in.
@@ -538,14 +567,15 @@ export default function SalusStaff() {
         </div>
 
         <div className="salus-header-right" style={styles.headerRight}>
-          {badgeCount > 0 && (
+          {(coverUnread + chatUnread) > 0 && (
             <button
-              onClick={() => setTab('cover')}
+              onClick={() => setTab(coverUnread > 0 ? 'cover' : 'chat')}
               className="salus-btn"
               style={styles.alertBadge}
+              title={`${coverUnread} new cover · ${chatUnread} new messages`}
             >
               <Bell size={14} />
-              <span>{badgeCount}{!isMobile && ` ${badgeLabel}`}</span>
+              <span>{coverUnread + chatUnread}{!isMobile && ' new'}</span>
             </button>
           )}
 
@@ -589,8 +619,8 @@ export default function SalusStaff() {
       {/* Nav */}
       <nav className="salus-nav" style={styles.nav}>
         <NavTab icon={Calendar}     label="Timetable"   active={tab==='timetable'} onClick={() => setTab('timetable')} isMobile={isMobile} />
-        <NavTab icon={ArrowLeftRight} label="Cover Board" active={tab==='cover'}    onClick={() => setTab('cover')} badge={badgeCount} isMobile={isMobile} />
-        <NavTab icon={MessageSquare}  label="Team Chat"   active={tab==='chat'}     onClick={() => setTab('chat')} isMobile={isMobile} />
+        <NavTab icon={ArrowLeftRight} label="Cover Board" active={tab==='cover'}    onClick={() => setTab('cover')} badge={coverUnread} isMobile={isMobile} />
+        <NavTab icon={MessageSquare}  label="Team Chat"   active={tab==='chat'}     onClick={() => setTab('chat')} badge={chatUnread} isMobile={isMobile} />
         <NavTab icon={BarChart3}      label={isManager ? 'Team Stats' : 'My Stats'} active={tab==='stats'} onClick={() => setTab('stats')} isMobile={isMobile} />
       </nav>
 
@@ -1938,12 +1968,12 @@ function ClassDetailModal({ classObj, data, currentUser, isManager, onClose, onR
                 </button>
               </>
             )}
-            {!isManager && isMine && !needsCover && (
+            {isMine && !needsCover && (
               <>
-                <button onClick={() => setMode('requestCover')} className="salus-btn" style={styles.btnPrimary}>
+                <button onClick={() => setMode('requestCover')} className="salus-btn" style={isManager ? styles.btnSecondary : styles.btnPrimary}>
                   <AlertCircle size={14} /> Request cover
                 </button>
-                {myOtherClasses.length > 0 && (
+                {!isManager && myOtherClasses.length > 0 && (
                   <button onClick={() => setMode('swap')} className="salus-btn" style={styles.btnSecondary}>
                     <ArrowLeftRight size={14} /> Propose swap
                   </button>
@@ -1970,10 +2000,14 @@ function ClassDetailModal({ classObj, data, currentUser, isManager, onClose, onR
               style={styles.textarea}
               rows={3}
             />
-            <p style={styles.hint}>This will be sent to the manager, who'll either assign someone to cover or post it to the team.</p>
+            <p style={styles.hint}>
+              {isManager
+                ? 'This will be posted to the cover board straight away — coaches can claim or express interest.'
+                : "This will be sent to the manager, who'll either assign someone to cover or post it to the team."}
+            </p>
             <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
               <button onClick={() => onRequestCover(reason)} className="salus-btn" style={styles.btnPrimary}>
-                Send to manager
+                {isManager ? 'Post to board' : 'Send to manager'}
               </button>
               <button onClick={() => setMode('view')} className="salus-btn" style={styles.btnGhost}>Back</button>
             </div>
