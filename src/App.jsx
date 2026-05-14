@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Calendar, MessageSquare, Users, BarChart3, AlertCircle, Plus,
   Send, ArrowLeftRight, Check, X, Clock, Bell, RotateCcw, Settings, Mail, LogOut,
-  ChevronLeft, ChevronRight, TrendingUp, Award, Activity
+  ChevronLeft, ChevronRight, TrendingUp, Award, Activity, Trash2
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import {
@@ -58,7 +58,7 @@ const CLASS_TYPES = {
   'Friday Night Flow':   { color: '#c6926a', bg: '#f4e6d8' },
   'Hyrox':               { color: '#c8442a', bg: '#f5dcd6' },
   'Hyrox for Beginners': { color: '#d8694f', bg: '#fae3dc' },
-  'Salus Signature':     { color: '#2f4f3a', bg: '#dce4df' },
+  'Salus Signature':     { color: '#5c4a38', bg: '#dce4df' },
   'Salus Strength':      { color: '#1f3528', bg: '#d4dcd6' },
   'Barbell Strength':    { color: '#4a6f54', bg: '#e0e8e2' },
   'Salus Sculpt':        { color: '#c89c4a', bg: '#f4ead4' },
@@ -288,7 +288,7 @@ export default function SalusStaff() {
   if (!authChecked) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f1e8', fontFamily: 'Geist, sans-serif' }}>
-        <div style={{ color: '#2f4f3a', fontFamily: '"Fraunces", serif', fontSize: 18, letterSpacing: 0.5 }}>Loading Salus Staff…</div>
+        <div style={{ color: '#5c4a38', fontFamily: '"Fraunces", serif', fontSize: 18, letterSpacing: 0.5 }}>Loading Salus Staff…</div>
       </div>
     );
   }
@@ -308,7 +308,7 @@ export default function SalusStaff() {
   if (loading) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f1e8', fontFamily: 'Geist, sans-serif' }}>
-        <div style={{ color: '#2f4f3a', fontFamily: '"Fraunces", serif', fontSize: 18, letterSpacing: 0.5 }}>Loading your team…</div>
+        <div style={{ color: '#5c4a38', fontFamily: '"Fraunces", serif', fontSize: 18, letterSpacing: 0.5 }}>Loading your team…</div>
       </div>
     );
   }
@@ -327,7 +327,7 @@ export default function SalusStaff() {
           </p>
           <button
             onClick={handleLogout}
-            style={{ marginTop: 16, padding: '10px 18px', borderRadius: 8, border: 'none', background: '#2f4f3a', color: '#fff', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+            style={{ marginTop: 16, padding: '10px 18px', borderRadius: 8, border: 'none', background: '#5c4a38', color: '#fff', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
           >
             Sign out
           </button>
@@ -346,6 +346,8 @@ export default function SalusStaff() {
     if (settings.initials !== undefined) patch.initials = settings.initials;
     if (settings.color !== undefined) patch.color = settings.color;
     if (settings.avatarUrl !== undefined) patch.avatar_url = settings.avatarUrl;
+    if (settings.bankAccount !== undefined) patch.bank_account = settings.bankAccount;
+    if (settings.bankSortCode !== undefined) patch.bank_sort_code = settings.bankSortCode;
     if (Object.keys(patch).length === 0) return;
     const { error } = await supabase.from('profiles').update(patch).eq('id', userId);
     if (error) { console.error('updateUserSettings', error); return; }
@@ -442,6 +444,20 @@ export default function SalusStaff() {
     await reloadData(true);
   };
 
+  const deleteMessage = async (messageId) => {
+    if (!messageId) return;
+    const { error } = await supabase.from('messages').delete().eq('id', messageId);
+    if (error) { console.error('deleteMessage', error); return; }
+    await reloadData(true);
+  };
+
+  const clearAllMessages = async () => {
+    // .neq trick: delete all rows (id is never equal to this fake UUID)
+    const { error } = await supabase.from('messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    if (error) { console.error('clearAllMessages', error); return; }
+    await reloadData(true);
+  };
+
   // Reset is now a no-op for safety. (In dev, manager can wipe data via Supabase.)
   const resetData = async () => { setModal(null); };
 
@@ -532,14 +548,14 @@ export default function SalusStaff() {
         .salus-btn { transition: all 0.15s ease; cursor: pointer; }
         .salus-btn:hover { transform: translateY(-1px); }
         .salus-card { transition: all 0.2s ease; }
-        .salus-card:hover { box-shadow: 0 4px 12px rgba(47, 79, 58, 0.08); }
+        .salus-card:hover { box-shadow: 0 4px 12px rgba(92, 74, 56, 0.08); }
         .salus-tab { transition: all 0.2s ease; }
         @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .salus-modal-content { animation: slideUp 0.22s ease; }
         .salus-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
         .salus-scroll::-webkit-scrollbar-track { background: transparent; }
         .salus-scroll::-webkit-scrollbar-thumb { background: #d4cdb8; border-radius: 3px; }
-        .salus-input:focus { outline: none; border-color: #2f4f3a !important; }
+        .salus-input:focus { outline: none; border-color: #5c4a38 !important; }
 
         /* Mobile-specific overrides */
         @media (max-width: 768px) {
@@ -565,7 +581,7 @@ export default function SalusStaff() {
       <header className="salus-header" style={styles.header}>
         <div style={styles.headerLeft}>
           <div style={styles.logo}>
-            <div style={styles.logoMark}>S</div>
+            <img src="https://cdn.prod.website-files.com/66803175747777a7dd2956e8/668c04b49ff0954ea73d39ef_download-compresskaru.com.png" alt="Salus" style={styles.logoMark} />
             <div>
               <div style={styles.logoText}>Salus Staff</div>
               <div style={styles.logoSub}>Salus House · Sidcup</div>
@@ -603,6 +619,15 @@ export default function SalusStaff() {
           </div>
 
           <button
+            onClick={() => setModal({ type: 'timeOff' })}
+            className="salus-btn"
+            style={styles.iconBtn}
+            title="Upcoming bank holidays & time off"
+          >
+            <Calendar size={16} />
+          </button>
+
+          <button
             onClick={() => setModal({ type: 'settings' })}
             className="salus-btn"
             style={styles.iconBtn}
@@ -622,6 +647,8 @@ export default function SalusStaff() {
 
         </div>
       </header>
+
+      <DailyQuote />
 
       {/* Nav */}
       <nav className="salus-nav" style={styles.nav}>
@@ -665,11 +692,18 @@ export default function SalusStaff() {
           />
         )}
         {tab === 'chat' && (
-          <Chat data={data} currentUser={currentUser} onSend={sendMessage} />
+          <Chat
+            data={data}
+            currentUser={currentUser}
+            isManager={isManager}
+            onSend={sendMessage}
+            onDeleteMessage={deleteMessage}
+            onClearAll={() => setModal({ type: 'clearChat' })}
+          />
         )}
         {tab === 'stats' && (
           isManager
-            ? <ManagerStats data={data} />
+            ? <ManagerStats data={data} onShowInvoices={() => setModal({ type: 'invoices' })} />
             : <CoachStats data={data} currentUser={currentUser} />
         )}
       </main>
@@ -736,6 +770,21 @@ export default function SalusStaff() {
           onClose={() => setModal(null)}
         />
       )}
+      {modal?.type === 'clearChat' && (
+        <ConfirmModal
+          title="Clear all chat messages?"
+          message="This will permanently delete every message in the team chat. This action cannot be undone."
+          confirmLabel="Clear all"
+          onConfirm={() => { clearAllMessages(); setModal(null); }}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal?.type === 'timeOff' && (
+        <TimeOffModal onClose={() => setModal(null)} />
+      )}
+      {modal?.type === 'invoices' && (
+        <InvoicesModal data={data} onClose={() => setModal(null)} />
+      )}
     </div>
   );
 }
@@ -770,6 +819,99 @@ function UserAvatar({ user, size = 24, fontSize = 10 }) {
       fontSize, fontWeight: 700, flexShrink: 0,
     }}>
       {user.initials}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// DAILY WELLBEING QUOTE — rotates by day of year
+// ──────────────────────────────────────────────────────────────────────────────
+
+const WELLBEING_QUOTES = [
+  { text: "Movement is medicine. Show up for your body today.", attr: "Salus" },
+  { text: "Strength is not measured in weight, but in how you carry your day.", attr: "Salus" },
+  { text: "Recovery is part of the work, not separate from it.", attr: "Salus" },
+  { text: "Breathe deeply. Move intentionally. Rest fully.", attr: "Salus" },
+  { text: "Take care of your body. It's the only place you have to live.", attr: "Jim Rohn" },
+  { text: "The greatest wealth is health.", attr: "Virgil" },
+  { text: "An ounce of prevention is worth a pound of cure.", attr: "Benjamin Franklin" },
+  { text: "Don't put off tomorrow what you can do today — especially the warm-up.", attr: "Salus" },
+  { text: "Small daily practices create extraordinary lives.", attr: "Robin Sharma" },
+  { text: "Your body hears everything your mind says. Be kind in both.", attr: "Naomi Judd" },
+  { text: "Discipline is choosing between what you want now and what you want most.", attr: "Abraham Lincoln" },
+  { text: "Rest when you're weary. Refresh and renew yourself.", attr: "Ralph Marston" },
+  { text: "Health is a state of complete harmony of the body, mind, and spirit.", attr: "B.K.S. Iyengar" },
+  { text: "Show up for yourself before showing up for anyone else.", attr: "Salus" },
+  { text: "The body achieves what the mind believes.", attr: "Napoleon Hill" },
+  { text: "Progress, not perfection.", attr: "Salus" },
+  { text: "You don't have to be extreme, just consistent.", attr: "Salus" },
+  { text: "The first wealth is health.", attr: "Ralph Waldo Emerson" },
+  { text: "What you do today can improve all your tomorrows.", attr: "Ralph Marston" },
+  { text: "Honour your effort. Be proud of every rep.", attr: "Salus" },
+  { text: "A healthy outside starts from the inside.", attr: "Robert Urich" },
+  { text: "Slow is smooth. Smooth is fast.", attr: "Salus" },
+  { text: "Make every breath count.", attr: "Salus" },
+  { text: "Rest is not the opposite of progress. It's part of it.", attr: "Salus" },
+  { text: "The pain you feel today will be the strength you feel tomorrow.", attr: "Arnold Schwarzenegger" },
+  { text: "Find joy in the journey, not just the finish line.", attr: "Salus" },
+  { text: "Strong people lift others up.", attr: "Salus" },
+  { text: "Listen to your body. It's smarter than your training plan.", attr: "Salus" },
+  { text: "Calm mind, strong body, full heart.", attr: "Salus" },
+  { text: "Mobility is freedom. Move every joint daily.", attr: "Salus" },
+  { text: "Sleep is the most underrated performance enhancer.", attr: "Salus" },
+  { text: "Be patient with your progress. Trust the process.", attr: "Salus" },
+];
+
+// ──────────────────────────────────────────────────────────────────────────────
+// UK BANK HOLIDAYS — 2026
+// ──────────────────────────────────────────────────────────────────────────────
+
+const UK_BANK_HOLIDAYS_2026 = [
+  { date: '2026-01-01', name: "New Year's Day" },
+  { date: '2026-04-03', name: 'Good Friday' },
+  { date: '2026-04-06', name: 'Easter Monday' },
+  { date: '2026-05-04', name: 'Early May bank holiday' },
+  { date: '2026-05-25', name: 'Spring bank holiday' },
+  { date: '2026-08-31', name: 'Summer bank holiday' },
+  { date: '2026-12-25', name: 'Christmas Day' },
+  { date: '2026-12-28', name: 'Boxing Day (substitute)' },
+];
+
+const UK_BANK_HOLIDAYS_2027 = [
+  { date: '2027-01-01', name: "New Year's Day" },
+  { date: '2027-03-26', name: 'Good Friday' },
+  { date: '2027-03-29', name: 'Easter Monday' },
+  { date: '2027-05-03', name: 'Early May bank holiday' },
+  { date: '2027-05-31', name: 'Spring bank holiday' },
+  { date: '2027-08-30', name: 'Summer bank holiday' },
+  { date: '2027-12-27', name: 'Christmas Day (substitute)' },
+  { date: '2027-12-28', name: 'Boxing Day (substitute)' },
+];
+
+const ALL_BANK_HOLIDAYS = [...UK_BANK_HOLIDAYS_2026, ...UK_BANK_HOLIDAYS_2027];
+
+function getUpcomingBankHolidays(months = 12) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const limit = new Date(today); limit.setMonth(limit.getMonth() + months);
+  return ALL_BANK_HOLIDAYS.filter(h => {
+    const d = new Date(h.date);
+    return d >= today && d <= limit;
+  });
+}
+
+function DailyQuote() {
+  // Day of year, deterministic — same quote all day, different tomorrow
+  const dayOfYear = (() => {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), 0, 0);
+    const diff = now - start;
+    return Math.floor(diff / (1000 * 60 * 60 * 24));
+  })();
+  const quote = WELLBEING_QUOTES[dayOfYear % WELLBEING_QUOTES.length];
+  return (
+    <div style={styles.quoteBar}>
+      <div style={styles.quoteText}>“{quote.text}”</div>
+      <div style={styles.quoteAttr}>— {quote.attr}</div>
     </div>
   );
 }
@@ -855,7 +997,7 @@ function LoginScreen({ error, onLogin, onSignup, onClearError }) {
 
       <form onSubmit={handleSubmit} style={styles.loginCard}>
         <div style={styles.loginLogo}>
-          <div style={styles.loginLogoMark}>S</div>
+          <img src="https://cdn.prod.website-files.com/66803175747777a7dd2956e8/668c04b49ff0954ea73d39ef_download-compresskaru.com.png" alt="Salus" style={styles.loginLogoMark} />
         </div>
 
         <h1 style={styles.loginTitle}>Salus Staff</h1>
@@ -1133,7 +1275,7 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
                 >
                   <div style={styles.dayPillDay}>{day}</div>
                   <div style={styles.dayPillDate}>{DAY_LABELS[i].split(' ')[1]}</div>
-                  {byDay[i].length > 0 && <div style={{ ...styles.dayPillDot, background: isActive ? '#fff' : '#2f4f3a' }} />}
+                  {byDay[i].length > 0 && <div style={{ ...styles.dayPillDot, background: isActive ? '#fff' : '#5c4a38' }} />}
                 </button>
               );
             })}
@@ -1268,7 +1410,7 @@ function StatusBar({ data, currentUser, isManager, onJumpTo }) {
       };
     } else {
       content = {
-        accent: '#2f4f3a',
+        accent: '#5c4a38',
         title: 'All caught up',
         sub: `${needsCover} class${needsCover === 1 ? '' : 'es'} need cover · ${covered} sorted this week`,
       };
@@ -1645,8 +1787,9 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
 // CHAT
 // ──────────────────────────────────────────────────────────────────────────────
 
-function Chat({ data, currentUser, onSend }) {
+function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onClearAll }) {
   const [text, setText] = useState('');
+  const [hoveredMsgId, setHoveredMsgId] = useState(null);
   const scrollRef = useRef(null);
 
   useEffect(() => {
@@ -1664,8 +1807,21 @@ function Chat({ data, currentUser, onSend }) {
   return (
     <div style={styles.chatContainer}>
       <div style={styles.chatHeader}>
-        <h2 style={styles.h2}>Team Salus</h2>
-        <p style={styles.subtitle}>{data.users.length} members · everyone</p>
+        <div style={{ flex: 1 }}>
+          <h2 style={styles.h2}>Team Salus</h2>
+          <p style={styles.subtitle}>{data.users.length} members · everyone</p>
+        </div>
+        {isManager && data.messages.length > 0 && (
+          <button
+            onClick={onClearAll}
+            className="salus-btn"
+            style={styles.chatClearAllBtn}
+            title="Delete every message in the chat"
+          >
+            <Trash2 size={14} />
+            <span>Clear chat</span>
+          </button>
+        )}
       </div>
 
       <div ref={scrollRef} className="salus-scroll" style={styles.messagesList}>
@@ -1675,21 +1831,46 @@ function Chat({ data, currentUser, onSend }) {
           const showHeader = !prevMsg || prevMsg.userId !== msg.userId ||
                              (msg.timestamp - prevMsg.timestamp) > 600000;
           const isMine = msg.userId === currentUser.id;
+          const canDelete = isManager || isMine;
+          const showDelete = canDelete && hoveredMsgId === msg.id;
           return (
-            <div key={msg.id} style={{ ...styles.message, ...(isMine ? styles.messageMine : {}) }}>
-              {showHeader && (
+            <div
+              key={msg.id}
+              style={{ ...styles.message, ...(isMine ? styles.messageMine : {}), position: 'relative' }}
+              onMouseEnter={() => setHoveredMsgId(msg.id)}
+              onMouseLeave={() => setHoveredMsgId(null)}
+            >
+              {showHeader && user && (
                 <div style={styles.messageHeader}>
                   <UserAvatar user={user} size={28} fontSize={11} />
                   <span style={styles.messageName}>{user.name}{user.role === 'manager' ? ' · Manager' : ''}</span>
                   <span style={styles.messageTime}>{fmtTime(msg.timestamp)}</span>
                 </div>
               )}
-              <div style={{ ...styles.messageBubble, marginLeft: showHeader ? 36 : 36 }}>
+              <div style={{ ...styles.messageBubble, marginLeft: 36, position: 'relative' }}>
                 {msg.text}
+                {canDelete && (
+                  <button
+                    onClick={() => {
+                      if (window.confirm('Delete this message?')) onDeleteMessage(msg.id);
+                    }}
+                    className="salus-btn"
+                    style={{ ...styles.messageDeleteBtn, opacity: showDelete ? 1 : 0 }}
+                    title="Delete this message"
+                    aria-label="Delete message"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
               </div>
             </div>
           );
         })}
+        {data.messages.length === 0 && (
+          <div style={styles.chatEmpty}>
+            No messages yet. Be the first to say hello.
+          </div>
+        )}
       </div>
 
       <div style={styles.chatInputRow}>
@@ -1714,7 +1895,9 @@ function Chat({ data, currentUser, onSend }) {
 // MANAGER STATS
 // ──────────────────────────────────────────────────────────────────────────────
 
-function ManagerStats({ data }) {
+const RATE_PER_SESSION = 30; // £ per class taught
+
+function ManagerStats({ data, onShowInvoices }) {
   const allCoaches = data.users.filter(u => u.role === 'coach');
   const permanentCoaches = allCoaches.filter(c => (c.coachType || 'permanent') === 'permanent');
   const coverCoaches = allCoaches.filter(c => c.coachType === 'cover');
@@ -1725,7 +1908,8 @@ function ManagerStats({ data }) {
     const coverRequested = data.coverRequests.filter(r => r.requestedBy === coach.id).length;
     const coverTaken = data.coverRequests.filter(r => r.claimedBy === coach.id).length;
     const interestExpressed = data.coverRequests.filter(r => (r.interestedCovers || []).includes(coach.id)).length;
-    return { coach, classes: myClasses.length, hours: totalHours, coverRequested, coverTaken, interestExpressed };
+    const earnings = myClasses.length * RATE_PER_SESSION;
+    return { coach, classes: myClasses.length, hours: totalHours, coverRequested, coverTaken, interestExpressed, earnings };
   };
 
   const permStats = permanentCoaches.map(computeStats).sort((a, b) => b.classes - a.classes);
@@ -1735,22 +1919,26 @@ function ManagerStats({ data }) {
   const totalHours = permStats.reduce((s, x) => s + x.hours, 0);
   const needsCover = data.classes.filter(c => c.status === 'needsCover').length;
   const covered = data.coverRequests.filter(r => r.status === 'claimed' || r.status === 'assigned').length;
+  const totalPayroll = [...permStats, ...coverStats].reduce((s, x) => s + x.earnings, 0);
 
   return (
     <div>
       <div style={styles.sectionHeader}>
         <div>
           <h2 style={styles.h2}>Team Stats · This Week</h2>
-          <p style={styles.subtitle}>Workload breakdown and cover activity</p>
+          <p style={styles.subtitle}>Workload, payments, and cover activity</p>
         </div>
+        <button onClick={onShowInvoices} className="salus-btn" style={styles.btnPrimary}>
+          <Mail size={14} /> Generate invoices
+        </button>
       </div>
 
       {/* Summary cards */}
       <div style={styles.statGrid}>
-        <StatCard icon={Activity} label="Total classes" value={totalClasses} accent="#2f4f3a" />
+        <StatCard icon={Activity} label="Total classes" value={totalClasses} accent="#5c4a38" />
         <StatCard icon={Clock} label="Total hours" value={totalHours.toFixed(1)} accent="#b85c38" />
         <StatCard icon={AlertCircle} label="Need cover" value={needsCover} accent="#c8442a" />
-        <StatCard icon={Check} label="Covered" value={covered} accent="#7a8c5c" />
+        <StatCard icon={Check} label="Total payroll" value={`£${totalPayroll.toLocaleString()}`} accent="#7a8c5c" />
       </div>
 
       {/* Permanent coach breakdown */}
@@ -1759,18 +1947,19 @@ function ManagerStats({ data }) {
         <span style={{ ...styles.coachTypeBadge, ...styles.coachTypePermanent }}>On the timetable</span>
       </h3>
       <div className="salus-stats-table" style={styles.coachStatsCard}>
-        <div style={styles.coachStatsHeader}>
+        <div style={{ ...styles.coachStatsHeader, gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr 1fr' }}>
           <div>Coach</div>
-          <div style={{ textAlign: 'right' }}>Classes</div>
+          <div style={{ textAlign: 'right' }}>Sessions</div>
           <div style={{ textAlign: 'right' }}>Hours</div>
           <div style={{ textAlign: 'right' }}>Cover asked</div>
           <div style={{ textAlign: 'right' }}>Cover taken</div>
+          <div style={{ textAlign: 'right' }}>Owed</div>
         </div>
-        {permStats.map(({ coach, classes, hours, coverRequested, coverTaken }) => {
+        {permStats.map(({ coach, classes, hours, coverRequested, coverTaken, earnings }) => {
           const maxClasses = Math.max(...permStats.map(s => s.classes), 1);
           const barWidth = (classes / maxClasses) * 100;
           return (
-            <div key={coach.id} style={styles.coachStatsRow}>
+            <div key={coach.id} style={{ ...styles.coachStatsRow, gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr 1fr' }}>
               <div style={styles.coachStatsName}>
                 <UserAvatar user={coach} size={20} fontSize={9} />
                 <div>
@@ -1784,6 +1973,7 @@ function ManagerStats({ data }) {
               <div style={styles.coachStatsValue}>{hours.toFixed(1)}h</div>
               <div style={styles.coachStatsValue}>{coverRequested}</div>
               <div style={styles.coachStatsValue}>{coverTaken}</div>
+              <div style={{ ...styles.coachStatsValue, fontWeight: 700, color: '#5c4a38' }}>£{earnings}</div>
             </div>
           );
         })}
@@ -1800,11 +1990,11 @@ function ManagerStats({ data }) {
             <div style={{ ...styles.coachStatsHeader, gridTemplateColumns: '2fr 1.5fr 1fr 1fr 1fr' }}>
               <div>Coach</div>
               <div>Qualified to teach</div>
-              <div style={{ textAlign: 'right' }}>Hours</div>
-              <div style={{ textAlign: 'right' }}>Interest shown</div>
               <div style={{ textAlign: 'right' }}>Cover taken</div>
+              <div style={{ textAlign: 'right' }}>Interest shown</div>
+              <div style={{ textAlign: 'right' }}>Owed</div>
             </div>
-            {coverStats.map(({ coach, hours, coverTaken, interestExpressed }) => (
+            {coverStats.map(({ coach, coverTaken, interestExpressed, earnings }) => (
               <div key={coach.id} style={{ ...styles.coachStatsRow, gridTemplateColumns: '2fr 1.5fr 1fr 1fr 1fr' }}>
                 <div style={styles.coachStatsName}>
                   <UserAvatar user={coach} size={20} fontSize={9} />
@@ -1815,9 +2005,9 @@ function ManagerStats({ data }) {
                 <div style={{ fontSize: 11, color: '#7a8270', lineHeight: 1.4 }}>
                   {(coach.qualifications || []).join(', ') || '—'}
                 </div>
-                <div style={styles.coachStatsValue}>{hours.toFixed(1)}h</div>
-                <div style={styles.coachStatsValue}>{interestExpressed}</div>
                 <div style={styles.coachStatsValue}>{coverTaken}</div>
+                <div style={styles.coachStatsValue}>{interestExpressed}</div>
+                <div style={{ ...styles.coachStatsValue, fontWeight: 700, color: '#5c4a38' }}>£{earnings}</div>
               </div>
             ))}
           </div>
@@ -1958,7 +2148,7 @@ function ClassDetailModal({ classObj, data, currentUser, isManager, onClose, onR
 
         <div style={styles.detailRow}>
           <span style={styles.detailLabel}>Status</span>
-          <span style={{ color: needsCover ? '#c8442a' : '#2f4f3a', fontWeight: 500 }}>
+          <span style={{ color: needsCover ? '#c8442a' : '#5c4a38', fontWeight: 500 }}>
             {needsCover ? 'Needs cover' : classObj.status === 'covered' ? 'Covered' : 'Assigned'}
           </span>
         </div>
@@ -2248,7 +2438,7 @@ const AVATAR_COLOR_PALETTE = [
   '#b85c38', '#7a8c5c', '#5b7a8c', '#c89c4a', '#4a6b3a',
   '#8c5b7a', '#a8703a', '#6b7a8c', '#8c4a5c', '#c8442a',
   '#7a6b8c', '#8c8c4a', '#4a5c8c', '#7a8c8c', '#6b5c3a',
-  '#5c7a6b', '#2f4f3a',
+  '#5c7a6b', '#5c4a38',
 ];
 
 function SettingsModal({ user, isManager, onClose, onSave }) {
@@ -2260,6 +2450,8 @@ function SettingsModal({ user, isManager, onClose, onSave }) {
   const [initials, setInitials] = useState(user.initials || '');
   const [color, setColor] = useState(user.color || '#7a8c5c');
   const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl || null);
+  const [bankAccount, setBankAccount] = useState(user.bankAccount || '');
+  const [bankSortCode, setBankSortCode] = useState(user.bankSortCode || '');
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState(null);
   const [prefs, setPrefs] = useState({ ...defaults, ...(user.emailPrefs || {}) });
@@ -2304,6 +2496,8 @@ function SettingsModal({ user, isManager, onClose, onSave }) {
     initials: initials.trim().toUpperCase().slice(0, 3) || user.initials,
     color,
     avatarUrl,
+    bankAccount: bankAccount.trim(),
+    bankSortCode: bankSortCode.trim(),
     emailPrefs: prefs,
   });
 
@@ -2391,6 +2585,45 @@ function SettingsModal({ user, isManager, onClose, onSave }) {
               {color === c && <Check size={14} color="#fff" strokeWidth={3} />}
             </button>
           ))}
+        </div>
+
+        <h2 style={{ ...styles.h2, marginTop: 30, marginBottom: 4 }}>Bank details</h2>
+        <p style={{ ...styles.subtitle, marginBottom: 16 }}>
+          {isManager
+            ? 'For your own records — coaches add their bank details so you can pay them.'
+            : 'Used for invoicing. Only the manager can see these.'}
+        </p>
+        <div style={styles.formGrid}>
+          <div>
+            <label style={styles.label}>Account number</label>
+            <input
+              type="text"
+              value={bankAccount}
+              onChange={(e) => setBankAccount(e.target.value.replace(/[^0-9]/g, '').slice(0, 8))}
+              className="salus-input"
+              style={styles.select}
+              placeholder="12345678"
+              maxLength={8}
+            />
+          </div>
+          <div>
+            <label style={styles.label}>Sort code</label>
+            <input
+              type="text"
+              value={bankSortCode}
+              onChange={(e) => {
+                let v = e.target.value.replace(/[^0-9]/g, '').slice(0, 6);
+                // Auto-format as XX-XX-XX
+                if (v.length > 4) v = v.slice(0, 2) + '-' + v.slice(2, 4) + '-' + v.slice(4);
+                else if (v.length > 2) v = v.slice(0, 2) + '-' + v.slice(2);
+                setBankSortCode(v);
+              }}
+              className="salus-input"
+              style={styles.select}
+              placeholder="12-34-56"
+              maxLength={8}
+            />
+          </div>
         </div>
 
         <h2 style={{ ...styles.h2, marginTop: 30, marginBottom: 4 }}>Email notifications</h2>
@@ -2574,6 +2807,260 @@ function PrefToggle({ label, hint, checked, onChange }) {
   );
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// INVOICES — generate printable HTML invoices for each coach
+// ──────────────────────────────────────────────────────────────────────────────
+
+function generateInvoiceHtml({ coach, sessions, rate }) {
+  const subtotal = sessions.length * rate;
+  const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  const invoiceNumber = `SAL-${Date.now().toString().slice(-6)}-${coach.initials}`;
+  const dateRange = sessions.length > 0
+    ? (() => {
+        const dates = sessions.map(s => s.date).filter(Boolean).sort();
+        return dates.length ? `${dates[0]} to ${dates[dates.length - 1]}` : 'this week';
+      })()
+    : 'this week';
+  const rowsHtml = sessions.map(s => `
+    <tr>
+      <td>${s.date || '—'}</td>
+      <td>${DAYS[s.day] || ''}</td>
+      <td>${s.time}</td>
+      <td>${s.type}</td>
+      <td>${(s.studio || '').toUpperCase()}</td>
+      <td style="text-align:right">£${rate.toFixed(2)}</td>
+    </tr>
+  `).join('');
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Invoice ${invoiceNumber} — ${coach.name}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #1a2620; max-width: 760px; margin: 40px auto; padding: 40px; background: #fff; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 30px; border-bottom: 2px solid #5c4a38; margin-bottom: 30px; }
+  .brand { display: flex; align-items: center; gap: 14px; }
+  .brand-mark { width: 48px; height: 48px; border-radius: 12px; background: #5c4a38; color: #f5f1e8; display: flex; align-items: center; justify-content: center; font-family: 'Georgia', serif; font-size: 26px; font-weight: 600; }
+  .brand-name { font-family: 'Georgia', serif; font-size: 24px; font-weight: 500; }
+  .brand-sub { font-size: 11px; color: #7a8270; text-transform: uppercase; letter-spacing: 1.5px; margin-top: 4px; }
+  .invoice-meta { text-align: right; font-size: 13px; color: #7a8270; }
+  .invoice-num { font-size: 18px; color: #5c4a38; font-weight: 700; margin-bottom: 6px; }
+  .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px; }
+  .party h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: #a59478; margin: 0 0 8px; font-weight: 600; }
+  .party-name { font-size: 16px; font-weight: 600; }
+  .party-detail { font-size: 13px; color: #5a5a4a; margin-top: 4px; line-height: 1.5; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+  th { text-align: left; padding: 12px 10px; background: #f5f1e8; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #5c4a38; border-bottom: 2px solid #5c4a38; }
+  th:last-child { text-align: right; }
+  td { padding: 10px; font-size: 13px; border-bottom: 1px solid #ebe3cf; }
+  tfoot td { font-weight: 700; font-size: 15px; padding-top: 16px; border-bottom: none; border-top: 2px solid #5c4a38; }
+  tfoot td:last-child { color: #5c4a38; font-size: 18px; }
+  .footer-note { font-size: 12px; color: #7a8270; margin-top: 40px; padding-top: 20px; border-top: 1px solid #ebe3cf; line-height: 1.6; }
+  .bank-details-warn { background: #fff5e5; border: 1px solid #ffc88a; padding: 12px 14px; border-radius: 8px; margin-bottom: 20px; font-size: 13px; color: #8c5b1a; }
+  @media print {
+    body { margin: 0; padding: 20px; }
+    @page { margin: 1.5cm; }
+  }
+  .print-btn { position: fixed; top: 20px; right: 20px; padding: 12px 20px; background: #5c4a38; color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  @media print { .print-btn { display: none; } }
+</style>
+</head>
+<body>
+<button class="print-btn" onclick="window.print()">🖨 Print / Save as PDF</button>
+<div class="header">
+  <div class="brand">
+    <div class="brand-mark">S</div>
+    <div>
+      <div class="brand-name">Salus House</div>
+      <div class="brand-sub">17 Foots Cray High St, Sidcup DA14 5HJ</div>
+    </div>
+  </div>
+  <div class="invoice-meta">
+    <div class="invoice-num">INVOICE ${invoiceNumber}</div>
+    <div>Issued: ${today}</div>
+    <div>Period: ${dateRange}</div>
+  </div>
+</div>
+${(!coach.bankAccount || !coach.bankSortCode) ? `<div class="bank-details-warn">⚠ ${coach.name} has not added bank details to their profile yet. Ask them to fill these in via Settings.</div>` : ''}
+<div class="parties">
+  <div class="party">
+    <h3>From</h3>
+    <div class="party-name">Salus House</div>
+    <div class="party-detail">17 Foots Cray High St<br>Foots Cray, Sidcup DA14 5HJ<br>reception@salus.house</div>
+  </div>
+  <div class="party">
+    <h3>Pay to</h3>
+    <div class="party-name">${coach.name}</div>
+    <div class="party-detail">
+      ${coach.email || ''}<br>
+      ${coach.bankAccount ? `Account: <strong>${coach.bankAccount}</strong>` : '<em style="color:#c8442a">No account number on file</em>'}<br>
+      ${coach.bankSortCode ? `Sort code: <strong>${coach.bankSortCode}</strong>` : '<em style="color:#c8442a">No sort code on file</em>'}
+    </div>
+  </div>
+</div>
+<table>
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th>Day</th>
+      <th>Time</th>
+      <th>Class</th>
+      <th>Studio</th>
+      <th>Fee</th>
+    </tr>
+  </thead>
+  <tbody>${rowsHtml || '<tr><td colspan="6" style="text-align:center;padding:30px;color:#a59478">No sessions taught in this period.</td></tr>'}</tbody>
+  <tfoot>
+    <tr>
+      <td colspan="5" style="text-align:right">Total (${sessions.length} session${sessions.length === 1 ? '' : 's'} × £${rate.toFixed(2)})</td>
+      <td style="text-align:right">£${subtotal.toFixed(2)}</td>
+    </tr>
+  </tfoot>
+</table>
+<div class="footer-note">
+  Payment terms: 7 days from issue. Please pay by bank transfer to the account above.<br>
+  Questions about this invoice? Contact reception@salus.house.
+</div>
+</body>
+</html>`;
+}
+
+function downloadInvoice({ coach, sessions, rate }) {
+  const html = generateInvoiceHtml({ coach, sessions, rate });
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, '_blank');
+  if (!win) {
+    // Fallback if popup blocked: download as file
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Invoice-${coach.name.replace(/\s+/g, '-')}-${Date.now()}.html`;
+    a.click();
+  }
+  // URL will be revoked when the window closes; if not, GC eventually
+}
+
+function InvoicesModal({ data, onClose }) {
+  const coaches = data.users.filter(u => u.role === 'coach');
+  const rate = RATE_PER_SESSION;
+
+  const buildSessions = (coach) => data.classes
+    .filter(c => c.coachId === coach.id)
+    .sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.time.localeCompare(b.time));
+
+  const total = coaches.reduce((s, c) => s + buildSessions(c).length * rate, 0);
+
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ padding: 24 }}>
+        <div style={styles.modalDayBadge}>Invoices · £{rate}/session</div>
+        <h2 style={{ ...styles.h2, marginTop: 8, marginBottom: 4 }}>Coach payments this week</h2>
+        <p style={{ ...styles.subtitle, marginBottom: 20 }}>
+          Download a printable invoice for each coach. Open the file, then use your browser's <strong>Print → Save as PDF</strong> option.
+        </p>
+
+        <div style={styles.invoiceList}>
+          {coaches.map(coach => {
+            const sessions = buildSessions(coach);
+            const earnings = sessions.length * rate;
+            const hasBank = !!(coach.bankAccount && coach.bankSortCode);
+            return (
+              <div key={coach.id} style={styles.invoiceRow}>
+                <UserAvatar user={coach} size={36} fontSize={13} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={styles.invoiceName}>
+                    {coach.name}
+                    {!hasBank && <span style={styles.invoiceWarn}>· no bank details</span>}
+                  </div>
+                  <div style={styles.invoiceDetail}>
+                    {sessions.length} session{sessions.length === 1 ? '' : 's'} · £{earnings}
+                  </div>
+                </div>
+                <button
+                  onClick={() => downloadInvoice({ coach, sessions, rate })}
+                  className="salus-btn"
+                  style={sessions.length === 0 ? styles.btnGhost : styles.btnPrimary}
+                  disabled={sessions.length === 0}
+                >
+                  {sessions.length === 0 ? 'No sessions' : 'Open invoice'}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={styles.invoiceTotal}>
+          <span>Total payroll this week</span>
+          <span style={{ fontSize: 22, fontWeight: 700, color: '#5c4a38' }}>£{total.toLocaleString()}</span>
+        </div>
+
+        <div style={styles.infoBox}>
+          <Mail size={14} style={{ marginTop: 1, flexShrink: 0 }} />
+          <span>
+            Coaches set their bank details in <strong>Settings → Profile → Bank details</strong>.
+            If any coach is missing details, the invoice will still generate but will flag the missing fields in red.
+          </span>
+        </div>
+
+        <div style={{ marginTop: 20 }}>
+          <button onClick={onClose} className="salus-btn" style={styles.btnGhost}>Close</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function TimeOffModal({ onClose }) {
+  const upcoming = getUpcomingBankHolidays(12);
+  const formatDate = (iso) => {
+    const d = new Date(iso);
+    return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
+  };
+  const daysUntil = (iso) => {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const d = new Date(iso); d.setHours(0, 0, 0, 0);
+    return Math.round((d - today) / (1000 * 60 * 60 * 24));
+  };
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ padding: 24 }}>
+        <div style={styles.modalDayBadge}>Time off</div>
+        <h2 style={{ ...styles.h2, marginTop: 8, marginBottom: 4 }}>UK Bank Holidays</h2>
+        <p style={{ ...styles.subtitle, marginBottom: 20 }}>
+          Upcoming public holidays for the next year. The studio is closed on these days.
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {upcoming.map(h => {
+            const d = daysUntil(h.date);
+            return (
+              <div key={h.date} style={styles.holidayRow}>
+                <div style={{ flex: 1 }}>
+                  <div style={styles.holidayName}>{h.name}</div>
+                  <div style={styles.holidayDate}>{formatDate(h.date)}</div>
+                </div>
+                <div style={styles.holidayCountdown}>
+                  {d === 0 ? 'Today' : d === 1 ? 'Tomorrow' : `in ${d} days`}
+                </div>
+              </div>
+            );
+          })}
+          {upcoming.length === 0 && (
+            <div style={styles.holidayEmpty}>No upcoming bank holidays in the next year.</div>
+          )}
+        </div>
+        <div style={styles.infoBox}>
+          <Calendar size={14} style={{ marginTop: 1, flexShrink: 0 }} />
+          <span>Coach annual leave tracking is coming soon. For now, mark scheduled absences in the team chat.</span>
+        </div>
+        <div style={{ marginTop: 20 }}>
+          <button onClick={onClose} className="salus-btn" style={styles.btnPrimary}>Close</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function ConfirmModal({ title, message, confirmLabel, onConfirm, onClose }) {
   return (
     <Modal onClose={onClose}>
@@ -2622,12 +3109,56 @@ const styles = {
   },
   headerLeft: { display: 'flex', alignItems: 'center', gap: 16 },
   headerRight: { display: 'flex', alignItems: 'center', gap: 12 },
+  quoteBar: {
+    background: 'linear-gradient(135deg, rgba(92, 74, 56, 0.04) 0%, rgba(232, 224, 204, 0.6) 100%)',
+    borderTop: '1px solid #ebe3cf', borderBottom: '1px solid #ebe3cf',
+    padding: '12px 24px', textAlign: 'center',
+  },
+  quoteText: {
+    fontFamily: '"Fraunces", serif', fontSize: 14, fontStyle: 'italic',
+    color: '#5c4a38', lineHeight: 1.5, maxWidth: 700, margin: '0 auto',
+  },
+  quoteAttr: {
+    fontSize: 10, letterSpacing: 1, textTransform: 'uppercase',
+    color: '#a59478', marginTop: 4, fontWeight: 500,
+  },
+  holidayRow: {
+    display: 'flex', alignItems: 'center', gap: 12,
+    padding: '14px 16px', background: '#fdfbf5',
+    borderRadius: 10, border: '1px solid #ebe3cf',
+  },
+  holidayName: { fontSize: 14, fontWeight: 600, color: '#1a2620' },
+  holidayDate: { fontSize: 12, color: '#7a8270', marginTop: 2 },
+  holidayCountdown: {
+    fontSize: 12, color: '#5c4a38', fontWeight: 600,
+    background: '#f0e6d0', padding: '4px 10px', borderRadius: 12,
+  },
+  holidayEmpty: {
+    padding: 20, textAlign: 'center', color: '#a8a895',
+    fontSize: 13, fontStyle: 'italic',
+  },
+  invoiceList: {
+    display: 'flex', flexDirection: 'column', gap: 8,
+    marginBottom: 16,
+  },
+  invoiceRow: {
+    display: 'flex', alignItems: 'center', gap: 14,
+    padding: '12px 14px', background: '#fdfbf5',
+    borderRadius: 10, border: '1px solid #ebe3cf',
+  },
+  invoiceName: { fontSize: 14, fontWeight: 600, color: '#1a2620' },
+  invoiceDetail: { fontSize: 12, color: '#7a8270', marginTop: 2 },
+  invoiceWarn: { fontSize: 11, color: '#c8442a', fontWeight: 500, marginLeft: 6 },
+  invoiceTotal: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    padding: '14px 16px', background: '#f0e6d0', borderRadius: 10,
+    marginTop: 12, marginBottom: 16,
+    fontSize: 13, fontWeight: 600, color: '#5c4a38',
+  },
   logo: { display: 'flex', alignItems: 'center', gap: 12 },
   logoMark: {
     width: 38, height: 38, borderRadius: 10,
-    background: '#2f4f3a', color: '#f5f1e8',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontFamily: '"Fraunces", serif', fontSize: 22, fontWeight: 600,
+    objectFit: 'contain', background: '#5c4a38', padding: 4,
   },
   logoText: { fontFamily: '"Fraunces", serif', fontSize: 20, fontWeight: 500, lineHeight: 1.1, color: '#1a2620' },
   logoSub: { fontSize: 10, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 1.2, marginTop: 4 },
@@ -2657,7 +3188,7 @@ const styles = {
     fontWeight: 500,
   },
   navTabActive: {
-    color: '#2f4f3a', borderBottom: '2px solid #2f4f3a',
+    color: '#5c4a38', borderBottom: '2px solid #5c4a38',
   },
   navBadge: {
     background: '#c8442a', color: '#fff', fontSize: 10, fontWeight: 600,
@@ -2687,7 +3218,7 @@ const styles = {
     fontWeight: 500,
   },
   filterPillActive: {
-    background: '#2f4f3a', color: '#fff', borderColor: '#2f4f3a',
+    background: '#5c4a38', color: '#fff', borderColor: '#5c4a38',
   },
 
   // Studio toggle (segmented control)
@@ -2702,8 +3233,8 @@ const styles = {
     color: '#7a8270', fontWeight: 500,
   },
   studioPillActive: {
-    background: '#fffdf7', color: '#2f4f3a', fontWeight: 600,
-    boxShadow: '0 1px 2px rgba(47, 79, 58, 0.08)',
+    background: '#fffdf7', color: '#5c4a38', fontWeight: 600,
+    boxShadow: '0 1px 2px rgba(92, 74, 56, 0.08)',
   },
 
   // Studio tag on class cards
@@ -2824,6 +3355,27 @@ const styles = {
   },
   chatHeader: {
     padding: 22, borderBottom: '1px solid #e8e0cc',
+    display: 'flex', alignItems: 'flex-start', gap: 12,
+  },
+  chatClearAllBtn: {
+    display: 'inline-flex', alignItems: 'center', gap: 6,
+    padding: '8px 12px', borderRadius: 8,
+    background: 'transparent', color: '#c8442a', fontSize: 12,
+    fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
+    border: '1px solid #e8c5b8',
+  },
+  chatEmpty: {
+    textAlign: 'center', color: '#a8a895', fontSize: 13,
+    padding: '40px 20px', fontStyle: 'italic',
+  },
+  messageDeleteBtn: {
+    position: 'absolute', top: -4, right: -6,
+    width: 22, height: 22, borderRadius: '50%',
+    background: '#fffdf7', color: '#7a8270', border: '1px solid #e8e0cc',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    cursor: 'pointer', padding: 0, fontFamily: 'inherit',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+    transition: 'opacity 0.15s',
   },
   messagesList: {
     flex: 1, overflowY: 'auto', padding: '18px 22px',
@@ -2851,7 +3403,7 @@ const styles = {
   },
   sendBtn: {
     width: 42, height: 42, borderRadius: '50%', border: 'none',
-    background: '#2f4f3a', color: '#fff',
+    background: '#5c4a38', color: '#fff',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
   },
 
@@ -2957,7 +3509,7 @@ const styles = {
   detailLabel: { color: '#7a8270', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.8 },
   detailValue: { display: 'flex', alignItems: 'center', gap: 8 },
   youBadge: {
-    background: '#2f4f3a', color: '#fff', fontSize: 10, fontWeight: 700,
+    background: '#5c4a38', color: '#fff', fontSize: 10, fontWeight: 700,
     padding: '2px 6px', borderRadius: 4, textTransform: 'uppercase', letterSpacing: 0.5,
   },
 
@@ -2982,14 +3534,14 @@ const styles = {
   btnPrimary: {
     display: 'flex', alignItems: 'center', gap: 6,
     padding: '10px 18px', borderRadius: 8, border: 'none',
-    background: '#2f4f3a', color: '#fff', fontFamily: 'inherit',
+    background: '#5c4a38', color: '#fff', fontFamily: 'inherit',
     fontSize: 13, fontWeight: 600, letterSpacing: 0.2,
   },
   btnSecondary: {
     display: 'flex', alignItems: 'center', gap: 6,
     padding: '10px 18px', borderRadius: 8,
-    border: '1px solid #2f4f3a', background: 'transparent',
-    color: '#2f4f3a', fontFamily: 'inherit', fontSize: 13, fontWeight: 500,
+    border: '1px solid #5c4a38', background: 'transparent',
+    color: '#5c4a38', fontFamily: 'inherit', fontSize: 13, fontWeight: 500,
   },
   btnGhost: {
     display: 'flex', alignItems: 'center', gap: 6,
@@ -3066,9 +3618,7 @@ const styles = {
   },
   loginLogoMark: {
     width: 44, height: 44, borderRadius: 12,
-    background: '#2f4f3a', color: '#f5f1e8',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontFamily: '"Fraunces", serif', fontSize: 26, fontWeight: 600,
+    objectFit: 'contain', background: '#5c4a38', padding: 5,
   },
   loginTitle: {
     fontFamily: '"Fraunces", serif', fontSize: 28, fontWeight: 500,
@@ -3099,12 +3649,12 @@ const styles = {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
   },
   checkboxActive: {
-    background: '#2f4f3a', borderColor: '#2f4f3a', color: '#fff',
+    background: '#5c4a38', borderColor: '#5c4a38', color: '#fff',
   },
-  termsLink: { color: '#2f4f3a', textDecoration: 'underline', cursor: 'pointer' },
+  termsLink: { color: '#5c4a38', textDecoration: 'underline', cursor: 'pointer' },
   loginBtn: {
     width: '100%', padding: '12px 18px', borderRadius: 8, border: 'none',
-    background: '#2f4f3a', color: '#fff', fontFamily: 'inherit',
+    background: '#5c4a38', color: '#fff', fontFamily: 'inherit',
     fontSize: 14, fontWeight: 600, cursor: 'pointer', letterSpacing: 0.2,
     transition: 'all 0.18s ease',
   },
@@ -3121,8 +3671,8 @@ const styles = {
     color: '#7a8270', fontWeight: 500, cursor: 'pointer',
   },
   modeToggleBtnActive: {
-    background: '#fffdf7', color: '#2f4f3a', fontWeight: 600,
-    boxShadow: '0 1px 2px rgba(47, 79, 58, 0.08)',
+    background: '#fffdf7', color: '#5c4a38', fontWeight: 600,
+    boxShadow: '0 1px 2px rgba(92, 74, 56, 0.08)',
   },
 
   // Profile editing in settings
@@ -3134,7 +3684,7 @@ const styles = {
   },
   avatarUploadBtn: {
     display: 'inline-block', padding: '8px 14px', borderRadius: 8,
-    background: '#2f4f3a', color: '#fff', fontSize: 12,
+    background: '#5c4a38', color: '#fff', fontSize: 12,
     fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
     border: 'none',
   },
@@ -3191,14 +3741,14 @@ const styles = {
   },
   assignChipBtn: {
     padding: '4px 10px', borderRadius: 10, border: 'none',
-    background: '#2f4f3a', color: '#fff', fontFamily: 'inherit',
+    background: '#5c4a38', color: '#fff', fontFamily: 'inherit',
     fontSize: 11, fontWeight: 600, marginLeft: 4,
   },
   chipTypeTag: {
     fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5,
     padding: '2px 5px', borderRadius: 3,
   },
-  chipTypePermanent: { background: '#dce4df', color: '#2f4f3a' },
+  chipTypePermanent: { background: '#dce4df', color: '#5c4a38' },
   chipTypeCover: { background: '#f0e3cc', color: '#8c5b3a' },
 
   // Personalized status bar at top of main content
@@ -3206,7 +3756,7 @@ const styles = {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
     gap: 16, padding: '16px 22px',
     background: '#fffdf7',
-    borderLeft: '4px solid #2f4f3a',
+    borderLeft: '4px solid #5c4a38',
     borderRadius: 12,
     border: '1px solid #e8e0cc',
     borderLeftWidth: 4,
@@ -3223,7 +3773,7 @@ const styles = {
   },
   statusBarBtn: {
     padding: '8px 16px', borderRadius: 8, border: 'none',
-    background: '#2f4f3a', color: '#fff', fontFamily: 'inherit',
+    background: '#5c4a38', color: '#fff', fontFamily: 'inherit',
     fontSize: 12, fontWeight: 600, letterSpacing: 0.2,
     flexShrink: 0,
   },
@@ -3242,7 +3792,7 @@ const styles = {
     minWidth: 64,
   },
   dayPillActive: {
-    background: '#2f4f3a', borderColor: '#2f4f3a', color: '#fff',
+    background: '#5c4a38', borderColor: '#5c4a38', color: '#fff',
   },
   dayPillDay: {
     fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
@@ -3302,7 +3852,7 @@ const styles = {
     textTransform: 'uppercase', letterSpacing: 0.6,
     padding: '2px 6px', borderRadius: 3, marginLeft: 6,
   },
-  coachTypePermanent: { background: '#dce4df', color: '#2f4f3a' },
+  coachTypePermanent: { background: '#dce4df', color: '#5c4a38' },
   coachTypeCover: { background: '#f0e3cc', color: '#8c5b3a' },
 
   // Demo quick sign-in section on login screen
