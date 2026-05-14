@@ -154,9 +154,9 @@ export default function SalusStaff() {
   }, []);
 
   // Fetch all data once we have a session
-  const reloadData = async () => {
+  const reloadData = async (silent = false) => {
     if (!session) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes] = await Promise.all([
         supabase.from('profiles').select('*'),
@@ -184,7 +184,7 @@ export default function SalusStaff() {
     } catch (e) {
       console.error('Failed to load data:', e);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -202,13 +202,14 @@ export default function SalusStaff() {
   // This is what makes a new message or cover request show up on everyone's screen instantly.
   useEffect(() => {
     if (!session) return;
+    const silentReload = () => reloadData(true);
     const channel = supabase
       .channel('salus-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => reloadData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'classes' }, () => reloadData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'cover_requests' }, () => reloadData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'swap_requests' }, () => reloadData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => reloadData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'classes' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cover_requests' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'swap_requests' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, silentReload)
       .subscribe();
     return () => { supabase.removeChannel(channel); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
