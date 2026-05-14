@@ -48,6 +48,7 @@ export const coverReqFromDb = (row) => ({
   status: row.status,
   claimedBy: row.claimed_by,
   interestedCovers: row.interested_covers || [],
+  timestamp: row.created_at ? new Date(row.created_at).getTime() : 0,
 });
 
 export const swapReqFromDb = (row) => ({
