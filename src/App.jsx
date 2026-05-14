@@ -229,8 +229,8 @@ export default function SalusStaff() {
     return true;
   };
 
-  // Signup handler — create auth user + profile in one shot.
-  // New users default to 'coach' / 'permanent'. Manager can change later.
+  // Signup handler — auth.signUp passes name in metadata; a database trigger creates the profile.
+  // This is more reliable than client-side INSERT (no RLS timing issues).
   const handleSignup = async (email, password, fullName) => {
     setAuthError(null);
     const cleanEmail = email.trim().toLowerCase();
@@ -240,38 +240,15 @@ export default function SalusStaff() {
       return false;
     }
 
-    const { data: signupData, error: signupErr } = await supabase.auth.signUp({
+    const { error: signupErr } = await supabase.auth.signUp({
       email: cleanEmail,
       password,
+      options: {
+        data: { name: cleanName },
+      },
     });
     if (signupErr) {
       setAuthError(signupErr.message || 'Could not create account.');
-      return false;
-    }
-
-    const newUserId = signupData.user?.id;
-    if (!newUserId) {
-      setAuthError('Account created but no user ID returned. Check your email for confirmation, or contact your manager.');
-      return false;
-    }
-
-    // Generate initials and pick a colour from a palette
-    const initials = cleanName.split(' ').slice(0, 2).map(p => p[0]?.toUpperCase() || '').join('');
-    const palette = ['#b85c38', '#7a8c5c', '#5b7a8c', '#c89c4a', '#4a6b3a', '#8c5b7a', '#a8703a', '#6b7a8c', '#8c4a5c', '#7a6b8c', '#8c8c4a', '#4a5c8c', '#7a8c8c', '#6b5c3a', '#5c7a6b'];
-    const color = palette[Math.floor(Math.random() * palette.length)];
-
-    const { error: profErr } = await supabase.from('profiles').insert({
-      id: newUserId,
-      name: cleanName,
-      role: 'coach',
-      coach_type: 'permanent',
-      color,
-      initials: initials || '?',
-      email_prefs: { assignedCover: true, coverPosted: false, classReminder24h: true, weeklySummary: false },
-      terms_accepted_at: new Date().toISOString(),
-    });
-    if (profErr) {
-      setAuthError('Account created but profile setup failed: ' + (profErr.message || 'unknown error'));
       return false;
     }
     return true;
@@ -340,6 +317,10 @@ export default function SalusStaff() {
   const updateUserSettings = async (userId, settings) => {
     const patch = {};
     if (settings.emailPrefs !== undefined) patch.email_prefs = settings.emailPrefs;
+    if (settings.name !== undefined) patch.name = settings.name;
+    if (settings.initials !== undefined) patch.initials = settings.initials;
+    if (settings.color !== undefined) patch.color = settings.color;
+    if (settings.avatarUrl !== undefined) patch.avatar_url = settings.avatarUrl;
     if (Object.keys(patch).length === 0) return;
     const { error } = await supabase.from('profiles').update(patch).eq('id', userId);
     if (error) { console.error('updateUserSettings', error); return; }
@@ -569,9 +550,7 @@ export default function SalusStaff() {
           )}
 
           <div style={styles.userSelector}>
-            <div style={{ ...styles.miniAvatar, width: 28, height: 28, fontSize: 11, background: currentUser.color }}>
-              {currentUser.initials}
-            </div>
+            <UserAvatar user={currentUser} size={28} fontSize={11} />
             {!isMobile && (
               <div>
                 <div style={styles.userSelectorName}>{currentUser.name.split(' ')[0]}</div>
@@ -727,6 +706,36 @@ export default function SalusStaff() {
 // ──────────────────────────────────────────────────────────────────────────────
 // NAV TAB
 // ──────────────────────────────────────────────────────────────────────────────
+
+// ──────────────────────────────────────────────────────────────────────────────
+// USER AVATAR — shows photo if uploaded, falls back to coloured circle with initials
+// ──────────────────────────────────────────────────────────────────────────────
+
+function UserAvatar({ user, size = 24, fontSize = 10 }) {
+  if (!user) return null;
+  if (user.avatarUrl) {
+    return (
+      <img
+        src={user.avatarUrl}
+        alt={user.name}
+        style={{
+          width: size, height: size, borderRadius: '50%',
+          objectFit: 'cover', flexShrink: 0, display: 'block',
+        }}
+      />
+    );
+  }
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: '50%',
+      background: user.color || '#888', color: '#fff',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize, fontWeight: 700, flexShrink: 0,
+    }}>
+      {user.initials}
+    </div>
+  );
+}
 
 function NavTab({ icon: Icon, label, active, onClick, badge, isMobile }) {
   // Shorten labels on mobile
@@ -991,9 +1000,7 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
             <div style={styles.mobileCardMid}>
               <div style={styles.mobileCardType}>{cls.type}</div>
               <div style={styles.mobileCardMeta}>
-                <div style={{ ...styles.miniAvatar, background: coach?.color || '#ccc', width: 18, height: 18, fontSize: 8 }}>
-                  {coach?.initials}
-                </div>
+                {coach && <UserAvatar user={coach} size={18} fontSize={8} />}
                 <span style={styles.mobileCardCoach}>{coach?.name || 'Unassigned'}</span>
                 <span style={styles.mobileCardStudio}>· {STUDIOS[cls.studio]?.short}</span>
               </div>
@@ -1016,9 +1023,7 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
             </div>
             <div style={styles.classType}>{cls.type}</div>
             <div style={styles.classCoach}>
-              <div style={{ ...styles.miniAvatar, background: coach?.color || '#ccc' }}>
-                {coach?.initials}
-              </div>
+              {coach && <UserAvatar user={coach} size={20} fontSize={9} />}
               <span style={styles.classCoachName}>
                 {coach?.name?.split(' ')[0] || 'Unassigned'}
               </span>
@@ -1356,7 +1361,7 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
                         <UrgencyBadge urgency={urgency} />
                         <div style={styles.coverCardMeta}>
-                          <div style={{ ...styles.miniAvatar, background: requester.color }}>{requester.initials}</div>
+                          <UserAvatar user={requester} size={20} fontSize={9} />
                           <div>
                             <div style={styles.coverCardRequester}>{requester.name.split(' ')[0]}</div>
                             <div style={styles.coverCardTime}>{fmtTime(req.timestamp)}</div>
@@ -1455,7 +1460,7 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
                         <UrgencyBadge urgency={urgency} />
                         <div style={styles.coverCardMeta}>
-                          <div style={{ ...styles.miniAvatar, background: requester.color }}>{requester.initials}</div>
+                          <UserAvatar user={requester} size={20} fontSize={9} />
                           <div>
                             <div style={styles.coverCardRequester}>{requester.name.split(' ')[0]}</div>
                             <div style={styles.coverCardTime}>{fmtTime(req.timestamp)}</div>
@@ -1479,7 +1484,7 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
                             const isCoverCv = cv.coachType === 'cover';
                             return (
                               <div key={cid} style={styles.interestedChip}>
-                                <div style={{ ...styles.miniAvatar, background: cv.color, width: 22, height: 22, fontSize: 9 }}>{cv.initials}</div>
+                                <UserAvatar user={cv} size={22} fontSize={9} />
                                 <span>{cv.name.split(' ')[0]}</span>
                                 <span style={{ ...styles.chipTypeTag, ...(isCoverCv ? styles.chipTypeCover : styles.chipTypePermanent) }}>
                                   {isCoverCv ? 'Cover' : 'Perm'}
@@ -1637,9 +1642,7 @@ function Chat({ data, currentUser, onSend }) {
             <div key={msg.id} style={{ ...styles.message, ...(isMine ? styles.messageMine : {}) }}>
               {showHeader && (
                 <div style={styles.messageHeader}>
-                  <div style={{ ...styles.miniAvatar, background: user.color, width: 28, height: 28, fontSize: 11 }}>
-                    {user.initials}
-                  </div>
+                  <UserAvatar user={user} size={28} fontSize={11} />
                   <span style={styles.messageName}>{user.name}{user.role === 'manager' ? ' · Manager' : ''}</span>
                   <span style={styles.messageTime}>{fmtTime(msg.timestamp)}</span>
                 </div>
@@ -1732,7 +1735,7 @@ function ManagerStats({ data }) {
           return (
             <div key={coach.id} style={styles.coachStatsRow}>
               <div style={styles.coachStatsName}>
-                <div style={{ ...styles.miniAvatar, background: coach.color }}>{coach.initials}</div>
+                <UserAvatar user={coach} size={20} fontSize={9} />
                 <div>
                   <div style={{ fontWeight: 500 }}>{coach.name}</div>
                   <div style={styles.barWrap}>
@@ -1767,7 +1770,7 @@ function ManagerStats({ data }) {
             {coverStats.map(({ coach, hours, coverTaken, interestExpressed }) => (
               <div key={coach.id} style={{ ...styles.coachStatsRow, gridTemplateColumns: '2fr 1.5fr 1fr 1fr 1fr' }}>
                 <div style={styles.coachStatsName}>
-                  <div style={{ ...styles.miniAvatar, background: coach.color }}>{coach.initials}</div>
+                  <UserAvatar user={coach} size={20} fontSize={9} />
                   <div>
                     <div style={{ fontWeight: 500 }}>{coach.name}</div>
                   </div>
@@ -1900,7 +1903,7 @@ function ClassDetailModal({ classObj, data, currentUser, isManager, onClose, onR
         <div style={styles.detailRow}>
           <span style={styles.detailLabel}>Coach</span>
           <div style={styles.detailValue}>
-            <div style={{ ...styles.miniAvatar, background: coach.color }}>{coach.initials}</div>
+            <UserAvatar user={coach} size={20} fontSize={9} />
             <span>{coach.name}</span>
             {isMine && <span style={styles.youBadge}>You</span>}
           </div>
@@ -2037,7 +2040,7 @@ function ManageCoverModal({ request, data, onClose, onAssign, onPost, onDecline 
         <div style={styles.detailRow}>
           <span style={styles.detailLabel}>Requested by</span>
           <div style={styles.detailValue}>
-            <div style={{ ...styles.miniAvatar, background: requester.color }}>{requester.initials}</div>
+            <UserAvatar user={requester} size={20} fontSize={9} />
             <span>{requester.name}</span>
           </div>
         </div>
@@ -2200,16 +2203,71 @@ function EditClassModal({ classObj, data, onClose, onSave }) {
   );
 }
 
+const AVATAR_COLOR_PALETTE = [
+  '#b85c38', '#7a8c5c', '#5b7a8c', '#c89c4a', '#4a6b3a',
+  '#8c5b7a', '#a8703a', '#6b7a8c', '#8c4a5c', '#c8442a',
+  '#7a6b8c', '#8c8c4a', '#4a5c8c', '#7a8c8c', '#6b5c3a',
+  '#5c7a6b', '#2f4f3a',
+];
+
 function SettingsModal({ user, isManager, onClose, onSave }) {
   const isCoverCoach = user.coachType === 'cover';
   const defaults = isManager ? DEFAULT_MANAGER_PREFS : isCoverCoach ? DEFAULT_COVER_PREFS : DEFAULT_COACH_PREFS;
 
   const [email, setEmail] = useState(user.email || '');
+  const [name, setName] = useState(user.name || '');
+  const [initials, setInitials] = useState(user.initials || '');
+  const [color, setColor] = useState(user.color || '#7a8c5c');
+  const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl || null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState(null);
   const [prefs, setPrefs] = useState({ ...defaults, ...(user.emailPrefs || {}) });
 
   const togglePref = (key) => setPrefs({ ...prefs, [key]: !prefs[key] });
 
-  const handleSave = () => onSave({ email, emailPrefs: prefs });
+  const handleAvatarUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError('Photo must be under 5MB');
+      return;
+    }
+    setUploadError(null);
+    setUploading(true);
+    try {
+      const ext = file.name.split('.').pop() || 'jpg';
+      const path = `${user.id}/avatar-${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage.from('avatars').upload(path, file, {
+        cacheControl: '3600',
+        upsert: true,
+        contentType: file.type,
+      });
+      if (upErr) throw upErr;
+      const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path);
+      setAvatarUrl(publicUrl);
+    } catch (err) {
+      console.error('avatar upload', err);
+      setUploadError(err.message || 'Upload failed. Check that the avatars storage bucket exists.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleRemoveAvatar = () => {
+    setAvatarUrl(null);
+  };
+
+  const handleSave = () => onSave({
+    email,
+    name: name.trim() || user.name,
+    initials: initials.trim().toUpperCase().slice(0, 3) || user.initials,
+    color,
+    avatarUrl,
+    emailPrefs: prefs,
+  });
+
+  // Preview user object for the avatar preview
+  const previewUser = { ...user, name, initials, color, avatarUrl };
 
   return (
     <Modal onClose={onClose}>
@@ -2218,14 +2276,90 @@ function SettingsModal({ user, isManager, onClose, onSave }) {
           Settings · {user.name}
           {isCoverCoach && <span style={{ ...styles.coachTypeBadge, ...styles.coachTypeCover, marginLeft: 8 }}>Cover coach</span>}
         </div>
-        <h2 style={{ ...styles.h2, marginTop: 8, marginBottom: 4 }}>Email notifications</h2>
-        <p style={{ ...styles.subtitle, marginBottom: 24 }}>
-          {isCoverCoach
-            ? "We'll email you when cover opportunities open up."
-            : 'Choose when we should email you. Settings save instantly.'}
+
+        <h2 style={{ ...styles.h2, marginTop: 8, marginBottom: 4 }}>Profile</h2>
+        <p style={{ ...styles.subtitle, marginBottom: 20 }}>
+          How you appear across the team.
         </p>
 
-        <div style={{ marginBottom: 24 }}>
+        {/* Avatar preview + upload */}
+        <div style={styles.avatarRow}>
+          <UserAvatar user={previewUser} size={64} fontSize={22} />
+          <div style={{ flex: 1 }}>
+            <label htmlFor="avatar-upload" className="salus-btn" style={styles.avatarUploadBtn}>
+              {uploading ? 'Uploading…' : (avatarUrl ? 'Change photo' : 'Upload photo')}
+            </label>
+            <input
+              id="avatar-upload"
+              type="file"
+              accept="image/*"
+              onChange={handleAvatarUpload}
+              style={{ display: 'none' }}
+              disabled={uploading}
+            />
+            {avatarUrl && (
+              <button onClick={handleRemoveAvatar} className="salus-btn" style={styles.avatarRemoveBtn}>
+                Remove
+              </button>
+            )}
+            <div style={styles.avatarHint}>JPEG or PNG · max 5MB</div>
+            {uploadError && <div style={{ ...styles.loginError, marginTop: 8 }}>{uploadError}</div>}
+          </div>
+        </div>
+
+        <div style={styles.formGrid}>
+          <div>
+            <label style={styles.label}>Full name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="salus-input"
+              style={styles.select}
+            />
+          </div>
+          <div>
+            <label style={styles.label}>Initials</label>
+            <input
+              type="text"
+              value={initials}
+              onChange={(e) => setInitials(e.target.value.toUpperCase().slice(0, 3))}
+              className="salus-input"
+              style={styles.select}
+              maxLength={3}
+              placeholder="e.g. TO"
+            />
+          </div>
+        </div>
+
+        <label style={styles.label}>Profile colour</label>
+        <div style={styles.colorPalette}>
+          {AVATAR_COLOR_PALETTE.map(c => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setColor(c)}
+              className="salus-btn"
+              style={{
+                ...styles.colorSwatch,
+                background: c,
+                ...(color === c ? styles.colorSwatchActive : {}),
+              }}
+              aria-label={`Pick colour ${c}`}
+            >
+              {color === c && <Check size={14} color="#fff" strokeWidth={3} />}
+            </button>
+          ))}
+        </div>
+
+        <h2 style={{ ...styles.h2, marginTop: 30, marginBottom: 4 }}>Email notifications</h2>
+        <p style={{ ...styles.subtitle, marginBottom: 20 }}>
+          {isCoverCoach
+            ? "We'll email you when cover opportunities open up."
+            : 'Choose when we should email you.'}
+        </p>
+
+        <div style={{ marginBottom: 16 }}>
           <label style={styles.label}>Your email</label>
           <input
             type="email"
@@ -2948,6 +3082,43 @@ const styles = {
   modeToggleBtnActive: {
     background: '#fffdf7', color: '#2f4f3a', fontWeight: 600,
     boxShadow: '0 1px 2px rgba(47, 79, 58, 0.08)',
+  },
+
+  // Profile editing in settings
+  avatarRow: {
+    display: 'flex', alignItems: 'center', gap: 18,
+    padding: '12px 0 20px',
+    borderBottom: '1px solid #f0eee4',
+    marginBottom: 20,
+  },
+  avatarUploadBtn: {
+    display: 'inline-block', padding: '8px 14px', borderRadius: 8,
+    background: '#2f4f3a', color: '#fff', fontSize: 12,
+    fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
+    border: 'none',
+  },
+  avatarRemoveBtn: {
+    padding: '8px 14px', borderRadius: 8,
+    background: 'transparent', color: '#7a8270', fontSize: 12,
+    fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer',
+    border: '1px solid #d4cdb8', marginLeft: 8,
+  },
+  avatarHint: {
+    fontSize: 11, color: '#a8a895', marginTop: 8,
+  },
+  colorPalette: {
+    display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(40px, 1fr))',
+    gap: 8, marginBottom: 20, maxWidth: 380,
+  },
+  colorSwatch: {
+    width: 40, height: 40, borderRadius: '50%',
+    border: '2px solid transparent', cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    padding: 0,
+  },
+  colorSwatchActive: {
+    border: '2px solid #1a2620',
+    boxShadow: '0 0 0 2px #fffdf7',
   },
   loginBtnDisabled: { opacity: 0.4, cursor: 'not-allowed' },
   loginFoot: {
