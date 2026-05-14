@@ -139,6 +139,31 @@ export default function SalusStaff() {
   const [tab, setTab] = useState('timetable');
   const [tabInitialized, setTabInitialized] = useState(false);
   const [modal, setModal] = useState(null);
+  const [lastViewed, setLastViewed] = useState({ chat: 0, cover: 0 });
+
+  // Load lastViewed from localStorage when the logged-in user is known
+  useEffect(() => {
+    const uid = session?.user?.id;
+    if (!uid) return;
+    try {
+      const raw = localStorage.getItem(`salus-last-viewed-${uid}`);
+      setLastViewed(raw ? JSON.parse(raw) : { chat: 0, cover: 0 });
+    } catch {
+      setLastViewed({ chat: 0, cover: 0 });
+    }
+  }, [session?.user?.id]);
+
+  // When the user switches to chat or cover, update the timestamp
+  useEffect(() => {
+    const uid = session?.user?.id;
+    if (!uid) return;
+    if (tab !== 'chat' && tab !== 'cover') return;
+    setLastViewed(prev => {
+      const next = { ...prev, [tab]: Date.now() };
+      try { localStorage.setItem(`salus-last-viewed-${uid}`, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, [tab, session?.user?.id]);
 
   // Listen for auth state changes (session restore on mount + reactive updates)
   useEffect(() => {
@@ -427,24 +452,6 @@ export default function SalusStaff() {
   const isManager = currentUser.role === 'manager';
   const pendingCount = data.coverRequests.filter(r => r.status === 'pending').length;
   const openCount = data.coverRequests.filter(r => r.status === 'open').length;
-
-  // Unread tracking — per device, per user
-  const LAST_VIEWED_KEY = `salus-last-viewed-${currentUserId}`;
-  const [lastViewed, setLastViewed] = useState(() => {
-    try {
-      const raw = localStorage.getItem(LAST_VIEWED_KEY);
-      return raw ? JSON.parse(raw) : { chat: 0, cover: 0 };
-    } catch { return { chat: 0, cover: 0 }; }
-  });
-
-  // When the user switches to chat or cover, update the timestamp
-  useEffect(() => {
-    if (tab !== 'chat' && tab !== 'cover') return;
-    const next = { ...lastViewed, [tab]: Date.now() };
-    setLastViewed(next);
-    try { localStorage.setItem(LAST_VIEWED_KEY, JSON.stringify(next)); } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
 
   // Unread = items created after lastViewed timestamp, excluding the user's own actions
   const chatUnread = data.messages.filter(m =>
