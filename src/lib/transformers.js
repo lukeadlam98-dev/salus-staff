@@ -8,6 +8,7 @@ export const profileFromDb = (row, authEmail) => ({
   coachType: row.coach_type,
   color: row.color,
   initials: row.initials,
+  avatarUrl: row.avatar_url || null,
   email: authEmail || '',
   emailPrefs: row.email_prefs || {},
   qualifications: row.qualifications || [],
