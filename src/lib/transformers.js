@@ -13,6 +13,8 @@ export const profileFromDb = (row, authEmail) => ({
   emailPrefs: row.email_prefs || {},
   qualifications: row.qualifications || [],
   termsAcceptedAt: row.terms_accepted_at,
+  bankAccount: row.bank_account || null,
+  bankSortCode: row.bank_sort_code || null,
 });
 
 export const classFromDb = (row) => ({
