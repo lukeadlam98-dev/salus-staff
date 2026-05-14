@@ -343,7 +343,7 @@ export default function SalusStaff() {
     if (Object.keys(patch).length === 0) return;
     const { error } = await supabase.from('profiles').update(patch).eq('id', userId);
     if (error) { console.error('updateUserSettings', error); return; }
-    await reloadData();
+    await reloadData(true);
   };
 
   const requestCover = async (classId, reason) => {
@@ -356,7 +356,7 @@ export default function SalusStaff() {
     if (er1) { console.error('requestCover', er1); return; }
     const cls = data.classes.find(c => c.id === classId);
     await supabase.from('classes').update({ status: 'needsCover', original_coach_id: cls?.coachId }).eq('id', classId);
-    await reloadData();
+    await reloadData(true);
   };
 
   const cancelCoverRequest = async (requestId) => {
@@ -366,7 +366,7 @@ export default function SalusStaff() {
     if (error) { console.error('cancelCoverRequest', error); return; }
     const origId = data.classes.find(c => c.id === req.classId)?.originalCoachId;
     await supabase.from('classes').update({ status: 'assigned', original_coach_id: null, coach_id: origId }).eq('id', req.classId);
-    await reloadData();
+    await reloadData(true);
   };
 
   const claimCover = async (requestId, overrideCoachId) => {
@@ -377,7 +377,7 @@ export default function SalusStaff() {
     if (er1) { console.error('claimCover-req', er1); return; }
     const { error: er2 } = await supabase.from('classes').update({ coach_id: coachId, status: 'covered' }).eq('id', req.classId);
     if (er2) { console.error('claimCover-class', er2); return; }
-    await reloadData();
+    await reloadData(true);
   };
 
   const approveCoverRequest = async (requestId, action, assignTo) => {
@@ -392,7 +392,7 @@ export default function SalusStaff() {
     } else if (action === 'post') {
       await supabase.from('cover_requests').update({ status: 'open' }).eq('id', requestId);
     }
-    await reloadData();
+    await reloadData(true);
   };
 
   const expressInterest = async (requestId) => {
@@ -404,7 +404,7 @@ export default function SalusStaff() {
       : [...interested, currentUserId];
     const { error } = await supabase.from('cover_requests').update({ interested_covers: next }).eq('id', requestId);
     if (error) { console.error('expressInterest', error); return; }
-    await reloadData();
+    await reloadData(true);
   };
 
   const saveClass = async (classData) => {
@@ -415,13 +415,13 @@ export default function SalusStaff() {
       const { error } = await supabase.from('classes').insert(classToDb(classData));
       if (error) console.error('insertClass', error);
     }
-    await reloadData();
+    await reloadData(true);
   };
 
   const deleteClass = async (classId) => {
     const { error } = await supabase.from('classes').delete().eq('id', classId);
     if (error) console.error('deleteClass', error);
-    await reloadData();
+    await reloadData(true);
   };
 
   const sendMessage = async (text) => {
@@ -431,14 +431,14 @@ export default function SalusStaff() {
       text: text.trim(),
     });
     if (error) console.error('sendMessage', error);
-    await reloadData();
+    await reloadData(true);
   };
 
   // Reset is now a no-op for safety. (In dev, manager can wipe data via Supabase.)
   const resetData = async () => { setModal(null); };
 
   // Legacy persist alias used by some inner components. Routes to reloadData.
-  const persist = async () => { await reloadData(); };
+  const persist = async () => { await reloadData(true); };
 
   const currentUser = data.users.find(u => u.id === currentUserId);
   const isManager = currentUser.role === 'manager';
@@ -486,7 +486,7 @@ export default function SalusStaff() {
       status: 'pending',
     });
     if (error) console.error('proposeSwap', error);
-    await reloadData();
+    await reloadData(true);
   };
 
   const respondToSwap = async (swapId, accept) => {
@@ -501,7 +501,7 @@ export default function SalusStaff() {
     } else {
       await supabase.from('swap_requests').update({ status: 'declined' }).eq('id', swapId);
     }
-    await reloadData();
+    await reloadData(true);
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
