@@ -69,7 +69,7 @@ const CLASS_TYPES = {
 
 const STUDIOS = {
   reformer: { label: 'Reformer Studio', short: 'Reformer' },
-  hybrid:   { label: 'HYBRID',          short: 'Hybrid' },
+  hybrid:   { label: 'Hybrid',          short: 'Hybrid' },
 };
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -1168,7 +1168,6 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
   // Renders a single class card — used in both desktop and mobile views
   const renderClassCard = (cls, variant = 'compact') => {
     const coach = data.users.find(u => u.id === cls.coachId);
-    const typeCfg = CLASS_TYPES[cls.type];
     const isMine = cls.coachId === currentUser.id;
     const needsCover = cls.status === 'needsCover';
     const isMobileVariant = variant === 'mobile';
@@ -1180,9 +1179,10 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
         style={{
           ...styles.classCard,
           ...(isMobileVariant ? styles.classCardMobile : {}),
-          borderLeft: `4px solid ${typeCfg.color}`,
-          background: needsCover ? '#fef3e2' : '#fff',
-          ...(isMine && !needsCover ? { background: '#f0eee4' } : {}),
+          background: needsCover ? '#fef0ea' : '#fff',
+          borderLeft: needsCover
+            ? '3px solid #c8442a'
+            : (isMine ? '3px solid #5c4a38' : '3px solid transparent'),
         }}
       >
         {isMobileVariant ? (
@@ -1200,8 +1200,9 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
               </div>
             </div>
             {needsCover && (
-              <div style={{ ...styles.coverBadge, marginRight: 4 }}>
-                <AlertCircle size={10} />
+              <div style={styles.coverBadgeProminent}>
+                <AlertCircle size={12} />
+                <span>COVER</span>
               </div>
             )}
           </>
@@ -1210,8 +1211,9 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
             <div style={styles.classCardTop}>
               <div style={styles.classTime}>{cls.time}</div>
               {needsCover && (
-                <div style={styles.coverBadge}>
-                  <AlertCircle size={10} /> Cover
+                <div style={styles.coverBadgeProminent}>
+                  <AlertCircle size={12} />
+                  <span>COVER</span>
                 </div>
               )}
             </div>
@@ -1271,7 +1273,7 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
           className="salus-btn"
           style={{ ...styles.studioPill, ...(studioFilter==='hybrid' ? styles.studioPillActive : {}) }}
         >
-          HYBRID
+          Hybrid
         </button>
       </div>
 
@@ -1334,18 +1336,6 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
                 )}
                 {byDay[i].map(cls => renderClassCard(cls, 'compact'))}
               </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Legend — hide on mobile to save space */}
-      {!isMobile && (
-        <div style={styles.legend}>
-          {Object.entries(CLASS_TYPES).map(([name, cfg]) => (
-            <div key={name} style={styles.legendItem}>
-              <div style={{ ...styles.legendDot, background: cfg.color }} />
-              <span>{name}</span>
             </div>
           ))}
         </div>
@@ -3204,11 +3194,11 @@ const styles = {
     borderBottom: '1px solid #e8e0cc', background: '#fffdf7',
   },
   navTab: {
-    display: 'flex', alignItems: 'center', gap: 8,
-    padding: '10px 16px', border: 'none', background: 'transparent',
+    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+    gap: 8, padding: '10px 8px', border: 'none', background: 'transparent',
     fontFamily: 'inherit', fontSize: 13, color: '#7a8270',
     borderBottom: '2px solid transparent', marginBottom: -1,
-    fontWeight: 500,
+    fontWeight: 500, cursor: 'pointer',
   },
   navTabActive: {
     color: '#5c4a38', borderBottom: '2px solid #5c4a38',
@@ -3297,14 +3287,15 @@ const styles = {
     padding: '24px 0', fontStyle: 'italic',
   },
   classCard: {
-    padding: '12px 12px 12px 14px', borderRadius: 8, background: '#fff',
-    border: '1px solid #e8e0cc', borderLeft: '3px solid #ccc',
+    padding: '12px 12px 12px 14px', borderRadius: 12, background: '#fff',
+    border: '1px solid #efe7d2', borderLeft: '3px solid transparent',
     fontFamily: 'inherit', textAlign: 'left', width: '100%',
     cursor: 'pointer', position: 'relative',
+    transition: 'transform 0.15s, box-shadow 0.15s',
   },
   classCardTop: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 6, gap: 6, flexWrap: 'wrap',
   },
   classTime: { fontSize: 15, fontWeight: 600, color: '#1a2620', letterSpacing: -0.2 },
   classType: { fontSize: 12, fontWeight: 500, marginBottom: 8, color: '#1a2620', lineHeight: 1.3 },
@@ -3320,6 +3311,13 @@ const styles = {
     fontSize: 9, fontWeight: 600, color: '#b85c38',
     background: '#fef3e2', padding: '2px 6px', borderRadius: 10,
     textTransform: 'uppercase', letterSpacing: 0.3,
+  },
+  coverBadgeProminent: {
+    display: 'flex', alignItems: 'center', gap: 4,
+    fontSize: 10, fontWeight: 700, color: '#fff',
+    background: '#c8442a', padding: '4px 8px', borderRadius: 6,
+    textTransform: 'uppercase', letterSpacing: 0.8,
+    flexShrink: 0,
   },
 
   legend: {
@@ -3827,7 +3825,7 @@ const styles = {
     border: '1px solid #e8e0cc', background: '#fffdf7',
     fontFamily: 'inherit', cursor: 'pointer', position: 'relative',
     display: 'flex', flexDirection: 'column', alignItems: 'center',
-    minWidth: 64,
+    minWidth: 64, color: '#1a2620',
   },
   dayPillActive: {
     background: '#5c4a38', borderColor: '#5c4a38', color: '#fff',
@@ -3856,30 +3854,31 @@ const styles = {
 
   // Mobile-variant class card (horizontal layout, full width)
   classCardMobile: {
-    display: 'flex', alignItems: 'center', gap: 14,
-    padding: '14px 14px 14px 16px',
+    display: 'flex', alignItems: 'center', gap: 16,
+    padding: '16px 14px 16px 14px',
     width: '100%',
   },
   mobileCardLeft: {
     display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
-    minWidth: 52, flexShrink: 0,
+    minWidth: 48, flexShrink: 0,
   },
   mobileCardTime: {
-    fontFamily: '"Fraunces", serif', fontSize: 18, fontWeight: 500,
-    color: '#1a2620', lineHeight: 1, letterSpacing: -0.2,
+    fontSize: 15, fontWeight: 600,
+    color: '#5c4a38', lineHeight: 1, letterSpacing: -0.2,
+    fontFamily: 'inherit',
   },
   mobileCardDur: {
-    fontSize: 10, color: '#7a8270', marginTop: 4, fontWeight: 500,
-    textTransform: 'uppercase', letterSpacing: 0.6,
+    fontSize: 10, color: '#a8a895', marginTop: 4, fontWeight: 500,
+    letterSpacing: 0.4,
   },
   mobileCardMid: { flex: 1, minWidth: 0 },
   mobileCardType: {
-    fontSize: 14, fontWeight: 500, color: '#1a2620',
-    marginBottom: 4, lineHeight: 1.3,
+    fontSize: 16, fontWeight: 600, color: '#1a2620',
+    marginBottom: 4, lineHeight: 1.3, letterSpacing: -0.1,
   },
   mobileCardMeta: {
     display: 'flex', alignItems: 'center', gap: 6,
-    fontSize: 11, color: '#7a8270',
+    fontSize: 12, color: '#7a8270',
   },
   mobileCardCoach: { whiteSpace: 'nowrap' },
   mobileCardStudio: { color: '#a8a895' },
