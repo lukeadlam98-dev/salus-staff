@@ -559,11 +559,11 @@ export default function SalusStaff() {
 
         /* Mobile-specific overrides */
         @media (max-width: 768px) {
-          .salus-header { padding: 14px 16px !important; }
-          .salus-header-right { gap: 8px !important; }
-          .salus-nav { padding: 12px 8px 0 !important; gap: 2px !important; }
+          .salus-header { padding: 10px 14px !important; }
+          .salus-header-right { gap: 4px !important; }
+          .salus-nav { padding: 6px 8px 0 !important; gap: 2px !important; }
           .salus-nav-tab { padding: 8px 10px !important; font-size: 12px !important; }
-          .salus-main { padding: 16px !important; }
+          .salus-main { padding: 14px !important; }
           .salus-section-header { gap: 12px !important; }
           .salus-modal-card { max-width: 100% !important; border-radius: 12px !important; }
           .salus-stats-table { overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -581,16 +581,21 @@ export default function SalusStaff() {
       <header className="salus-header" style={styles.header}>
         <div style={styles.headerLeft}>
           <div style={styles.logo}>
-            <img src="https://cdn.prod.website-files.com/66803175747777a7dd2956e8/668c04b49ff0954ea73d39ef_download-compresskaru.com.png" alt="Salus" style={styles.logoMark} />
-            <div>
-              <div style={styles.logoText}>Salus Staff</div>
-              <div style={styles.logoSub}>Salus House · Sidcup</div>
+            <div style={styles.logoMark}>
+              <img src="https://cdn.prod.website-files.com/66803175747777a7dd2956e8/668c04b49ff0954ea73d39ef_download-compresskaru.com.png" alt="Salus" style={styles.logoMarkImg} />
             </div>
+            {!isMobile && (
+              <div>
+                <div style={styles.logoText}>Salus Staff</div>
+                <div style={styles.logoSub}>Salus House · Sidcup</div>
+              </div>
+            )}
           </div>
         </div>
 
         <div className="salus-header-right" style={styles.headerRight}>
-          {(coverUnread + chatUnread) > 0 && (
+          {/* Bell pill removed on mobile — nav tab badges already show what's new */}
+          {!isMobile && (coverUnread + chatUnread) > 0 && (
             <button
               onClick={() => setTab(coverUnread > 0 ? 'cover' : 'chat')}
               className="salus-btn"
@@ -602,7 +607,12 @@ export default function SalusStaff() {
             </button>
           )}
 
-          <div style={styles.userSelector}>
+          <button
+            onClick={() => setModal({ type: 'settings' })}
+            className="salus-btn"
+            style={isMobile ? styles.userSelectorBare : styles.userSelector}
+            title="Your profile & settings"
+          >
             <UserAvatar user={currentUser} size={28} fontSize={11} />
             {!isMobile && (
               <div>
@@ -616,7 +626,7 @@ export default function SalusStaff() {
                 </div>
               </div>
             )}
-          </div>
+          </button>
 
           <button
             onClick={() => setModal({ type: 'timeOff' })}
@@ -627,14 +637,17 @@ export default function SalusStaff() {
             <Calendar size={16} />
           </button>
 
-          <button
-            onClick={() => setModal({ type: 'settings' })}
-            className="salus-btn"
-            style={styles.iconBtn}
-            title="Email notification settings"
-          >
-            <Settings size={16} />
-          </button>
+          {/* Settings gear redundant on mobile — tap avatar instead */}
+          {!isMobile && (
+            <button
+              onClick={() => setModal({ type: 'settings' })}
+              className="salus-btn"
+              style={styles.iconBtn}
+              title="Email notification settings"
+            >
+              <Settings size={16} />
+            </button>
+          )}
 
           <button
             onClick={handleLogout}
@@ -997,7 +1010,9 @@ function LoginScreen({ error, onLogin, onSignup, onClearError }) {
 
       <form onSubmit={handleSubmit} style={styles.loginCard}>
         <div style={styles.loginLogo}>
-          <img src="https://cdn.prod.website-files.com/66803175747777a7dd2956e8/668c04b49ff0954ea73d39ef_download-compresskaru.com.png" alt="Salus" style={styles.loginLogoMark} />
+          <div style={styles.loginLogoMark}>
+            <img src="https://cdn.prod.website-files.com/66803175747777a7dd2956e8/668c04b49ff0954ea73d39ef_download-compresskaru.com.png" alt="Salus" style={styles.loginLogoMarkImg} />
+          </div>
         </div>
 
         <h1 style={styles.loginTitle}>Salus Staff</h1>
@@ -1808,8 +1823,8 @@ function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onClearAl
     <div style={styles.chatContainer}>
       <div style={styles.chatHeader}>
         <div style={{ flex: 1 }}>
-          <h2 style={styles.h2}>Team Salus</h2>
-          <p style={styles.subtitle}>{data.users.length} members · everyone</p>
+          <h2 style={styles.chatTitle}>Team Salus</h2>
+          <p style={styles.chatSubtitle}>{data.users.length} members</p>
         </div>
         {isManager && data.messages.length > 0 && (
           <button
@@ -3110,17 +3125,17 @@ const styles = {
   headerLeft: { display: 'flex', alignItems: 'center', gap: 16 },
   headerRight: { display: 'flex', alignItems: 'center', gap: 12 },
   quoteBar: {
-    background: 'linear-gradient(135deg, rgba(92, 74, 56, 0.04) 0%, rgba(232, 224, 204, 0.6) 100%)',
-    borderTop: '1px solid #ebe3cf', borderBottom: '1px solid #ebe3cf',
-    padding: '12px 24px', textAlign: 'center',
+    background: 'rgba(232, 224, 204, 0.35)',
+    borderBottom: '1px solid #ebe3cf',
+    padding: '8px 16px', textAlign: 'center',
   },
   quoteText: {
-    fontFamily: '"Fraunces", serif', fontSize: 14, fontStyle: 'italic',
-    color: '#5c4a38', lineHeight: 1.5, maxWidth: 700, margin: '0 auto',
+    fontFamily: '"Fraunces", serif', fontSize: 13, fontStyle: 'italic',
+    color: '#5c4a38', lineHeight: 1.4, maxWidth: 700, margin: '0 auto',
   },
   quoteAttr: {
-    fontSize: 10, letterSpacing: 1, textTransform: 'uppercase',
-    color: '#a59478', marginTop: 4, fontWeight: 500,
+    fontSize: 9, letterSpacing: 0.8, textTransform: 'uppercase',
+    color: '#a59478', marginTop: 2, fontWeight: 500,
   },
   holidayRow: {
     display: 'flex', alignItems: 'center', gap: 12,
@@ -3158,7 +3173,14 @@ const styles = {
   logo: { display: 'flex', alignItems: 'center', gap: 12 },
   logoMark: {
     width: 38, height: 38, borderRadius: 10,
-    objectFit: 'contain', background: '#5c4a38', padding: 4,
+    background: '#f5f1e8', border: '1px solid #ebe3cf',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  logoMarkImg: {
+    width: '100%', height: '100%',
+    objectFit: 'contain', padding: 4,
+    filter: 'brightness(0)',
   },
   logoText: { fontFamily: '"Fraunces", serif', fontSize: 20, fontWeight: 500, lineHeight: 1.1, color: '#1a2620' },
   logoSub: { fontSize: 10, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 1.2, marginTop: 4 },
@@ -3168,7 +3190,8 @@ const styles = {
     background: '#fef3e2', color: '#b85c38',
     border: '1px solid #f3d8b8', fontSize: 12, fontWeight: 500,
   },
-  userSelector: { display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px 6px 12px', borderRadius: 24, background: '#f5f1e8', border: '1px solid #e8e0cc' },
+  userSelector: { display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px 6px 12px', borderRadius: 24, background: '#f5f1e8', border: '1px solid #e8e0cc', cursor: 'pointer' },
+  userSelectorBare: { display: 'flex', alignItems: 'center', padding: 0, background: 'transparent', border: 'none', cursor: 'pointer' },
   userSelectorName: { fontSize: 13, fontWeight: 500, color: '#1a2620' },
   userSelectorRole: { fontSize: 10, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 1 },
   iconBtn: {
@@ -3354,8 +3377,16 @@ const styles = {
     minHeight: 500, overflow: 'hidden',
   },
   chatHeader: {
-    padding: 22, borderBottom: '1px solid #e8e0cc',
-    display: 'flex', alignItems: 'flex-start', gap: 12,
+    padding: '14px 18px', borderBottom: '1px solid #e8e0cc',
+    display: 'flex', alignItems: 'center', gap: 12,
+  },
+  chatTitle: {
+    fontFamily: '"Fraunces", serif', fontSize: 20, fontWeight: 500,
+    color: '#1a2620', margin: 0, letterSpacing: -0.2, lineHeight: 1.2,
+  },
+  chatSubtitle: {
+    fontSize: 11, color: '#7a8270', margin: '2px 0 0',
+    textTransform: 'uppercase', letterSpacing: 1,
   },
   chatClearAllBtn: {
     display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -3618,7 +3649,14 @@ const styles = {
   },
   loginLogoMark: {
     width: 44, height: 44, borderRadius: 12,
-    objectFit: 'contain', background: '#5c4a38', padding: 5,
+    background: '#f5f1e8', border: '1px solid #ebe3cf',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  loginLogoMarkImg: {
+    width: '100%', height: '100%',
+    objectFit: 'contain', padding: 5,
+    filter: 'brightness(0)',
   },
   loginTitle: {
     fontFamily: '"Fraunces", serif', fontSize: 28, fontWeight: 500,
