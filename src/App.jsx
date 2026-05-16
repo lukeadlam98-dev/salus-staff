@@ -140,6 +140,8 @@ export default function SalusStaff() {
   const [tabInitialized, setTabInitialized] = useState(false);
   const [modal, setModal] = useState(null);
   const [lastViewed, setLastViewed] = useState({ chat: 0, cover: 0 });
+  const [urgentCoverShown, setUrgentCoverShown] = useState(false);
+  const [showUrgentCover, setShowUrgentCover] = useState(false);
 
   // Load lastViewed from localStorage when the logged-in user is known
   useEffect(() => {
@@ -164,6 +166,42 @@ export default function SalusStaff() {
       return next;
     });
   }, [tab, session?.user?.id]);
+
+  // Link OneSignal subscriber to Supabase user ID so we can target push notifications.
+  // Safe to call even if OneSignal hasn't loaded yet — it queues until ready.
+  useEffect(() => {
+    const uid = session?.user?.id;
+    if (typeof window === 'undefined') return;
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    window.OneSignalDeferred.push(async function(OneSignal) {
+      try {
+        if (uid) {
+          await OneSignal.login(uid);
+        } else {
+          await OneSignal.logout();
+        }
+      } catch (e) {
+        // Don't crash the app if OneSignal fails — push is non-critical
+        console.warn('OneSignal login/logout failed:', e);
+      }
+    });
+  }, [session?.user?.id]);
+
+  // Show urgent cover popup once per session if there are open cover requests
+  // for this user (and they're not the one who requested it).
+  useEffect(() => {
+    if (urgentCoverShown) return;
+    if (loading || !session?.user?.id || !data.users.length) return;
+    const me = data.users.find(u => u.id === session.user.id);
+    if (!me || me.role === 'manager') return; // Manager doesn't need this prompt
+    const openForMe = data.coverRequests.filter(r =>
+      r.status === 'open' && r.requestedBy !== me.id
+    );
+    if (openForMe.length > 0) {
+      setShowUrgentCover(true);
+      setUrgentCoverShown(true);
+    }
+  }, [loading, session?.user?.id, data.users.length, data.coverRequests.length, urgentCoverShown]);
 
   // Listen for auth state changes (session restore on mount + reactive updates)
   useEffect(() => {
@@ -798,6 +836,23 @@ export default function SalusStaff() {
       {modal?.type === 'invoices' && (
         <InvoicesModal data={data} onClose={() => setModal(null)} />
       )}
+      {showUrgentCover && (
+        <UrgentCoverModal
+          requests={data.coverRequests.filter(r => r.status === 'open' && r.requestedBy !== currentUser.id)}
+          classes={data.classes}
+          users={data.users}
+          currentUser={currentUser}
+          onClaim={(req) => {
+            setShowUrgentCover(false);
+            setModal({ type: 'class', classId: req.classId });
+          }}
+          onView={() => {
+            setShowUrgentCover(false);
+            setTab('cover');
+          }}
+          onClose={() => setShowUrgentCover(false)}
+        />
+      )}
     </div>
   );
 }
@@ -1149,10 +1204,116 @@ function LoginScreen({ error, onLogin, onSignup, onClearError }) {
   );
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// MONTH VIEW — 3-month overview with cover indicators
+// ──────────────────────────────────────────────────────────────────────────────
+
+function MonthView({ classes, coverRequests, currentUser, onDayClick }) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const months = [];
+
+  // Build 3 months starting from current month
+  for (let m = 0; m < 3; m++) {
+    const date = new Date(today.getFullYear(), today.getMonth() + m, 1);
+    const monthLabel = date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+    const firstWeekday = (date.getDay() + 6) % 7; // Mon=0..Sun=6
+    const daysInMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+
+    const cells = [];
+    // Pad start with empty cells
+    for (let i = 0; i < firstWeekday; i++) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d++) {
+      const cellDate = new Date(date.getFullYear(), date.getMonth(), d);
+      const isoDate = cellDate.toISOString().slice(0, 10);
+      const classesThisDay = classes.filter(c => c.date === isoDate);
+      const coverCount = classesThisDay.filter(c => c.status === 'needsCover').length;
+      const isToday = cellDate.getTime() === today.getTime();
+      const isPast = cellDate < today;
+      cells.push({
+        day: d, date: cellDate, isoDate,
+        classCount: classesThisDay.length,
+        coverCount,
+        isToday, isPast,
+      });
+    }
+
+    months.push({ label: monthLabel, cells });
+  }
+
+  return (
+    <div>
+      {/* Legend */}
+      <div style={styles.monthLegend}>
+        <span style={styles.monthLegendItem}>
+          <span style={{ ...styles.monthLegendDot, background: '#5c4a38' }} /> Today
+        </span>
+        <span style={styles.monthLegendItem}>
+          <span style={{ ...styles.monthLegendDot, background: '#c8442a' }} /> Needs cover
+        </span>
+        <span style={styles.monthLegendItem}>
+          <span style={{ ...styles.monthLegendDot, background: '#a59478' }} /> Has classes
+        </span>
+      </div>
+
+      {months.map((m, idx) => (
+        <div key={idx} style={{ marginBottom: 28 }}>
+          <h3 style={styles.monthLabel}>{m.label}</h3>
+          <div style={styles.monthGridHeader}>
+            {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
+              <div key={i} style={styles.monthDayLabel}>{d}</div>
+            ))}
+          </div>
+          <div style={styles.monthGrid}>
+            {m.cells.map((cell, i) => {
+              if (!cell) return <div key={i} style={styles.monthCellEmpty} />;
+              const bg = cell.coverCount > 0
+                ? '#fef0ea'
+                : cell.isToday
+                  ? '#5c4a38'
+                  : cell.classCount > 0
+                    ? '#fffdf7'
+                    : 'transparent';
+              const color = cell.isToday ? '#fff' : (cell.isPast ? '#c4bca8' : '#1a2620');
+              const border = cell.coverCount > 0 ? '2px solid #c8442a' : '1px solid #ebe3cf';
+              return (
+                <button
+                  key={i}
+                  onClick={() => onDayClick(cell.isoDate)}
+                  className="salus-btn"
+                  style={{
+                    ...styles.monthCell,
+                    background: bg,
+                    color,
+                    border,
+                    cursor: cell.classCount > 0 ? 'pointer' : 'default',
+                  }}
+                  disabled={cell.classCount === 0}
+                  title={cell.classCount > 0
+                    ? `${cell.classCount} class${cell.classCount === 1 ? '' : 'es'}${cell.coverCount > 0 ? ` · ${cell.coverCount} need cover` : ''}`
+                    : 'No classes scheduled'}
+                >
+                  <div style={styles.monthCellDay}>{cell.day}</div>
+                  {cell.classCount > 0 && (
+                    <div style={{
+                      ...styles.monthCellDots,
+                      background: cell.coverCount > 0 ? '#c8442a' : (cell.isToday ? '#fff' : '#a59478'),
+                    }} />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAddClass }) {
   const [filter, setFilter] = useState('all'); // all | mine | needsCover
   const [studioFilter, setStudioFilter] = useState('all'); // all | reformer | hybrid
   const [selectedDay, setSelectedDay] = useState(0); // for mobile day-selector
+  const [viewMode, setViewMode] = useState('week'); // week | month
 
   let classes = data.classes;
   if (filter === 'mine') classes = classes.filter(c => c.coachId === currentUser.id);
@@ -1235,15 +1396,37 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
     <div>
       <div className="salus-section-header" style={styles.sectionHeader}>
         <div>
-          <h2 className="salus-h2" style={styles.h2}>{isMobile ? 'This Week' : `Week of ${DAY_LABELS[0]}–${DAY_LABELS[6]} May`}</h2>
+          <h2 className="salus-h2" style={styles.h2}>
+            {viewMode === 'month' ? 'Next 3 Months' : (isMobile ? 'This Week' : `Week of ${DAY_LABELS[0]}–${DAY_LABELS[6]} May`)}
+          </h2>
           <p style={styles.subtitle}>
             {classes.length} classes · {data.classes.filter(c => c.status === 'needsCover').length} need cover
           </p>
         </div>
         <div style={styles.filterRow}>
-          <FilterPill label="All" active={filter==='all'} onClick={() => setFilter('all')} />
-          {!isManager && <FilterPill label="Mine" active={filter==='mine'} onClick={() => setFilter('mine')} />}
-          <FilterPill label="Cover" active={filter==='needsCover'} onClick={() => setFilter('needsCover')} />
+          <div style={styles.viewToggle}>
+            <button
+              onClick={() => setViewMode('week')}
+              className="salus-btn"
+              style={{ ...styles.viewToggleBtn, ...(viewMode === 'week' ? styles.viewToggleBtnActive : {}) }}
+            >
+              Week
+            </button>
+            <button
+              onClick={() => setViewMode('month')}
+              className="salus-btn"
+              style={{ ...styles.viewToggleBtn, ...(viewMode === 'month' ? styles.viewToggleBtnActive : {}) }}
+            >
+              3-Month
+            </button>
+          </div>
+          {viewMode === 'week' && (
+            <>
+              <FilterPill label="All" active={filter==='all'} onClick={() => setFilter('all')} />
+              {!isManager && <FilterPill label="Mine" active={filter==='mine'} onClick={() => setFilter('mine')} />}
+              <FilterPill label="Cover" active={filter==='needsCover'} onClick={() => setFilter('needsCover')} />
+            </>
+          )}
           {isManager && (
             <button onClick={onAddClass} className="salus-btn" style={styles.btnPrimary}>
               <Plus size={14} /> {isMobile ? 'Add' : 'Add class'}
@@ -1252,6 +1435,22 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
         </div>
       </div>
 
+      {viewMode === 'month' ? (
+        <MonthView
+          classes={data.classes}
+          coverRequests={data.coverRequests}
+          currentUser={currentUser}
+          onDayClick={(isoDate) => {
+            // Switch back to week view focused on that day
+            const targetClasses = data.classes.filter(c => c.date === isoDate);
+            if (targetClasses.length > 0) {
+              setViewMode('week');
+              setSelectedDay(targetClasses[0].day);
+            }
+          }}
+        />
+      ) : (
+        <>
       {/* Studio toggle */}
       <div style={styles.studioToggle}>
         <button
@@ -1339,6 +1538,8 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
             </div>
           ))}
         </div>
+      )}
+        </>
       )}
     </div>
   );
@@ -2446,6 +2647,106 @@ const AVATAR_COLOR_PALETTE = [
   '#5c7a6b', '#5c4a38',
 ];
 
+// ──────────────────────────────────────────────────────────────────────────────
+// PUSH NOTIFICATIONS — OneSignal subscription UI
+// ──────────────────────────────────────────────────────────────────────────────
+
+function PushNotificationsSection() {
+  const [status, setStatus] = useState('checking'); // checking | supported | subscribed | denied | unsupported
+  const [working, setWorking] = useState(false);
+
+  // Check current state on mount
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!('Notification' in window) || !('serviceWorker' in navigator)) {
+      setStatus('unsupported');
+      return;
+    }
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    window.OneSignalDeferred.push(async function(OneSignal) {
+      try {
+        const perm = OneSignal.Notifications.permission;
+        if (perm === true) setStatus('subscribed');
+        else if (Notification.permission === 'denied') setStatus('denied');
+        else setStatus('supported');
+      } catch {
+        setStatus('supported');
+      }
+    });
+  }, []);
+
+  const handleEnable = () => {
+    setWorking(true);
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    window.OneSignalDeferred.push(async function(OneSignal) {
+      try {
+        await OneSignal.Notifications.requestPermission();
+        // Re-check status
+        const perm = OneSignal.Notifications.permission;
+        if (perm === true) setStatus('subscribed');
+        else if (Notification.permission === 'denied') setStatus('denied');
+      } catch (e) {
+        console.error('push enable failed', e);
+      } finally {
+        setWorking(false);
+      }
+    });
+  };
+
+  return (
+    <>
+      <h2 style={{ ...styles.h2, marginTop: 30, marginBottom: 4 }}>Push notifications</h2>
+      <p style={{ ...styles.subtitle, marginBottom: 16 }}>
+        Get alerts on your phone when cover is needed or someone messages the team.
+      </p>
+      {status === 'checking' && (
+        <div style={styles.pushBox}>Checking…</div>
+      )}
+      {status === 'unsupported' && (
+        <div style={{ ...styles.pushBox, color: '#7a8270' }}>
+          Your browser doesn't support push notifications. Try Safari (after installing the app to your home screen) or Chrome.
+        </div>
+      )}
+      {status === 'supported' && (
+        <div style={styles.pushBox}>
+          <p style={{ marginBottom: 12, fontSize: 13, lineHeight: 1.5 }}>
+            Notifications are <strong>off</strong>. Turn them on to get a banner on your lock screen for cover requests and chat messages.
+          </p>
+          <button
+            onClick={handleEnable}
+            disabled={working}
+            className="salus-btn"
+            style={styles.btnPrimary}
+          >
+            {working ? 'Asking…' : 'Turn on notifications'}
+          </button>
+          <p style={{ fontSize: 11, color: '#a59478', marginTop: 10 }}>
+            On iPhone: you must have added Salus Staff to your home screen first. iOS 16.4 or later required.
+          </p>
+        </div>
+      )}
+      {status === 'subscribed' && (
+        <div style={{ ...styles.pushBox, background: '#e8efe1', borderColor: '#c4d1b8' }}>
+          <strong style={{ color: '#5c4a38' }}>✓ Notifications are on.</strong>
+          <p style={{ fontSize: 12, color: '#5c4a38', marginTop: 6 }}>
+            You'll get a banner when cover is needed or someone messages the team chat.
+          </p>
+        </div>
+      )}
+      {status === 'denied' && (
+        <div style={{ ...styles.pushBox, background: '#fef0ea', borderColor: '#e8b8a8' }}>
+          <strong style={{ color: '#c8442a' }}>Notifications are blocked.</strong>
+          <p style={{ fontSize: 12, color: '#1a2620', marginTop: 6, lineHeight: 1.5 }}>
+            You denied permission previously. To turn back on:
+            <br/>iPhone: Settings → Salus Staff → Notifications → Allow.
+            <br/>Browser: site settings → Notifications → Allow.
+          </p>
+        </div>
+      )}
+    </>
+  );
+}
+
 function SettingsModal({ user, isManager, onClose, onSave }) {
   const isCoverCoach = user.coachType === 'cover';
   const defaults = isManager ? DEFAULT_MANAGER_PREFS : isCoverCoach ? DEFAULT_COVER_PREFS : DEFAULT_COACH_PREFS;
@@ -2591,6 +2892,8 @@ function SettingsModal({ user, isManager, onClose, onSave }) {
             </button>
           ))}
         </div>
+
+        <PushNotificationsSection />
 
         <h2 style={{ ...styles.h2, marginTop: 30, marginBottom: 4 }}>Bank details</h2>
         <p style={{ ...styles.subtitle, marginBottom: 16 }}>
@@ -3066,6 +3369,68 @@ function TimeOffModal({ onClose }) {
   );
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// URGENT COVER PROMPT — shown on login when there are open cover requests
+// ──────────────────────────────────────────────────────────────────────────────
+
+function UrgentCoverModal({ requests, classes, users, currentUser, onClaim, onView, onClose }) {
+  if (!requests || requests.length === 0) return null;
+
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ padding: 24 }}>
+        <div style={{ ...styles.modalDayBadge, background: '#fef0ea', color: '#c8442a' }}>
+          {requests.length === 1 ? '1 class needs cover' : `${requests.length} classes need cover`}
+        </div>
+        <h2 style={{ ...styles.h2, marginTop: 8, marginBottom: 4 }}>
+          {requests.length === 1 ? 'Can you help?' : 'Can you help with any of these?'}
+        </h2>
+        <p style={{ ...styles.subtitle, marginBottom: 18 }}>
+          {currentUser.coachType === 'cover'
+            ? 'Tap one to express interest — the manager will assign.'
+            : 'Tap a class to claim it, or view all on the Cover Board.'}
+        </p>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
+          {requests.slice(0, 4).map(req => {
+            const cls = classes.find(c => c.id === req.classId);
+            const requester = users.find(u => u.id === req.requestedBy);
+            if (!cls) return null;
+            return (
+              <button
+                key={req.id}
+                onClick={() => onClaim(req)}
+                className="salus-btn"
+                style={styles.urgentCoverRow}
+              >
+                <div style={{ flex: 1, textAlign: 'left' }}>
+                  <div style={styles.urgentCoverWhen}>
+                    {DAYS[cls.day]} {cls.time} · {cls.type}
+                  </div>
+                  <div style={styles.urgentCoverMeta}>
+                    {requester ? `${requester.name} unavailable` : 'Cover needed'} · {STUDIOS[cls.studio]?.short}
+                    {req.reason ? ` · "${req.reason.slice(0, 40)}${req.reason.length > 40 ? '…' : ''}"` : ''}
+                  </div>
+                </div>
+                <ChevronRight size={16} color="#5c4a38" />
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={onView} className="salus-btn" style={styles.btnPrimary}>
+            View Cover Board
+          </button>
+          <button onClick={onClose} className="salus-btn" style={styles.btnGhost}>
+            Later
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function ConfirmModal({ title, message, confirmLabel, onConfirm, onClose }) {
   return (
     <Modal onClose={onClose}>
@@ -3159,6 +3524,71 @@ const styles = {
     padding: '14px 16px', background: '#f0e6d0', borderRadius: 10,
     marginTop: 12, marginBottom: 16,
     fontSize: 13, fontWeight: 600, color: '#5c4a38',
+  },
+  pushBox: {
+    padding: '14px 16px', borderRadius: 10,
+    background: '#fdfbf5', border: '1px solid #ebe3cf',
+    fontSize: 13,
+  },
+
+  // View toggle (Week / 3-Month)
+  viewToggle: {
+    display: 'flex', padding: 2, background: '#f0eee4',
+    borderRadius: 8, gap: 2,
+  },
+  viewToggleBtn: {
+    padding: '6px 12px', borderRadius: 6,
+    background: 'transparent', color: '#7a8270',
+    fontSize: 12, fontWeight: 500, border: 'none',
+    cursor: 'pointer', fontFamily: 'inherit',
+  },
+  viewToggleBtnActive: {
+    background: '#fffdf7', color: '#5c4a38', fontWeight: 600,
+    boxShadow: '0 1px 2px rgba(92, 74, 56, 0.08)',
+  },
+
+  // Month view
+  monthLegend: {
+    display: 'flex', gap: 16, marginBottom: 20, flexWrap: 'wrap',
+    fontSize: 11, color: '#7a8270',
+  },
+  monthLegendItem: { display: 'flex', alignItems: 'center', gap: 6 },
+  monthLegendDot: { width: 8, height: 8, borderRadius: '50%' },
+  monthLabel: {
+    fontFamily: '"Fraunces", serif', fontSize: 18, fontWeight: 500,
+    color: '#1a2620', margin: '0 0 12px',
+  },
+  monthGridHeader: {
+    display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)',
+    gap: 4, marginBottom: 4,
+  },
+  monthDayLabel: {
+    textAlign: 'center', fontSize: 10, fontWeight: 600,
+    color: '#a59478', textTransform: 'uppercase', letterSpacing: 0.6,
+  },
+  monthGrid: {
+    display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4,
+  },
+  monthCell: {
+    aspectRatio: '1 / 1', borderRadius: 8,
+    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between',
+    padding: '6px 4px', fontFamily: 'inherit', minHeight: 44,
+  },
+  monthCellEmpty: { aspectRatio: '1 / 1', minHeight: 44 },
+  monthCellDay: { fontSize: 13, fontWeight: 600 },
+  monthCellDots: { width: 6, height: 6, borderRadius: '50%' },
+  urgentCoverRow: {
+    display: 'flex', alignItems: 'center', gap: 12,
+    padding: '12px 14px',
+    background: '#fef0ea', border: '1px solid #f0c8b8',
+    borderRadius: 10, cursor: 'pointer',
+    fontFamily: 'inherit', width: '100%',
+  },
+  urgentCoverWhen: {
+    fontSize: 14, fontWeight: 600, color: '#1a2620', marginBottom: 2,
+  },
+  urgentCoverMeta: {
+    fontSize: 12, color: '#7a8270', lineHeight: 1.4,
   },
   logo: { display: 'flex', alignItems: 'center', gap: 12 },
   logoMark: {
