@@ -3,20 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-
     <title>Salus Staff</title>
     <meta name="description" content="Salus House staff timetable, cover board, and team chat." />
-
     <!-- PWA manifest + theme -->
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#f5f1e8" />
-
     <!-- iOS-specific PWA settings: makes it a real standalone app when added to home screen -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Salus" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-
     <!-- Favicons -->
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
@@ -24,31 +20,13 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
-
-    <!-- Register service worker so the app works offline & loads instantly -->
+    <!-- Register service worker so the app works offline & receives push notifications -->
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('/sw.js').catch(() => {});
         });
       }
-    </script>
-
-    <!-- OneSignal Web Push SDK -->
-    <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
-    <script>
-      window.OneSignalDeferred = window.OneSignalDeferred || [];
-      OneSignalDeferred.push(async function(OneSignal) {
-        await OneSignal.init({
-          appId: "934353c4-afd7-4177-9746-0aa8c143d6fb",
-          // Use OUR existing service worker (which imports OneSignal's at the top)
-          serviceWorkerPath: "sw.js",
-          serviceWorkerParam: { scope: "/" },
-          // Don't auto-prompt — we'll trigger it from the Settings modal so the user has context
-          autoResubscribe: true,
-          notifyButton: { enable: false },
-        });
-      });
     </script>
   </body>
 </html>
