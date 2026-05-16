@@ -140,7 +140,7 @@ export default function SalusStaff() {
   const [tabInitialized, setTabInitialized] = useState(false);
   const [modal, setModal] = useState(null);
   const [lastViewed, setLastViewed] = useState({ chat: 0, cover: 0 });
-  const [urgentCoverShown, setUrgentCoverShown] = useState(false);
+  const [urgentCoverDismissed, setUrgentCoverDismissed] = useState(false);
   const [showUrgentCover, setShowUrgentCover] = useState(false);
 
   // Load lastViewed from localStorage when the logged-in user is known
@@ -187,10 +187,21 @@ export default function SalusStaff() {
     });
   }, [session?.user?.id]);
 
-  // Show urgent cover popup once per session if there are open cover requests
-  // for this user (and they're not the one who requested it).
+  // Show urgent cover popup whenever there are open cover requests for this user.
+  // It re-shows every time the app becomes visible (fresh load OR returning from background).
+  // Reset dismissal whenever the app is hidden, so it reappears next time you open it.
   useEffect(() => {
-    if (urgentCoverShown) return;
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        setUrgentCoverDismissed(false);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, []);
+
+  useEffect(() => {
+    if (urgentCoverDismissed) return;
     if (loading || !session?.user?.id || !data.users.length) return;
     const me = data.users.find(u => u.id === session.user.id);
     if (!me || me.role === 'manager') return; // Manager doesn't need this prompt
@@ -199,9 +210,8 @@ export default function SalusStaff() {
     );
     if (openForMe.length > 0) {
       setShowUrgentCover(true);
-      setUrgentCoverShown(true);
     }
-  }, [loading, session?.user?.id, data.users.length, data.coverRequests.length, urgentCoverShown]);
+  }, [loading, session?.user?.id, data.users.length, data.coverRequests.length, urgentCoverDismissed]);
 
   // Listen for auth state changes (session restore on mount + reactive updates)
   useEffect(() => {
@@ -844,13 +854,18 @@ export default function SalusStaff() {
           currentUser={currentUser}
           onClaim={(req) => {
             setShowUrgentCover(false);
+            setUrgentCoverDismissed(true);
             setModal({ type: 'class', classId: req.classId });
           }}
           onView={() => {
             setShowUrgentCover(false);
+            setUrgentCoverDismissed(true);
             setTab('cover');
           }}
-          onClose={() => setShowUrgentCover(false)}
+          onClose={() => {
+            setShowUrgentCover(false);
+            setUrgentCoverDismissed(true);
+          }}
         />
       )}
     </div>
