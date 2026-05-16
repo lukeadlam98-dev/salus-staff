@@ -1,8 +1,12 @@
-// Salus Staff service worker — minimal offline fallback
-// Caches the app shell so the page loads even without a connection.
-// For data (messages, classes, etc) we always hit the network so the app shows live state.
+// Salus Staff service worker
+// Imports OneSignal's worker so we get push notifications, plus our own offline caching.
 
-const CACHE_NAME = 'salus-staff-v1';
+importScripts('https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js');
+
+// Minimal offline fallback for app shell.
+// For data (messages, classes) we always go to network so the app shows live state.
+
+const CACHE_NAME = 'salus-staff-v2';
 const APP_SHELL = [
   '/',
   '/index.html',
