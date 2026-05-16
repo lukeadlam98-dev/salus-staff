@@ -1,65 +1,76 @@
 // Salus Staff service worker
-// Imports OneSignal's worker so we get push notifications, plus our own offline caching.
+// Handles Web Push notifications natively (no third-party SDK)
+// + minimal offline shell caching.
 
-importScripts('https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js');
+const CACHE_NAME = 'salus-staff-v3';
+const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
 
-// Minimal offline fallback for app shell.
-// For data (messages, classes) we always go to network so the app shows live state.
-
-const CACHE_NAME = 'salus-staff-v2';
-const APP_SHELL = [
-  '/',
-  '/index.html',
-  '/manifest.webmanifest',
-  '/icon-192.png',
-  '/icon-512.png',
-  '/apple-touch-icon.png',
-];
-
+// Install: pre-cache app shell
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)).catch(() => {})
+    caches.open(CACHE_NAME).then(c => c.addAll(APP_SHELL).catch(() => {}))
   );
   self.skipWaiting();
 });
 
+// Activate: clean up old caches
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+    caches.keys().then(names =>
+      Promise.all(names.filter(n => n !== CACHE_NAME).map(n => caches.delete(n)))
     )
   );
   self.clients.claim();
 });
 
+// Fetch: network-first; fall back to cache only when offline
 self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
+  if (event.request.method !== 'GET') return;
+  event.respondWith(
+    fetch(event.request).catch(() => caches.match(event.request))
+  );
+});
 
-  // Don't intercept API calls (Supabase) — always go to network
-  if (url.hostname.includes('supabase.co')) return;
-
-  // For navigation requests (HTML), try network first, fallback to cache
-  if (event.request.mode === 'navigate') {
-    event.respondWith(
-      fetch(event.request).catch(() => caches.match('/index.html'))
-    );
-    return;
+// PUSH NOTIFICATION RECEIVED
+// Push servers (Apple/Google/Mozilla) call this when a message arrives.
+self.addEventListener('push', (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { title: 'Salus Staff', body: event.data ? event.data.text() : '' };
   }
 
-  // For other GET requests (icons, JS, CSS), cache-first
-  if (event.request.method === 'GET') {
-    event.respondWith(
-      caches.match(event.request).then((cached) => {
-        if (cached) return cached;
-        return fetch(event.request).then((response) => {
-          // Only cache successful responses from our origin
-          if (response.ok && url.origin === self.location.origin) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((c) => c.put(event.request, clone));
-          }
-          return response;
-        });
-      }).catch(() => undefined)
-    );
-  }
+  const title = data.title || 'Salus Staff';
+  const options = {
+    body: data.body || '',
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+    tag: data.tag || 'salus-default',
+    data: data.data || {},
+    requireInteraction: false,
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// NOTIFICATION TAPPED
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = event.notification.data?.url || '/';
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
+      for (const client of clientList) {
+        if ('focus' in client) {
+          client.focus();
+          if (client.navigate) client.navigate(targetUrl);
+          return;
+        }
+      }
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(targetUrl);
+      }
+    })
+  );
 });
