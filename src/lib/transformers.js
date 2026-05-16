@@ -5,7 +5,7 @@ export const profileFromDb = (row, authEmail) => ({
   id: row.id,
   name: row.name,
   role: row.role,
-  coachType: row.coach_type,
+  coachType: row.coach_type || 'permanent',
   color: row.color,
   initials: row.initials,
   avatarUrl: row.avatar_url || null,
