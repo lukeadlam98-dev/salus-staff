@@ -33,5 +33,22 @@
         });
       }
     </script>
+
+    <!-- OneSignal Web Push SDK -->
+    <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+    <script>
+      window.OneSignalDeferred = window.OneSignalDeferred || [];
+      OneSignalDeferred.push(async function(OneSignal) {
+        await OneSignal.init({
+          appId: "934353c4-afd7-4177-9746-0aa8c143d6fb",
+          // Use OUR existing service worker (which imports OneSignal's at the top)
+          serviceWorkerPath: "sw.js",
+          serviceWorkerParam: { scope: "/" },
+          // Don't auto-prompt — we'll trigger it from the Settings modal so the user has context
+          autoResubscribe: true,
+          notifyButton: { enable: false },
+        });
+      });
+    </script>
   </body>
 </html>
