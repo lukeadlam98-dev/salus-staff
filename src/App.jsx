@@ -2667,14 +2667,23 @@ const AVATAR_COLOR_PALETTE = [
 // ──────────────────────────────────────────────────────────────────────────────
 
 function PushNotificationsSection() {
-  const [status, setStatus] = useState('checking'); // checking | supported | subscribed | denied | unsupported
+  const [status, setStatus] = useState('checking'); // checking | supported | subscribed | denied | unsupported | not-installed
   const [working, setWorking] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
   // Check current state on mount
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (!('Notification' in window) || !('serviceWorker' in navigator)) {
       setStatus('unsupported');
+      return;
+    }
+    // Detect iOS Safari outside of installed PWA — push won't work
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+      || window.navigator.standalone === true;
+    if (isIOS && !isStandalone) {
+      setStatus('not-installed');
       return;
     }
     window.OneSignalDeferred = window.OneSignalDeferred || [];
@@ -2690,22 +2699,48 @@ function PushNotificationsSection() {
     });
   }, []);
 
-  const handleEnable = () => {
+  const handleEnable = async () => {
     setWorking(true);
-    window.OneSignalDeferred = window.OneSignalDeferred || [];
-    window.OneSignalDeferred.push(async function(OneSignal) {
-      try {
-        await OneSignal.Notifications.requestPermission();
-        // Re-check status
-        const perm = OneSignal.Notifications.permission;
-        if (perm === true) setStatus('subscribed');
-        else if (Notification.permission === 'denied') setStatus('denied');
-      } catch (e) {
-        console.error('push enable failed', e);
-      } finally {
-        setWorking(false);
-      }
+    setErrorMsg('');
+
+    // 15-second safety net so the button can never hang forever
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('TIMEOUT')), 15000)
+    );
+
+    const request = new Promise((resolve, reject) => {
+      window.OneSignalDeferred = window.OneSignalDeferred || [];
+      window.OneSignalDeferred.push(async function(OneSignal) {
+        try {
+          const result = await OneSignal.Notifications.requestPermission();
+          resolve({ result, OneSignal });
+        } catch (e) {
+          reject(e);
+        }
+      });
     });
+
+    try {
+      const { OneSignal } = await Promise.race([request, timeout]);
+      const perm = OneSignal.Notifications.permission;
+      if (perm === true) {
+        setStatus('subscribed');
+      } else if (Notification.permission === 'denied') {
+        setStatus('denied');
+      } else {
+        // Prompt was dismissed without choosing — stay on supported
+        setErrorMsg('No response received. If the iOS prompt didn\'t appear, the app likely isn\'t opened from your home screen.');
+      }
+    } catch (e) {
+      if (e?.message === 'TIMEOUT') {
+        setErrorMsg('The notification prompt didn\'t appear. Make sure you opened Salus Staff from the beige tile on your home screen (not from Safari). Force-close the app and reopen it from the home screen, then try again.');
+      } else {
+        setErrorMsg('Something went wrong turning on notifications. Try force-closing the app and reopening from the home screen.');
+      }
+      console.error('push enable failed', e);
+    } finally {
+      setWorking(false);
+    }
   };
 
   return (
@@ -2722,6 +2757,21 @@ function PushNotificationsSection() {
           Your browser doesn't support push notifications. Try Safari (after installing the app to your home screen) or Chrome.
         </div>
       )}
+      {status === 'not-installed' && (
+        <div style={{ ...styles.pushBox, background: '#fef0ea', borderColor: '#e8b8a8' }}>
+          <strong style={{ color: '#c8442a' }}>You're in Safari, not the installed app.</strong>
+          <p style={{ fontSize: 12, color: '#1a2620', marginTop: 8, lineHeight: 1.5 }}>
+            iPhone push notifications only work from the home-screen version of Salus Staff. To fix:
+          </p>
+          <ol style={{ fontSize: 12, color: '#1a2620', marginTop: 8, paddingLeft: 20, lineHeight: 1.6 }}>
+            <li>Tap the <strong>Share</strong> button (square with arrow up)</li>
+            <li>Scroll down → <strong>Add to Home Screen</strong> → tap Add</li>
+            <li>Close Safari completely (swipe up, flick away)</li>
+            <li>Open the <strong>beige Salus tile</strong> from your home screen</li>
+            <li>Come back to this Settings page and try again</li>
+          </ol>
+        </div>
+      )}
       {status === 'supported' && (
         <div style={styles.pushBox}>
           <p style={{ marginBottom: 12, fontSize: 13, lineHeight: 1.5 }}>
@@ -2735,6 +2785,11 @@ function PushNotificationsSection() {
           >
             {working ? 'Asking…' : 'Turn on notifications'}
           </button>
+          {errorMsg && (
+            <p style={{ fontSize: 12, color: '#c8442a', marginTop: 10, lineHeight: 1.5 }}>
+              {errorMsg}
+            </p>
+          )}
           <p style={{ fontSize: 11, color: '#a59478', marginTop: 10 }}>
             On iPhone: you must have added Salus Staff to your home screen first. iOS 16.4 or later required.
           </p>
