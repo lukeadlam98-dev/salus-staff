@@ -3,6 +3,19 @@ html, body, #root {
   padding: 0;
   background: #f5f1e8;
   min-height: 100vh;
+  color: #1a2620;
+  /* Prevent horizontal scroll and accidental zoom */
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* Stop iOS double-tap from zooming */
+  touch-action: manipulation;
 }
 
 * { -webkit-tap-highlight-color: transparent; }
+
+/* iOS Safari defaults button text to blue — force it to inherit */
+button { color: inherit; font-family: inherit; }
+
+/* Prevent body bounce/rubber-band on iOS */
+html { overscroll-behavior: none; }
