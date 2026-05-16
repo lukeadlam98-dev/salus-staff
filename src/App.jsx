@@ -167,26 +167,6 @@ export default function SalusStaff() {
     });
   }, [tab, session?.user?.id]);
 
-  // Link OneSignal subscriber to Supabase user ID so we can target push notifications.
-  // Safe to call even if OneSignal hasn't loaded yet — it queues until ready.
-  useEffect(() => {
-    const uid = session?.user?.id;
-    if (typeof window === 'undefined') return;
-    window.OneSignalDeferred = window.OneSignalDeferred || [];
-    window.OneSignalDeferred.push(async function(OneSignal) {
-      try {
-        if (uid) {
-          await OneSignal.login(uid);
-        } else {
-          await OneSignal.logout();
-        }
-      } catch (e) {
-        // Don't crash the app if OneSignal fails — push is non-critical
-        console.warn('OneSignal login/logout failed:', e);
-      }
-    });
-  }, [session?.user?.id]);
-
   // Show urgent cover popup whenever there are open cover requests for this user.
   // It re-shows every time the app becomes visible (fresh load OR returning from background).
   // Reset dismissal whenever the app is hidden, so it reappears next time you open it.
@@ -2666,7 +2646,173 @@ const AVATAR_COLOR_PALETTE = [
 // PUSH NOTIFICATIONS — OneSignal subscription UI
 // ──────────────────────────────────────────────────────────────────────────────
 
+// ──────────────────────────────────────────────────────────────────────────────
+// PUSH NOTIFICATIONS — native Web Push (VAPID, stored in Supabase)
+// ──────────────────────────────────────────────────────────────────────────────
+
+const VAPID_PUBLIC_KEY = 'BCDujhnkO0iRoRtzHOoSj9A8gfPt6Wc_IDdfI8VJMjT6PEJWdZHiqFDyWv64Tq3XtCsNZGP_yUYNIq3daCBAfMk';
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
+}
+
 function PushNotificationsSection() {
+  const [status, setStatus] = useState('checking');
+  // checking | not-installed | unsupported | denied | subscribed | supported
+  const [working, setWorking] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+      setStatus('unsupported');
+      return;
+    }
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+      || window.navigator.standalone === true;
+    if (isIOS && !isStandalone) {
+      setStatus('not-installed');
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      setStatus('denied');
+      return;
+    }
+
+    (async () => {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const existing = await reg.pushManager.getSubscription();
+        if (existing && Notification.permission === 'granted') setStatus('subscribed');
+        else setStatus('supported');
+      } catch {
+        setStatus('supported');
+      }
+    })();
+  }, []);
+
+  const handleEnable = async () => {
+    setWorking(true);
+    setErrorMsg('');
+
+    try {
+      // 1. Ask iOS for permission (must run in user-gesture context — this handler is one)
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        setStatus(permission === 'denied' ? 'denied' : 'supported');
+        setErrorMsg(permission === 'denied'
+          ? 'Permission was denied.'
+          : 'No response received. The prompt may not have appeared — make sure you opened Salus from the home screen, not Safari.');
+        return;
+      }
+
+      // 2. Wait for service worker to be ready
+      const reg = await navigator.serviceWorker.ready;
+
+      // 3. Subscribe via PushManager using our VAPID public key
+      let subscription = await reg.pushManager.getSubscription();
+      if (!subscription) {
+        subscription = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+        });
+      }
+
+      // 4. Save subscription to Supabase
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not signed in');
+
+      const subJson = subscription.toJSON();
+      const { error } = await supabase
+        .from('push_subscriptions')
+        .upsert(
+          {
+            user_id: session.user.id,
+            endpoint: subJson.endpoint,
+            subscription: subJson,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'endpoint' }
+        );
+      if (error) throw error;
+
+      setStatus('subscribed');
+    } catch (e) {
+      console.error('push subscribe failed', e);
+      setErrorMsg(`Couldn't enable notifications: ${e.message || 'unknown error'}. Force-close and reopen from home screen, then try again.`);
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <>
+      <h2 style={{ ...styles.h2, marginTop: 30, marginBottom: 4 }}>Push notifications</h2>
+      <p style={{ ...styles.subtitle, marginBottom: 16 }}>
+        Lock-screen alerts when cover is needed or someone messages the team.
+      </p>
+      {status === 'checking' && (
+        <div style={styles.pushBox}>Checking…</div>
+      )}
+      {status === 'unsupported' && (
+        <div style={{ ...styles.pushBox, color: '#7a8270' }}>
+          Your browser doesn't support push notifications.
+        </div>
+      )}
+      {status === 'not-installed' && (
+        <div style={{ ...styles.pushBox, background: '#fef0ea', borderColor: '#e8b8a8' }}>
+          <strong style={{ color: '#c8442a' }}>You're in Safari, not the installed app.</strong>
+          <p style={{ fontSize: 12, color: '#1a2620', marginTop: 8, lineHeight: 1.5 }}>
+            Push notifications on iPhone only work from the home-screen version. Share → Add to Home Screen → open from the beige tile.
+          </p>
+        </div>
+      )}
+      {status === 'supported' && (
+        <div style={styles.pushBox}>
+          <p style={{ marginBottom: 12, fontSize: 13, lineHeight: 1.5 }}>
+            Notifications are <strong>off</strong>. Turn them on to get a banner on your lock screen.
+          </p>
+          <button
+            onClick={handleEnable}
+            disabled={working}
+            className="salus-btn"
+            style={styles.btnPrimary}
+          >
+            {working ? 'Setting up…' : 'Turn on notifications'}
+          </button>
+          {errorMsg && (
+            <p style={{ fontSize: 12, color: '#c8442a', marginTop: 10, lineHeight: 1.5 }}>{errorMsg}</p>
+          )}
+          <p style={{ fontSize: 11, color: '#a59478', marginTop: 10 }}>
+            iPhone: open this app from the beige tile on your home screen. iOS 16.4 or later required.
+          </p>
+        </div>
+      )}
+      {status === 'subscribed' && (
+        <div style={{ ...styles.pushBox, background: '#e8efe1', borderColor: '#c4d1b8' }}>
+          <strong style={{ color: '#5c4a38' }}>✓ Notifications are on.</strong>
+          <p style={{ fontSize: 12, color: '#5c4a38', marginTop: 6 }}>
+            You'll get a banner when cover is needed or someone messages the team.
+          </p>
+        </div>
+      )}
+      {status === 'denied' && (
+        <div style={{ ...styles.pushBox, background: '#fef0ea', borderColor: '#e8b8a8' }}>
+          <strong style={{ color: '#c8442a' }}>Notifications are blocked.</strong>
+          <p style={{ fontSize: 12, color: '#1a2620', marginTop: 6, lineHeight: 1.5 }}>
+            iPhone Settings → Notifications → Salus Staff → toggle Allow Notifications on, then come back.
+          </p>
+        </div>
+      )}
+    </>
+  );
+}
+
+function PushNotificationsSection_DISABLED_NEEDS_ONESIGNAL_IOS26_FIX() {
   const [status, setStatus] = useState('checking'); // checking | supported | subscribed | denied | unsupported | not-installed
   const [working, setWorking] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
