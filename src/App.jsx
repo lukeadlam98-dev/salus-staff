@@ -291,6 +291,22 @@ export default function SalusStaff() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user?.id]);
 
+  // Lock body scrolling when chat is active — chat has its own contained scroll.
+  // Prevents the iOS rubber-band effect on the background.
+  // MUST be before any early returns (React rules of hooks).
+  useEffect(() => {
+    if (tab === 'chat') {
+      const prevBody = document.body.style.overflow;
+      const prevHtml = document.documentElement.style.overflow;
+      document.body.style.overflow = 'hidden';
+      document.documentElement.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = prevBody;
+        document.documentElement.style.overflow = prevHtml;
+      };
+    }
+  }, [tab]);
+
   // Login handler — real Supabase auth
   const handleLogin = async (email, password) => {
     setAuthError(null);
@@ -573,21 +589,6 @@ export default function SalusStaff() {
     setTab('home');
     setTabInitialized(true);
   }
-
-  // Lock body scrolling when chat is active — chat has its own contained scroll.
-  // Prevents the iOS rubber-band effect on the background.
-  useEffect(() => {
-    if (tab === 'chat') {
-      const prevBody = document.body.style.overflow;
-      const prevHtml = document.documentElement.style.overflow;
-      document.body.style.overflow = 'hidden';
-      document.documentElement.style.overflow = 'hidden';
-      return () => {
-        document.body.style.overflow = prevBody;
-        document.documentElement.style.overflow = prevHtml;
-      };
-    }
-  }, [tab]);
 
   // Wrappers that match the names the inner components expect
   const assignCoverDirectly = (requestId, coachId) =>
