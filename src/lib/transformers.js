@@ -28,6 +28,9 @@ export const classFromDb = (row) => ({
   studio: row.studio,
   status: row.status,
   originalCoachId: row.original_coach_id,
+  isHire: row.is_hire || false,
+  hireType: row.hire_type || null,
+  notes: row.notes || null,
 });
 
 export const classToDb = (cls) => ({
@@ -40,6 +43,9 @@ export const classToDb = (cls) => ({
   studio: cls.studio,
   status: cls.status || 'assigned',
   original_coach_id: cls.originalCoachId || null,
+  is_hire: cls.isHire || false,
+  hire_type: cls.hireType || null,
+  notes: cls.notes || null,
 });
 
 export const coverReqFromDb = (row) => ({
@@ -67,4 +73,5 @@ export const messageFromDb = (row) => ({
   userId: row.user_id,
   text: row.text,
   timestamp: new Date(row.created_at).getTime(),
+  editedAt: row.edited_at ? new Date(row.edited_at).getTime() : null,
 });
