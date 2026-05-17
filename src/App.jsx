@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Calendar, MessageSquare, Users, BarChart3, AlertCircle, Plus,
   Send, ArrowLeftRight, Check, X, Clock, Bell, RotateCcw, Settings, Mail, LogOut,
-  ChevronLeft, ChevronRight, TrendingUp, Award, Activity, Trash2
+  ChevronLeft, ChevronRight, TrendingUp, Award, Activity, Trash2,
+  Home as HomeIcon, FileText, User as UserIcon, Settings as SettingsIcon
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import {
@@ -136,7 +137,7 @@ export default function SalusStaff() {
   const [data, setData] = useState(EMPTY_DATA);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState(null);
-  const [tab, setTab] = useState('timetable');
+  const [tab, setTab] = useState('home');
   const [tabInitialized, setTabInitialized] = useState(false);
   const [modal, setModal] = useState(null);
   const [lastViewed, setLastViewed] = useState({ chat: 0, cover: 0 });
@@ -508,14 +509,10 @@ export default function SalusStaff() {
     r.timestamp > (lastViewed.cover || 0)
   ).length;
 
-  // Drop cover coaches onto the Cover Board (their main action surface).
-  // Everyone else gets the Timetable. Only runs once per sign-in.
+  // Everyone lands on Home — the cover-first dashboard.
+  // Only runs once per sign-in.
   if (!tabInitialized && currentUser) {
-    if (currentUser.coachType === 'cover') {
-      setTab('cover');
-    } else {
-      setTab('timetable');
-    }
+    setTab('home');
     setTabInitialized(true);
   }
 
@@ -691,16 +688,29 @@ export default function SalusStaff() {
 
       <DailyQuote />
 
-      {/* Nav */}
-      <nav className="salus-nav" style={styles.nav}>
-        <NavTab icon={Calendar}     label="Timetable"   active={tab==='timetable'} onClick={() => setTab('timetable')} isMobile={isMobile} />
-        <NavTab icon={ArrowLeftRight} label="Cover Board" active={tab==='cover'}    onClick={() => setTab('cover')} badge={coverUnread} isMobile={isMobile} />
-        <NavTab icon={MessageSquare}  label="Team Chat"   active={tab==='chat'}     onClick={() => setTab('chat')} badge={chatUnread} isMobile={isMobile} />
-        <NavTab icon={BarChart3}      label={isManager ? 'Team Stats' : 'My Stats'} active={tab==='stats'} onClick={() => setTab('stats')} isMobile={isMobile} />
-      </nav>
-
       {/* Main */}
       <main className="salus-main" style={styles.main}>
+        {tab === 'home' && (
+          <Home
+            data={data}
+            currentUser={currentUser}
+            isManager={isManager}
+            onClassClick={(classId) => {
+              const cls = data.classes.find(c => c.id === classId);
+              const req = data.coverRequests.find(r => r.classId === classId && (r.status === 'open' || r.status === 'pending'));
+              if (req) {
+                setModal({ type: 'coverThread', coverRequestId: req.id });
+              } else {
+                setModal({ type: 'classDetail', classId });
+              }
+            }}
+            onRequestCover={() => setModal({ type: 'pickClassToRequestCover' })}
+            onClaim={(req) => setModal({ type: 'coverThread', coverRequestId: req.id })}
+            onExpressInterest={expressInterest}
+            onViewAllCover={() => setTab('cover')}
+            onViewChat={() => setTab('chat')}
+          />
+        )}
         {(tab === 'timetable' || tab === 'cover') && (
           <StatusBar
             data={data}
@@ -747,7 +757,25 @@ export default function SalusStaff() {
             ? <ManagerStats data={data} onShowInvoices={() => setModal({ type: 'invoices' })} />
             : <CoachStats data={data} currentUser={currentUser} />
         )}
+        {tab === 'me' && (
+          <MePage
+            data={data}
+            currentUser={currentUser}
+            isManager={isManager}
+            onOpenSettings={() => setModal({ type: 'settings' })}
+            onShowInvoices={() => setModal({ type: 'invoices' })}
+            onSignOut={() => supabase.auth.signOut()}
+          />
+        )}
       </main>
+
+      {/* Bottom nav */}
+      <nav style={styles.bottomNav}>
+        <BottomTab icon={HomeIcon} label="Home" active={tab==='home'} onClick={() => setTab('home')} />
+        <BottomTab icon={Calendar} label="Schedule" active={tab==='timetable'} onClick={() => setTab('timetable')} />
+        <BottomTab icon={MessageSquare} label="Chat" active={tab==='chat'} onClick={() => setTab('chat')} badge={chatUnread} />
+        <BottomTab icon={UserIcon} label="Me" active={tab==='me'} onClick={() => setTab('me')} />
+      </nav>
 
       {/* Modals */}
       {modal?.type === 'classDetail' && (
@@ -791,6 +819,33 @@ export default function SalusStaff() {
           message="This will remove the class from the timetable and cancel any related cover or swap requests."
           confirmLabel="Delete"
           onConfirm={() => { deleteClass(modal.classId); setModal(null); }}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal?.type === 'coverThread' && (() => {
+        const req = data.coverRequests.find(r => r.id === modal.coverRequestId);
+        const cls = req && data.classes.find(c => c.id === req.classId);
+        if (!req || !cls) return null;
+        return (
+          <CoverThreadModal
+            coverRequest={req}
+            classObj={cls}
+            data={data}
+            currentUser={currentUser}
+            isManager={isManager}
+            onClose={() => setModal(null)}
+            onClaim={(r) => { claimCover(r.id); setModal(null); }}
+            onCancel={(reqId) => { cancelCoverRequest(reqId); setModal(null); }}
+            onExpressInterest={(reqId) => expressInterest(reqId)}
+          />
+        );
+      })()}
+      {modal?.type === 'pickClassToRequestCover' && (
+        <PickClassModal
+          data={data}
+          currentUser={currentUser}
+          isManager={isManager}
+          onPick={(classId) => setModal({ type: 'classDetail', classId })}
           onClose={() => setModal(null)}
         />
       )}
@@ -976,6 +1031,22 @@ function DailyQuote() {
       <div style={styles.quoteText}>“{quote.text}”</div>
       <div style={styles.quoteAttr}>— {quote.attr}</div>
     </div>
+  );
+}
+
+function BottomTab({ icon: Icon, label, active, onClick, badge }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{ ...styles.bottomTab, ...(active ? styles.bottomTabActive : {}) }}
+      className="salus-btn"
+    >
+      <Icon size={22} strokeWidth={active ? 2.4 : 2} />
+      <span style={{ ...styles.bottomTabLabel, ...(active ? styles.bottomTabLabelActive : {}) }}>
+        {label}
+      </span>
+      {badge > 0 && <span style={styles.bottomTabBadge}>{badge}</span>}
+    </button>
   );
 }
 
@@ -1300,6 +1371,216 @@ function MonthView({ classes, coverRequests, currentUser, onDayClick }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// HOME — cover-first dashboard, the new app landing screen
+// ──────────────────────────────────────────────────────────────────────────────
+
+function Home({ data, currentUser, isManager, onClassClick, onRequestCover, onClaim, onExpressInterest, onViewAllCover, onViewChat }) {
+  const now = new Date();
+  const hour = now.getHours();
+  const greeting = hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening';
+  const todayStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+  const todayIso = now.toISOString().slice(0, 10);
+
+  // Today's classes (all of them, for the date subhead count)
+  const classesToday = data.classes.filter(c => c.date === todayIso);
+
+  // Open cover requests (where this user isn't the one who requested)
+  const openCovers = data.coverRequests
+    .filter(r => r.status === 'open' && r.requestedBy !== currentUser.id)
+    .map(r => ({ ...r, cls: data.classes.find(c => c.id === r.classId) }))
+    .filter(r => r.cls)
+    .sort((a, b) => `${a.cls.date} ${a.cls.time}`.localeCompare(`${b.cls.date} ${b.cls.time}`));
+
+  // Pending requests (for managers to approve)
+  const pendingForManager = isManager
+    ? data.coverRequests
+        .filter(r => r.status === 'pending')
+        .map(r => ({ ...r, cls: data.classes.find(c => c.id === r.classId) }))
+        .filter(r => r.cls)
+    : [];
+
+  // User's upcoming classes today + tomorrow (next 4)
+  const myUpcoming = data.classes
+    .filter(c => c.coachId === currentUser.id && c.date >= todayIso)
+    .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))
+    .slice(0, 4);
+
+  const firstName = currentUser.name?.split(' ')[0] || 'there';
+
+  return (
+    <div style={styles.homeContainer}>
+      {/* Greeting */}
+      <div style={styles.homeGreeting}>
+        <h1 style={styles.homeH1}>{greeting}, {firstName}</h1>
+        <p style={styles.homeGreetSub}>{todayStr} · {classesToday.length} {classesToday.length === 1 ? 'class' : 'classes'} today</p>
+      </div>
+
+      {/* Cover section */}
+      <section style={styles.homeSection}>
+        <div style={styles.homeSectionHead}>
+          <div style={styles.homeSectionTitle}>
+            Needs cover
+            {openCovers.length > 0 && <span style={styles.homeSectionCount}>{openCovers.length}</span>}
+          </div>
+          {openCovers.length > 0 && (
+            <button onClick={onViewAllCover} style={styles.homeSectionLink}>View all →</button>
+          )}
+        </div>
+
+        {openCovers.length === 0 && pendingForManager.length === 0 && (
+          <div style={styles.homeEmptyCover}>
+            <div style={{ fontSize: 22, marginBottom: 4 }}>✓</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#5c4a38' }}>All shifts covered</div>
+            <div style={{ fontSize: 11, color: '#a59478', marginTop: 2 }}>Nothing on the board right now.</div>
+          </div>
+        )}
+
+        {openCovers.map((req, idx) => (
+          <CoverHomeCard
+            key={req.id}
+            req={req}
+            users={data.users}
+            interested={data.users.filter(u => req.interestedCovers?.includes(u.id))}
+            urgent={idx === 0}
+            onClick={() => onClassClick(req.cls.id)}
+            onClaim={() => onClaim(req)}
+            currentUser={currentUser}
+          />
+        ))}
+
+        {pendingForManager.length > 0 && (
+          <>
+            <div style={{ ...styles.homeSectionTitle, marginTop: 18, marginBottom: 8, color: '#7a8270' }}>
+              Awaiting your approval
+            </div>
+            {pendingForManager.map(req => (
+              <CoverHomeCard
+                key={req.id}
+                req={req}
+                users={data.users}
+                interested={[]}
+                pending={true}
+                onClick={() => onClassClick(req.cls.id)}
+                currentUser={currentUser}
+              />
+            ))}
+          </>
+        )}
+      </section>
+
+      {/* Request cover CTA */}
+      <button onClick={onRequestCover} style={styles.homeRequestCard} className="salus-btn">
+        <div style={styles.homeRequestIcon}><Plus size={18} /></div>
+        <div style={{ flex: 1, textAlign: 'left' }}>
+          <div style={styles.homeRequestTitle}>
+            {isManager ? 'Post a shift for cover' : 'I need cover for one of my classes'}
+          </div>
+          <div style={styles.homeRequestSub}>Your team will see it instantly</div>
+        </div>
+      </button>
+
+      {/* Your day */}
+      {myUpcoming.length > 0 && (
+        <section style={styles.homeSection}>
+          <div style={styles.homeSectionHead}>
+            <div style={styles.homeSectionTitle}>Your upcoming classes</div>
+          </div>
+          <div style={styles.homeDayCard}>
+            {myUpcoming.map((cls, idx) => {
+              const isToday = cls.date === todayIso;
+              const dayPrefix = isToday ? '' : new Date(cls.date).toLocaleDateString('en-GB', { weekday: 'short' });
+              return (
+                <button
+                  key={cls.id}
+                  onClick={() => onClassClick(cls.id)}
+                  className="salus-btn"
+                  style={{ ...styles.homeDayRow, ...(idx > 0 ? styles.homeDayRowBorder : {}) }}
+                >
+                  <div style={styles.homeDayTime}>
+                    {dayPrefix && <div style={{ fontSize: 9, color: '#a59478', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 600 }}>{dayPrefix}</div>}
+                    {cls.time}
+                  </div>
+                  <div style={{ flex: 1, textAlign: 'left' }}>
+                    <div style={styles.homeDayTitle}>{cls.type}</div>
+                    <div style={styles.homeDayMeta}>{cls.dur} min · {STUDIOS[cls.studio]?.short}</div>
+                  </div>
+                  {idx === 0 && isToday && <span style={styles.homeDayTagNow}>Up next</span>}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function CoverHomeCard({ req, users, interested, urgent, pending, onClick, onClaim, currentUser }) {
+  const requester = users.find(u => u.id === req.requestedBy);
+  const cls = req.cls;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const classDate = new Date(cls.date);
+  const daysAway = Math.round((classDate - today) / 86400000);
+  const relativeText =
+    daysAway === 0 ? 'today' :
+    daysAway === 1 ? 'tomorrow' :
+    daysAway < 7 ? `${daysAway} days` :
+    daysAway < 14 ? '1 week' :
+    `${Math.floor(daysAway / 7)} weeks`;
+  const isUrgentColor = daysAway <= 1;
+  const dayLabel = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][cls.day];
+
+  return (
+    <div style={{ ...styles.coverHome, ...(urgent ? styles.coverHomeUrgent : {}) }}>
+      <div style={styles.coverHomeTop}>
+        <div style={{ ...styles.coverHomeWhen, ...(isUrgentColor ? {} : styles.coverHomeWhenMuted) }}>
+          <div style={{ ...styles.coverHomeWhenDay, color: isUrgentColor ? '#c8442a' : '#7a8270' }}>{dayLabel}</div>
+          <div style={styles.coverHomeWhenTime}>{cls.time}</div>
+          <div style={{ ...styles.coverHomeWhenRel, color: isUrgentColor ? '#c8442a' : '#7a8270' }}>{relativeText}</div>
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={styles.coverHomeTitle}>{cls.type}</div>
+          <div style={styles.coverHomeCoach}>
+            {requester && <UserAvatar user={requester} size={18} fontSize={8} />}
+            <span>{requester?.name?.split(' ')[0] || 'Someone'} can't make it</span>
+          </div>
+          {req.reason && (
+            <div style={styles.coverHomeReason}>"{req.reason}"</div>
+          )}
+        </div>
+      </div>
+
+      {interested.length > 0 && (
+        <div style={styles.coverHomeInterested}>
+          <div style={styles.coverHomeInterestedAvs}>
+            {interested.slice(0, 3).map((u, i) => (
+              <div key={u.id} style={{ ...styles.coverHomeInterestedAv, marginLeft: i === 0 ? 0 : -6, zIndex: 10 - i }}>
+                <UserAvatar user={u} size={20} fontSize={9} />
+              </div>
+            ))}
+          </div>
+          <span>{interested.length} interested</span>
+        </div>
+      )}
+
+      <div style={styles.coverHomeFooter}>
+        <button onClick={onClick} className="salus-btn" style={styles.coverHomeViewBtn}>
+          View details
+        </button>
+        {!pending && onClaim && currentUser.coachType === 'permanent' && currentUser.id !== req.requestedBy && (
+          <button onClick={onClaim} className="salus-btn" style={styles.coverHomeClaimBtn}>
+            Claim shift
+          </button>
+        )}
+        {pending && (
+          <span style={styles.coverHomePendingPill}>Pending</span>
+        )}
+      </div>
     </div>
   );
 }
@@ -2097,6 +2378,91 @@ function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onClearAl
 // ──────────────────────────────────────────────────────────────────────────────
 
 const RATE_PER_SESSION = 30; // £ per class taught
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ME — personal hub: profile, stats, settings link
+// ──────────────────────────────────────────────────────────────────────────────
+
+function MePage({ data, currentUser, isManager, onOpenSettings, onSignOut, onShowInvoices }) {
+  const myClasses = data.classes.filter(c => c.coachId === currentUser.id);
+  const thisWeekClasses = myClasses; // For now showing all; can filter to this week later
+  const sessionCount = thisWeekClasses.length;
+  const totalMinutes = thisWeekClasses.reduce((acc, c) => acc + c.dur, 0);
+  const owed = sessionCount * 30;
+
+  return (
+    <div style={styles.homeContainer}>
+      {/* Profile header */}
+      <div style={styles.meProfileCard}>
+        <UserAvatar user={currentUser} size={64} fontSize={22} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={styles.meName}>{currentUser.name}</div>
+          <div style={styles.meRole}>
+            {isManager ? 'Manager' : (currentUser.coachType === 'permanent' ? 'Permanent coach' : 'Cover coach')}
+          </div>
+        </div>
+        <button onClick={onOpenSettings} className="salus-btn" style={styles.meEditBtn}>
+          Edit
+        </button>
+      </div>
+
+      {/* Stats card */}
+      <section style={styles.homeSection}>
+        <div style={styles.homeSectionHead}>
+          <div style={styles.homeSectionTitle}>This week</div>
+        </div>
+        <div style={styles.meStatsGrid}>
+          <div style={styles.meStatCell}>
+            <div style={styles.meStatNum}>{sessionCount}</div>
+            <div style={styles.meStatLabel}>Sessions</div>
+          </div>
+          <div style={styles.meStatCell}>
+            <div style={styles.meStatNum}>{Math.round(totalMinutes / 60 * 10) / 10}</div>
+            <div style={styles.meStatLabel}>Hours</div>
+          </div>
+          <div style={styles.meStatCell}>
+            <div style={styles.meStatNum}>£{owed}</div>
+            <div style={styles.meStatLabel}>Owed</div>
+          </div>
+        </div>
+      </section>
+
+      {/* Manager actions */}
+      {isManager && (
+        <section style={styles.homeSection}>
+          <div style={styles.homeSectionHead}>
+            <div style={styles.homeSectionTitle}>Manager tools</div>
+          </div>
+          <div style={styles.meActionsList}>
+            <button onClick={onShowInvoices} className="salus-btn" style={styles.meActionRow}>
+              <FileText size={18} color="#5c4a38" />
+              <span style={{ flex: 1, textAlign: 'left' }}>Generate invoices</span>
+              <ChevronRight size={16} color="#a59478" />
+            </button>
+          </div>
+        </section>
+      )}
+
+      {/* Settings link */}
+      <section style={styles.homeSection}>
+        <div style={styles.homeSectionHead}>
+          <div style={styles.homeSectionTitle}>Settings</div>
+        </div>
+        <div style={styles.meActionsList}>
+          <button onClick={onOpenSettings} className="salus-btn" style={styles.meActionRow}>
+            <SettingsIcon size={18} color="#5c4a38" />
+            <span style={{ flex: 1, textAlign: 'left' }}>Profile, notifications, bank details</span>
+            <ChevronRight size={16} color="#a59478" />
+          </button>
+          <button onClick={onSignOut} className="salus-btn" style={{ ...styles.meActionRow, color: '#c8442a' }}>
+            <LogOut size={18} color="#c8442a" />
+            <span style={{ flex: 1, textAlign: 'left', color: '#c8442a' }}>Sign out</span>
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
 
 function ManagerStats({ data, onShowInvoices }) {
   const allCoaches = data.users.filter(u => u.role === 'coach');
@@ -3662,6 +4028,294 @@ function ConfirmModal({ title, message, confirmLabel, onConfirm, onClose }) {
   );
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// PICK CLASS — when user taps "I need cover", shows their upcoming classes
+// ──────────────────────────────────────────────────────────────────────────────
+
+function PickClassModal({ data, currentUser, isManager, onPick, onClose }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const eligible = isManager
+    ? data.classes.filter(c => c.date >= today && c.status !== 'needsCover').slice(0, 30)
+    : data.classes.filter(c => c.coachId === currentUser.id && c.date >= today && c.status !== 'needsCover');
+  const sorted = [...eligible].sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ padding: 24 }}>
+        <h2 style={{ ...styles.h2, marginTop: 0, marginBottom: 4 }}>Which class needs cover?</h2>
+        <p style={{ ...styles.subtitle, marginBottom: 16 }}>
+          {isManager
+            ? 'Pick any upcoming class to post cover for.'
+            : 'Pick one of your upcoming classes.'}
+        </p>
+        {sorted.length === 0 ? (
+          <p style={{ fontSize: 13, color: '#7a8270', padding: 20, textAlign: 'center' }}>
+            No upcoming classes to request cover for.
+          </p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {sorted.map(cls => {
+              const dayLabel = new Date(cls.date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+              return (
+                <button
+                  key={cls.id}
+                  onClick={() => onPick(cls.id)}
+                  className="salus-btn"
+                  style={styles.pickClassRow}
+                >
+                  <div style={{ minWidth: 80, textAlign: 'left' }}>
+                    <div style={{ fontSize: 11, color: '#7a8270', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>{dayLabel}</div>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: '#5c4a38', marginTop: 2 }}>{cls.time}</div>
+                  </div>
+                  <div style={{ flex: 1, textAlign: 'left' }}>
+                    <div style={{ fontSize: 14, fontWeight: 500, color: '#1a2620' }}>{cls.type}</div>
+                    <div style={{ fontSize: 11, color: '#7a8270', marginTop: 2 }}>{cls.dur} min · {STUDIOS[cls.studio]?.short}</div>
+                  </div>
+                  <ChevronRight size={16} color="#a59478" />
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// COVER THREAD MODAL — Slack-style conversation for each cover request
+// ──────────────────────────────────────────────────────────────────────────────
+
+function CoverThreadModal({ coverRequest, classObj, data, currentUser, isManager, onClose, onClaim, onCancel, onExpressInterest, onApprove, onAssignTo }) {
+  const [messages, setMessages] = useState([]);
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const scrollRef = useRef(null);
+
+  const requester = data.users.find(u => u.id === coverRequest.requestedBy);
+  const dayLabel = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][classObj.day];
+  const dateLabel = new Date(classObj.date).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+  const interested = data.users.filter(u => coverRequest.interestedCovers?.includes(u.id));
+  const isPermanent = currentUser.coachType === 'permanent';
+  const isRequester = currentUser.id === coverRequest.requestedBy;
+
+  // Load messages on open
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const { data: msgs, error } = await supabase
+        .from('cover_messages')
+        .select('*')
+        .eq('cover_request_id', coverRequest.id)
+        .order('created_at', { ascending: true });
+      if (!cancelled) {
+        setMessages(msgs || []);
+        setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [coverRequest.id]);
+
+  // Realtime subscription — new messages appear instantly
+  useEffect(() => {
+    const channel = supabase
+      .channel(`cover-thread-${coverRequest.id}`)
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'cover_messages', filter: `cover_request_id=eq.${coverRequest.id}` },
+        (payload) => {
+          setMessages(prev => {
+            // De-dupe in case the optimistic update already added it
+            if (prev.some(m => m.id === payload.new.id)) return prev;
+            return [...prev, payload.new];
+          });
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [coverRequest.id]);
+
+  // Scroll to bottom when new messages arrive
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages.length]);
+
+  const send = async () => {
+    const text = draft.trim();
+    if (!text || sending) return;
+    setSending(true);
+    setDraft('');
+    const { error } = await supabase
+      .from('cover_messages')
+      .insert({
+        cover_request_id: coverRequest.id,
+        user_id: currentUser.id,
+        text: text,
+      });
+    if (error) {
+      setDraft(text); // restore
+      console.error('send failed', error);
+    }
+    setSending(false);
+  };
+
+  const handleClaim = () => { onClaim(coverRequest); onClose(); };
+  const handleCancel = () => { onCancel(coverRequest.id); onClose(); };
+  const handleInterest = () => { onExpressInterest(coverRequest.id); };
+
+  const formatTime = (iso) => {
+    const d = new Date(iso);
+    const today = new Date();
+    if (d.toDateString() === today.toDateString()) {
+      return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    }
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ' ' +
+           d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  return (
+    <div style={styles.threadBackdrop} onClick={onClose}>
+      <div style={styles.threadSheet} onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div style={styles.threadHeader}>
+          <button onClick={onClose} className="salus-btn" style={styles.threadCloseBtn}>
+            <X size={20} />
+          </button>
+          <div style={styles.threadHeaderTitle}>Cover thread</div>
+          <div style={{ width: 36 }} />
+        </div>
+
+        {/* Class summary card */}
+        <div style={styles.threadClassCard}>
+          <div style={styles.threadClassDate}>{dateLabel}</div>
+          <div style={styles.threadClassTitle}>{classObj.time} · {classObj.type}</div>
+          <div style={styles.threadClassMeta}>{classObj.dur} min · {STUDIOS[classObj.studio]?.short}</div>
+          {requester && (
+            <div style={styles.threadRequester}>
+              <UserAvatar user={requester} size={22} fontSize={10} />
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#1a2620' }}>
+                  {requester.name} can't make it
+                </div>
+                {coverRequest.reason && (
+                  <div style={styles.threadReason}>"{coverRequest.reason}"</div>
+                )}
+              </div>
+            </div>
+          )}
+          {interested.length > 0 && (
+            <div style={styles.threadInterestedBar}>
+              <div style={{ fontSize: 11, color: '#7a8270', fontWeight: 600 }}>
+                Interested:
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {interested.map(u => (
+                  <div key={u.id} style={styles.threadInterestedAv}>
+                    <UserAvatar user={u} size={22} fontSize={10} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Action buttons */}
+        {coverRequest.status === 'open' && !isRequester && (
+          <div style={styles.threadActionBar}>
+            {isPermanent && (
+              <button onClick={handleClaim} className="salus-btn" style={styles.threadClaimBtn}>
+                <Check size={16} /> Claim shift
+              </button>
+            )}
+            {!isPermanent && (
+              <button
+                onClick={handleInterest}
+                disabled={interested.some(u => u.id === currentUser.id)}
+                className="salus-btn"
+                style={{
+                  ...styles.threadClaimBtn,
+                  ...(interested.some(u => u.id === currentUser.id) ? styles.threadClaimBtnDisabled : {})
+                }}
+              >
+                {interested.some(u => u.id === currentUser.id) ? '✓ Interest noted' : 'I\'m interested'}
+              </button>
+            )}
+          </div>
+        )}
+        {isRequester && (coverRequest.status === 'open' || coverRequest.status === 'pending') && (
+          <div style={styles.threadActionBar}>
+            <button onClick={handleCancel} className="salus-btn" style={styles.threadCancelBtn}>
+              Cancel my request
+            </button>
+          </div>
+        )}
+
+        {/* Messages */}
+        <div ref={scrollRef} style={styles.threadMessages}>
+          {loading && (
+            <div style={styles.threadEmpty}>Loading…</div>
+          )}
+          {!loading && messages.length === 0 && (
+            <div style={styles.threadEmpty}>
+              <MessageSquare size={28} color="#c4b8a0" />
+              <div style={{ marginTop: 8, fontSize: 13, color: '#7a8270' }}>
+                No messages yet
+              </div>
+              <div style={{ fontSize: 11, color: '#a59478', marginTop: 4 }}>
+                Ask a question, offer cover, or chat about this shift.
+              </div>
+            </div>
+          )}
+          {!loading && messages.map((msg) => {
+            const author = data.users.find(u => u.id === msg.user_id);
+            const isMine = msg.user_id === currentUser.id;
+            return (
+              <div key={msg.id} style={{ ...styles.threadMsgRow, justifyContent: isMine ? 'flex-end' : 'flex-start' }}>
+                {!isMine && author && (
+                  <UserAvatar user={author} size={28} fontSize={11} />
+                )}
+                <div style={{ ...styles.threadMsgBubble, ...(isMine ? styles.threadMsgBubbleMine : {}) }}>
+                  {!isMine && author && (
+                    <div style={styles.threadMsgAuthor}>{author.name?.split(' ')[0] || 'Someone'}</div>
+                  )}
+                  <div style={styles.threadMsgText}>{msg.text}</div>
+                  <div style={{ ...styles.threadMsgTime, ...(isMine ? { color: 'rgba(255,255,255,0.6)' } : {}) }}>
+                    {formatTime(msg.created_at)}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Input */}
+        <div style={styles.threadInputBar}>
+          <input
+            type="text"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+            placeholder="Reply…"
+            style={styles.threadInput}
+            disabled={sending}
+          />
+          <button
+            onClick={send}
+            disabled={!draft.trim() || sending}
+            className="salus-btn"
+            style={{ ...styles.threadSendBtn, ...((!draft.trim() || sending) ? styles.threadSendBtnDisabled : {}) }}
+          >
+            <Send size={18} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Modal({ children, onClose }) {
   return (
     <div style={styles.modalOverlay} onClick={onClose}>
@@ -3745,6 +4399,235 @@ const styles = {
     padding: '14px 16px', borderRadius: 10,
     background: '#fdfbf5', border: '1px solid #ebe3cf',
     fontSize: 13,
+  },
+
+  // ─── HOME (cover-first dashboard) ───
+  homeContainer: { padding: '0 14px 80px' },
+  homeGreeting: { padding: '12px 4px 8px' },
+  homeH1: { fontFamily: '"Fraunces", serif', fontSize: 26, fontWeight: 500, color: '#1a2620', margin: 0 },
+  homeGreetSub: { fontSize: 13, color: '#7a8270', marginTop: 2, margin: 0 },
+  homeSection: { marginTop: 16 },
+  homeSectionHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10, padding: '0 4px' },
+  homeSectionTitle: { fontSize: 11, fontWeight: 700, color: '#5c4a38', letterSpacing: 1.2, textTransform: 'uppercase', display: 'flex', alignItems: 'center' },
+  homeSectionCount: { background: '#c8442a', color: '#fff', padding: '2px 7px', borderRadius: 8, fontSize: 10, marginLeft: 6, fontWeight: 700, letterSpacing: 0 },
+  homeSectionLink: { fontSize: 11, color: '#7a8270', background: 'none', border: 'none', fontFamily: 'inherit', cursor: 'pointer', padding: 4 },
+  homeEmptyCover: { padding: '24px 14px', background: '#fffdf7', borderRadius: 14, border: '1px solid #efe7d2', textAlign: 'center' },
+
+  // Cover home cards
+  coverHome: { background: '#fff', borderRadius: 14, border: '1px solid #efe7d2', marginBottom: 10, overflow: 'hidden' },
+  coverHomeUrgent: { borderLeft: '3px solid #c8442a' },
+  coverHomeTop: { padding: '14px 14px 10px', display: 'flex', gap: 12 },
+  coverHomeWhen: { display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 10px', background: '#fef0ea', borderRadius: 10, minWidth: 56, flexShrink: 0 },
+  coverHomeWhenMuted: { background: '#fdfbf5' },
+  coverHomeWhenDay: { fontSize: 9, letterSpacing: 1.2, fontWeight: 700, textTransform: 'uppercase' },
+  coverHomeWhenTime: { fontFamily: '"Fraunces", serif', fontSize: 17, color: '#1a2620', marginTop: 2, fontWeight: 600 },
+  coverHomeWhenRel: { fontSize: 9, marginTop: 2, fontWeight: 600 },
+  coverHomeTitle: { fontSize: 15, fontWeight: 600, color: '#1a2620', marginBottom: 4 },
+  coverHomeCoach: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#7a8270' },
+  coverHomeReason: { fontSize: 12, color: '#7a8270', fontStyle: 'italic', marginTop: 6, lineHeight: 1.4 },
+  coverHomeInterested: { display: 'flex', alignItems: 'center', gap: 6, padding: '0 14px 10px', fontSize: 11, color: '#7a8270' },
+  coverHomeInterestedAvs: { display: 'flex' },
+  coverHomeInterestedAv: { border: '2px solid #fff', borderRadius: '50%' },
+  coverHomeFooter: { background: '#fdfbf5', padding: '8px 14px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', borderTop: '1px solid #efe7d2', gap: 8 },
+  coverHomeViewBtn: { background: 'transparent', color: '#7a8270', border: 'none', padding: '6px 8px', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' },
+  coverHomeClaimBtn: { background: '#5c4a38', color: '#fff', padding: '6px 14px', borderRadius: 999, fontSize: 12, fontWeight: 600, border: 'none', fontFamily: 'inherit', cursor: 'pointer' },
+  coverHomePendingPill: { background: '#fef3e2', color: '#b85c38', padding: '4px 10px', borderRadius: 999, fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 },
+
+  // Request cover CTA
+  homeRequestCard: { background: '#fffdf7', border: '1px dashed #c4b8a0', borderRadius: 14, padding: 16, marginTop: 16, display: 'flex', alignItems: 'center', gap: 12, width: '100%', fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' },
+  homeRequestIcon: { width: 36, height: 36, borderRadius: '50%', background: '#5c4a38', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  homeRequestTitle: { fontSize: 14, fontWeight: 600, color: '#1a2620' },
+  homeRequestSub: { fontSize: 11, color: '#7a8270', marginTop: 1 },
+
+  // Your day
+  homeDayCard: { background: '#fffdf7', borderRadius: 14, border: '1px solid #efe7d2', padding: '4px 14px' },
+  homeDayRow: { display: 'flex', alignItems: 'center', gap: 14, padding: '12px 0', width: '100%', background: 'none', border: 'none', fontFamily: 'inherit', cursor: 'pointer' },
+  homeDayRowBorder: { borderTop: '1px solid #f5f0e0' },
+  homeDayTime: { fontSize: 14, fontWeight: 600, color: '#5c4a38', minWidth: 50, textAlign: 'left' },
+  homeDayTitle: { fontSize: 14, fontWeight: 500, color: '#1a2620' },
+  homeDayMeta: { fontSize: 11, color: '#7a8270', marginTop: 2 },
+  homeDayTagNow: { fontSize: 10, padding: '2px 8px', borderRadius: 4, background: '#5c4a38', color: '#fff', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 },
+
+  // ─── ME PAGE ───
+  meProfileCard: {
+    display: 'flex', alignItems: 'center', gap: 14,
+    padding: 16, background: '#fffdf7', borderRadius: 14,
+    border: '1px solid #efe7d2', marginTop: 12,
+  },
+  meName: { fontSize: 18, fontWeight: 600, color: '#1a2620' },
+  meRole: { fontSize: 12, color: '#7a8270', marginTop: 2 },
+  meEditBtn: {
+    padding: '6px 14px', borderRadius: 999, background: '#f0eee4',
+    color: '#5c4a38', fontSize: 12, fontWeight: 600,
+    border: 'none', fontFamily: 'inherit', cursor: 'pointer',
+  },
+  meStatsGrid: {
+    display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8,
+    background: '#fffdf7', borderRadius: 14, padding: 14, border: '1px solid #efe7d2',
+  },
+  meStatCell: { textAlign: 'center', padding: '8px 4px' },
+  meStatNum: { fontFamily: '"Fraunces", serif', fontSize: 24, fontWeight: 500, color: '#1a2620' },
+  meStatLabel: { fontSize: 10, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 0.8, marginTop: 4, fontWeight: 600 },
+  meActionsList: { background: '#fffdf7', borderRadius: 14, border: '1px solid #efe7d2', overflow: 'hidden' },
+  meActionRow: {
+    display: 'flex', alignItems: 'center', gap: 12,
+    padding: '14px 16px', width: '100%',
+    background: 'none', border: 'none', fontFamily: 'inherit',
+    fontSize: 14, color: '#1a2620', cursor: 'pointer',
+    borderBottom: '1px solid #f5f0e0',
+  },
+  pickClassRow: {
+    display: 'flex', alignItems: 'center', gap: 12,
+    padding: '12px 14px', background: '#fffdf7', borderRadius: 10,
+    border: '1px solid #efe7d2', fontFamily: 'inherit', cursor: 'pointer',
+  },
+
+  // ─── COVER THREAD MODAL (Slack-style) ───
+  threadBackdrop: {
+    position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.5)',
+    zIndex: 200, display: 'flex', flexDirection: 'column',
+    backdropFilter: 'blur(4px)',
+  },
+  threadSheet: {
+    background: '#f5f1e8', flex: 1,
+    display: 'flex', flexDirection: 'column',
+    maxWidth: 540, width: '100%', margin: '0 auto',
+    overflow: 'hidden',
+  },
+  threadHeader: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    padding: '14px 14px 12px', background: '#fffdf7',
+    borderBottom: '1px solid #ebe3cf', flexShrink: 0,
+    paddingTop: 'calc(14px + env(safe-area-inset-top))',
+  },
+  threadCloseBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    background: '#f0eee4', border: 'none', display: 'flex',
+    alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+    color: '#5c4a38',
+  },
+  threadHeaderTitle: {
+    fontSize: 14, fontWeight: 600, color: '#5c4a38',
+    textTransform: 'uppercase', letterSpacing: 1.2,
+  },
+  threadClassCard: {
+    background: '#fffdf7', padding: '16px 18px', flexShrink: 0,
+    borderBottom: '1px solid #ebe3cf',
+  },
+  threadClassDate: {
+    fontSize: 11, color: '#7a8270', fontWeight: 600,
+    textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4,
+  },
+  threadClassTitle: {
+    fontFamily: '"Fraunces", serif', fontSize: 22, fontWeight: 500,
+    color: '#1a2620', marginBottom: 2,
+  },
+  threadClassMeta: {
+    fontSize: 12, color: '#7a8270', marginBottom: 14,
+  },
+  threadRequester: {
+    display: 'flex', alignItems: 'flex-start', gap: 10,
+    padding: 12, background: '#fef0ea', borderRadius: 10,
+  },
+  threadReason: {
+    fontSize: 12, color: '#5c4a38', fontStyle: 'italic',
+    marginTop: 4, lineHeight: 1.4,
+  },
+  threadInterestedBar: {
+    display: 'flex', alignItems: 'center', gap: 10, marginTop: 12,
+    padding: '8px 12px', background: '#f0eee4', borderRadius: 10,
+  },
+  threadInterestedAv: { borderRadius: '50%', border: '2px solid #fff' },
+  threadActionBar: {
+    padding: '12px 18px', background: '#fffdf7', flexShrink: 0,
+    borderBottom: '1px solid #ebe3cf',
+  },
+  threadClaimBtn: {
+    width: '100%', padding: '12px 16px', borderRadius: 12,
+    background: '#5c4a38', color: '#fff', fontSize: 14, fontWeight: 600,
+    border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+  },
+  threadClaimBtnDisabled: { background: '#a59478', cursor: 'default' },
+  threadCancelBtn: {
+    width: '100%', padding: '12px 16px', borderRadius: 12,
+    background: '#fdfbf5', color: '#c8442a', fontSize: 14, fontWeight: 600,
+    border: '1px solid #e8b8a8', cursor: 'pointer', fontFamily: 'inherit',
+  },
+  threadMessages: {
+    flex: 1, overflowY: 'auto', padding: '16px 14px',
+    display: 'flex', flexDirection: 'column', gap: 10,
+  },
+  threadEmpty: {
+    flex: 1, display: 'flex', flexDirection: 'column',
+    alignItems: 'center', justifyContent: 'center',
+    padding: '40px 20px', textAlign: 'center',
+  },
+  threadMsgRow: {
+    display: 'flex', alignItems: 'flex-end', gap: 8,
+    maxWidth: '100%',
+  },
+  threadMsgBubble: {
+    padding: '8px 12px', borderRadius: 14,
+    background: '#fff', border: '1px solid #efe7d2',
+    maxWidth: '78%',
+  },
+  threadMsgBubbleMine: {
+    background: '#5c4a38', borderColor: '#5c4a38',
+  },
+  threadMsgAuthor: {
+    fontSize: 11, fontWeight: 600, color: '#7a8c5c',
+    marginBottom: 2,
+  },
+  threadMsgText: {
+    fontSize: 14, color: '#1a2620', lineHeight: 1.4,
+    wordBreak: 'break-word',
+  },
+  threadMsgTime: {
+    fontSize: 10, color: '#a59478', marginTop: 3,
+  },
+  threadInputBar: {
+    display: 'flex', gap: 8, padding: '10px 12px',
+    paddingBottom: 'calc(10px + env(safe-area-inset-bottom))',
+    background: '#fffdf7', borderTop: '1px solid #ebe3cf', flexShrink: 0,
+  },
+  threadInput: {
+    flex: 1, padding: '10px 14px', borderRadius: 999,
+    border: '1px solid #ebe3cf', background: '#f5f1e8',
+    fontSize: 14, fontFamily: 'inherit', color: '#1a2620',
+    outline: 'none',
+  },
+  threadSendBtn: {
+    width: 40, height: 40, borderRadius: 20,
+    background: '#5c4a38', color: '#fff', border: 'none',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    cursor: 'pointer',
+  },
+  threadSendBtnDisabled: { background: '#c4b8a0', cursor: 'default' },
+
+  // ─── COVER THREAD MODAL ends ───
+
+  // ─── BOTTOM NAV ───
+  bottomNav: {
+    position: 'fixed', bottom: 0, left: 0, right: 0,
+    background: '#fffdf7', borderTop: '1px solid #ebe3cf',
+    display: 'flex', padding: '8px 12px',
+    paddingBottom: 'calc(8px + env(safe-area-inset-bottom))',
+    zIndex: 100,
+  },
+  bottomTab: {
+    flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+    padding: 6, color: '#7a8270', background: 'none', border: 'none',
+    fontFamily: 'inherit', cursor: 'pointer', position: 'relative',
+  },
+  bottomTabActive: { color: '#5c4a38' },
+  bottomTabLabel: { fontSize: 10, fontWeight: 600 },
+  bottomTabLabelActive: { fontWeight: 700 },
+  bottomTabBadge: {
+    position: 'absolute', top: 2, right: '28%',
+    background: '#c8442a', color: '#fff', fontSize: 9, fontWeight: 700,
+    minWidth: 16, height: 16, borderRadius: 8,
+    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px',
   },
 
   // View toggle (Week / 3-Month)
@@ -3854,7 +4737,7 @@ const styles = {
     padding: '2px 6px', borderRadius: 10, minWidth: 18, textAlign: 'center',
   },
 
-  main: { padding: '28px 32px', maxWidth: 1400, margin: '0 auto' },
+  main: { padding: '28px 32px 100px', maxWidth: 1400, margin: '0 auto' },
 
   sectionHeader: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end',
