@@ -3853,7 +3853,7 @@ function SettingsModal({ user, isManager, onClose, onSave }) {
           />
           <div style={{ ...styles.colorPickerPreview, background: color || '#5c4a38' }}>
             <span style={{ color: '#fff', fontSize: 13, fontWeight: 700 }}>
-              {(currentUser.name || '').split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase() || '?'}
+              {(user?.name || '').split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase() || '?'}
             </span>
           </div>
         </div>
