@@ -21,7 +21,7 @@ export const classFromDb = (row) => ({
   id: row.id,
   day: row.day,
   date: row.date,
-  time: row.time,
+  time: (row.time || '').slice(0, 5),
   dur: row.dur,
   type: row.type,
   coachId: row.coach_id,
