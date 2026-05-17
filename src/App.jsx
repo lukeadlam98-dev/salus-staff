@@ -529,7 +529,6 @@ export default function SalusStaff() {
   };
 
   // Create a studio hire (stored in classes table with is_hire=TRUE).
-  // Hires block off a studio at a given time for an event or 1:1 session.
   const createStudioHire = async ({ date, time, dur, studio, hireType, notes }) => {
     const dateObj = new Date(date + 'T' + time);
     const jsDay = dateObj.getDay(); // 0=Sun..6=Sat
@@ -550,6 +549,28 @@ export default function SalusStaff() {
       notes: notes || null,
     });
     if (error) { console.error('createStudioHire', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  // Transfer a class directly to another coach (private hand-off).
+  // No approval flow — both coaches have agreed off-app.
+  const transferClass = async (classId, newCoachId) => {
+    if (!classId || !newCoachId) return false;
+    const { error } = await supabase
+      .from('classes')
+      .update({
+        coach_id: newCoachId,
+        status: 'assigned',
+        original_coach_id: null, // clear any cover-related state
+      })
+      .eq('id', classId);
+    if (error) { console.error('transferClass', error); return false; }
+    // Close any open cover request for this class
+    await supabase.from('cover_requests')
+      .delete()
+      .eq('class_id', classId)
+      .in('status', ['pending', 'open']);
     await reloadData(true);
     return true;
   };
@@ -810,6 +831,7 @@ export default function SalusStaff() {
             onOpenSettings={() => setModal({ type: 'settings' })}
             onShowInvoices={() => setModal({ type: 'invoices' })}
             onShowTimeOff={() => setModal({ type: 'timeOff' })}
+            onShowTeam={() => setModal({ type: 'team' })}
             onSignOut={handleLogout}
           />
         )}
@@ -833,6 +855,7 @@ export default function SalusStaff() {
           onClose={() => setModal(null)}
           onRequestCover={(reason) => { requestCover(modal.classId, reason); setModal(null); }}
           onProposeSwap={(toClassId) => { proposeSwap(modal.classId, toClassId); setModal(null); }}
+          onTransfer={() => setModal({ type: 'transferClass', classId: modal.classId })}
           onEdit={() => setModal({ type: 'editClass', classId: modal.classId })}
           onDelete={() => setModal({ type: 'confirmDelete', classId: modal.classId })}
         />
@@ -900,6 +923,27 @@ export default function SalusStaff() {
             onClaim={(r) => { claimCover(r.id); setModal(null); }}
             onCancel={(reqId) => { cancelCoverRequest(reqId); setModal(null); }}
             onExpressInterest={(reqId) => expressInterest(reqId)}
+          />
+        );
+      })()}
+      {modal?.type === 'team' && (
+        <TeamDirectoryModal
+          data={data}
+          currentUser={currentUser}
+          onClose={() => setModal(null)}
+          onMessageInChat={() => { setModal(null); setTab('chat'); }}
+        />
+      )}
+      {modal?.type === 'transferClass' && (() => {
+        const cls = data.classes.find(c => c.id === modal.classId);
+        if (!cls) return null;
+        return (
+          <TransferClassModal
+            classObj={cls}
+            data={data}
+            currentUser={currentUser}
+            onClose={() => setModal(null)}
+            onTransfer={transferClass}
           />
         );
       })()}
@@ -1473,11 +1517,11 @@ function Home({ data, currentUser, isManager, onClassClick, onRequestCover, onHi
         .filter(r => r.cls)
     : [];
 
-  // Upcoming classes — next 4
+  // Upcoming classes — everything within the next 7 days from today
+  const oneWeekOutIso = toIsoDate(addDays(now, 7));
   const myUpcoming = data.classes
-    .filter(c => c.coachId === currentUser.id && c.date >= todayIso)
-    .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))
-    .slice(0, 4);
+    .filter(c => c.coachId === currentUser.id && c.date >= todayIso && c.date <= oneWeekOutIso)
+    .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
 
   const totalCoverAttention = openCovers.length + pendingForManager.length;
   const [coverOpen, setCoverOpen] = useState(false);
@@ -2651,7 +2695,7 @@ const RATE_PER_SESSION = 30; // £ per class taught
 // ME — personal hub: profile, stats, settings link
 // ──────────────────────────────────────────────────────────────────────────────
 
-function MePage({ data, currentUser, isManager, onOpenSettings, onSignOut, onShowInvoices, onShowTimeOff }) {
+function MePage({ data, currentUser, isManager, onOpenSettings, onSignOut, onShowInvoices, onShowTimeOff, onShowTeam }) {
   const myClasses = data.classes.filter(c => c.coachId === currentUser.id);
   const sessionCount = myClasses.length;
   const totalMinutes = myClasses.reduce((acc, c) => acc + c.dur, 0);
@@ -2717,6 +2761,23 @@ function MePage({ data, currentUser, isManager, onOpenSettings, onSignOut, onSho
             <div style={{ flex: 1, textAlign: 'left' }}>
               <div style={{ fontSize: 14, color: '#1a2620' }}>Time off & bank holidays</div>
               <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Upcoming UK bank holidays</div>
+            </div>
+            <ChevronRight size={16} color="#a59478" />
+          </button>
+        </div>
+      </section>
+
+      {/* Your team */}
+      <section style={styles.homeSection}>
+        <div style={styles.homeSectionHead}>
+          <div style={styles.homeSectionTitle}>Know your team</div>
+        </div>
+        <div style={styles.meActionsList}>
+          <button onClick={onShowTeam} className="salus-btn" style={styles.meActionRow}>
+            <Users size={18} color="#5c4a38" />
+            <div style={{ flex: 1, textAlign: 'left' }}>
+              <div style={{ fontSize: 14, color: '#1a2620' }}>Your team ({data.users.length})</div>
+              <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Everyone at Salus House</div>
             </div>
             <ChevronRight size={16} color="#a59478" />
           </button>
@@ -2984,7 +3045,7 @@ function CoachStats({ data, currentUser }) {
 // MODALS
 // ──────────────────────────────────────────────────────────────────────────────
 
-function ClassDetailModal({ classObj, data, currentUser, isManager, onClose, onRequestCover, onProposeSwap, onEdit, onDelete }) {
+function ClassDetailModal({ classObj, data, currentUser, isManager, onClose, onRequestCover, onProposeSwap, onTransfer, onEdit, onDelete }) {
   const [mode, setMode] = useState('view'); // view | requestCover | swap
   const [reason, setReason] = useState('');
   const [swapTarget, setSwapTarget] = useState('');
@@ -3047,6 +3108,9 @@ function ClassDetailModal({ classObj, data, currentUser, isManager, onClose, onR
               <>
                 <button onClick={() => setMode('requestCover')} className="salus-btn" style={isManager ? styles.btnSecondary : styles.btnPrimary}>
                   <AlertCircle size={14} /> Request cover
+                </button>
+                <button onClick={onTransfer} className="salus-btn" style={styles.btnSecondary}>
+                  <ArrowLeftRight size={14} /> Transfer to coach
                 </button>
                 {!isManager && myOtherClasses.length > 0 && (
                   <button onClick={() => setMode('swap')} className="salus-btn" style={styles.btnSecondary}>
@@ -3767,24 +3831,35 @@ function SettingsModal({ user, isManager, onClose, onSave }) {
         </div>
 
         <label style={styles.label}>Profile colour</label>
-        <div style={styles.colorPalette}>
-          {AVATAR_COLOR_PALETTE.map(c => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => setColor(c)}
-              className="salus-btn"
-              style={{
-                ...styles.colorSwatch,
-                background: c,
-                ...(color === c ? styles.colorSwatchActive : {}),
-              }}
-              aria-label={`Pick colour ${c}`}
-            >
-              {color === c && <Check size={14} color="#fff" strokeWidth={3} />}
-            </button>
-          ))}
+        <div style={styles.colorPickerRow}>
+          <input
+            type="color"
+            value={color || '#5c4a38'}
+            onChange={(e) => setColor(e.target.value)}
+            style={styles.colorPickerWell}
+            aria-label="Pick a profile colour"
+          />
+          <input
+            type="text"
+            value={color || ''}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === '' || /^#[0-9a-fA-F]{0,6}$/.test(v)) setColor(v);
+            }}
+            placeholder="#5c4a38"
+            className="salus-input"
+            style={styles.colorPickerHex}
+            maxLength={7}
+          />
+          <div style={{ ...styles.colorPickerPreview, background: color || '#5c4a38' }}>
+            <span style={{ color: '#fff', fontSize: 13, fontWeight: 700 }}>
+              {(currentUser.name || '').split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase() || '?'}
+            </span>
+          </div>
         </div>
+        <p style={{ fontSize: 11, color: '#a59478', marginTop: 6, marginBottom: 20 }}>
+          Tap the swatch to pick any colour, or type a hex code like #c8442a.
+        </p>
 
         <PushNotificationsSection />
 
@@ -4736,6 +4811,180 @@ function DayDetailModal({ isoDate, data, currentUser, isManager, onClose, onClas
 // HIRE STUDIO MODAL — book a studio for an event or 1:1 session
 // ──────────────────────────────────────────────────────────────────────────────
 
+// ──────────────────────────────────────────────────────────────────────────────
+// TEAM DIRECTORY MODAL — see everyone on the team, contact via chat
+// ──────────────────────────────────────────────────────────────────────────────
+
+function TeamDirectoryModal({ data, currentUser, onClose, onMessageInChat }) {
+  // Group: manager first, then permanent coaches, then cover coaches
+  const sorted = [...data.users].sort((a, b) => {
+    const rank = (u) => u.role === 'manager' ? 0 : u.coachType === 'permanent' ? 1 : 2;
+    const r = rank(a) - rank(b);
+    if (r !== 0) return r;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+  const manager = sorted.find(u => u.role === 'manager');
+  const permanent = sorted.filter(u => u.role === 'coach' && u.coachType === 'permanent');
+  const covers = sorted.filter(u => u.role === 'coach' && u.coachType === 'cover');
+
+  const renderUser = (u) => {
+    const isMe = u.id === currentUser.id;
+    return (
+      <div key={u.id} style={styles.teamRow}>
+        <UserAvatar user={u} size={48} fontSize={16} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={styles.teamRowName}>
+            {u.name} {isMe && <span style={styles.teamMeTag}>You</span>}
+          </div>
+          <div style={styles.teamRowMeta}>
+            {u.role === 'manager' ? 'Manager' :
+             u.coachType === 'permanent' ? 'Permanent coach' : 'Cover coach'}
+          </div>
+        </div>
+        {!isMe && (
+          <button
+            onClick={() => onMessageInChat()}
+            className="salus-btn"
+            style={styles.teamMessageBtn}
+            title="Message the team chat"
+          >
+            <MessageSquare size={14} /> Chat
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div style={styles.threadBackdrop} onClick={onClose}>
+      <div style={styles.threadSheet} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.threadHeader}>
+          <button onClick={onClose} className="salus-btn" style={styles.threadCloseBtn}>
+            <X size={20} />
+          </button>
+          <div style={styles.threadHeaderTitle}>Your team</div>
+          <div style={{ width: 36 }} />
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '14px' }}>
+          {manager && (
+            <>
+              <div style={styles.teamSectionLabel}>Manager</div>
+              {renderUser(manager)}
+            </>
+          )}
+          {permanent.length > 0 && (
+            <>
+              <div style={styles.teamSectionLabel}>Permanent coaches ({permanent.length})</div>
+              {permanent.map(renderUser)}
+            </>
+          )}
+          {covers.length > 0 && (
+            <>
+              <div style={styles.teamSectionLabel}>Cover coaches ({covers.length})</div>
+              {covers.map(renderUser)}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// TRANSFER CLASS MODAL — privately hand a class to another coach
+// ──────────────────────────────────────────────────────────────────────────────
+
+function TransferClassModal({ classObj, data, currentUser, onClose, onTransfer }) {
+  const [pickedCoachId, setPickedCoachId] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const coaches = data.users
+    .filter(u => u.role === 'coach' && u.id !== currentUser.id)
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  const dayLabel = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][classObj.day];
+  const dateLabel = new Date(classObj.date).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+
+  const handleTransfer = async () => {
+    if (!pickedCoachId || submitting) return;
+    setSubmitting(true);
+    await onTransfer(classObj.id, pickedCoachId);
+    setSubmitting(false);
+    onClose();
+  };
+
+  const pickedCoach = coaches.find(c => c.id === pickedCoachId);
+
+  return (
+    <div style={styles.threadBackdrop} onClick={onClose}>
+      <div style={styles.threadSheet} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.threadHeader}>
+          <button onClick={onClose} className="salus-btn" style={styles.threadCloseBtn}>
+            <X size={20} />
+          </button>
+          <div style={styles.threadHeaderTitle}>Transfer class</div>
+          <div style={{ width: 36 }} />
+        </div>
+
+        <div style={styles.dayDetailHeader}>
+          <div style={styles.dayDetailRelative}>Class to transfer</div>
+          <div style={styles.dayDetailTitle}>{classObj.time} · {classObj.type}</div>
+          <div style={styles.dayDetailMeta}>{dateLabel} · {classObj.dur} min · {STUDIOS[classObj.studio]?.short}</div>
+        </div>
+
+        <div style={{ padding: '14px 16px 4px', flexShrink: 0 }}>
+          <p style={{ fontSize: 13, color: '#7a8270', lineHeight: 1.5, margin: 0 }}>
+            Only do this if you've already agreed privately with the other coach. The class will move
+            from your schedule to theirs immediately — no approval needed.
+          </p>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px' }}>
+          {coaches.map(c => {
+            const picked = pickedCoachId === c.id;
+            return (
+              <button
+                key={c.id}
+                onClick={() => setPickedCoachId(c.id)}
+                className="salus-btn"
+                style={{
+                  ...styles.transferCoachRow,
+                  ...(picked ? styles.transferCoachRowActive : {}),
+                }}
+              >
+                <UserAvatar user={c} size={36} fontSize={13} />
+                <div style={{ flex: 1, textAlign: 'left' }}>
+                  <div style={{ fontSize: 14, fontWeight: 500, color: '#1a2620' }}>{c.name}</div>
+                  <div style={{ fontSize: 11, color: '#7a8270', marginTop: 2 }}>
+                    {c.coachType === 'permanent' ? 'Permanent coach' : 'Cover coach'}
+                  </div>
+                </div>
+                {picked && <Check size={20} color="#5c4a38" strokeWidth={2.5} />}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={styles.threadActionBar}>
+          <button
+            onClick={handleTransfer}
+            disabled={!pickedCoachId || submitting}
+            className="salus-btn"
+            style={{
+              ...styles.threadClaimBtn,
+              ...((!pickedCoachId || submitting) ? styles.threadClaimBtnDisabled : {}),
+            }}
+          >
+            {submitting ? 'Transferring…' :
+             pickedCoach ? `Transfer to ${pickedCoach.name.split(' ')[0]}` :
+             'Pick a coach above'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function HireStudioModal({ onClose, onSubmit, currentUser }) {
   const [hireType, setHireType] = useState('1on1'); // '1on1' | 'event'
   const [date, setDate] = useState('');
@@ -5345,6 +5594,42 @@ const styles = {
     fontFamily: 'inherit', cursor: 'pointer',
   },
   hireSubmitBtnDisabled: { background: '#c4b8a0', cursor: 'default' },
+
+  // ─── TEAM DIRECTORY ───
+  teamSectionLabel: {
+    fontSize: 11, color: '#7a8270', fontWeight: 700,
+    textTransform: 'uppercase', letterSpacing: 0.8,
+    padding: '14px 4px 6px',
+  },
+  teamRow: {
+    display: 'flex', alignItems: 'center', gap: 12,
+    padding: 12, background: '#fffdf7', borderRadius: 12,
+    border: '1px solid #efe7d2', marginBottom: 8,
+  },
+  teamRowName: { fontSize: 14, fontWeight: 600, color: '#1a2620' },
+  teamRowMeta: { fontSize: 11, color: '#7a8270', marginTop: 2 },
+  teamMeTag: {
+    background: '#f0eee4', color: '#7a8270',
+    fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
+    textTransform: 'uppercase', letterSpacing: 0.5, marginLeft: 6,
+  },
+  teamMessageBtn: {
+    background: 'transparent', border: '1px solid #ebe3cf',
+    padding: '6px 10px', borderRadius: 999, color: '#5c4a38',
+    fontSize: 11, fontWeight: 600, fontFamily: 'inherit',
+    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+  },
+
+  // ─── TRANSFER CLASS ───
+  transferCoachRow: {
+    display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+    padding: 12, background: '#fffdf7', borderRadius: 12,
+    border: '1px solid #efe7d2', marginBottom: 8,
+    fontFamily: 'inherit', cursor: 'pointer',
+  },
+  transferCoachRowActive: {
+    background: '#fef0ea', borderColor: '#5c4a38', borderWidth: 2,
+  },
 
   // ─── COVER THREAD MODAL ends ───
 
@@ -6049,6 +6334,22 @@ const styles = {
   colorPalette: {
     display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(40px, 1fr))',
     gap: 8, marginBottom: 20, maxWidth: 380,
+  },
+  colorPickerRow: {
+    display: 'flex', alignItems: 'center', gap: 10,
+  },
+  colorPickerWell: {
+    width: 50, height: 44, border: '1px solid #d4cdb8', borderRadius: 8,
+    cursor: 'pointer', padding: 0, background: 'none',
+  },
+  colorPickerHex: {
+    flex: 1, padding: '11px 14px', fontSize: 14,
+    fontFamily: 'monospace', textTransform: 'uppercase',
+  },
+  colorPickerPreview: {
+    width: 44, height: 44, borderRadius: '50%',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    flexShrink: 0,
   },
   colorSwatch: {
     width: 40, height: 40, borderRadius: '50%',
