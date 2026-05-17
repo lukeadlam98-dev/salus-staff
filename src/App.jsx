@@ -77,6 +77,28 @@ const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const DATES = ['2026-05-18', '2026-05-19', '2026-05-20', '2026-05-21', '2026-05-22', '2026-05-23', '2026-05-24'];
 const DAY_LABELS = ['Mon 18', 'Tue 19', 'Wed 20', 'Thu 21', 'Fri 22', 'Sat 23', 'Sun 24'];
 
+// ─── Date helpers ───
+// Monday-anchored week: returns the Monday of the week containing `date`.
+function getMonday(date) {
+  const d = new Date(date);
+  const day = d.getDay(); // 0=Sun..6=Sat
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+function addDays(date, n) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + n);
+  return d;
+}
+function toIsoDate(date) {
+  const d = new Date(date);
+  return d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0');
+}
+
 
 // ──────────────────────────────────────────────────────────────────────────────
 // HOOKS
@@ -648,8 +670,6 @@ export default function SalusStaff() {
           </button>
         </div>
       </header>
-
-      <DailyQuote />
 
       {/* Main */}
       <main className="salus-main" style={styles.main}>
@@ -1254,7 +1274,7 @@ function MonthView({ classes, coverRequests, currentUser, onDayClick }) {
     for (let i = 0; i < firstWeekday; i++) cells.push(null);
     for (let d = 1; d <= daysInMonth; d++) {
       const cellDate = new Date(date.getFullYear(), date.getMonth(), d);
-      const isoDate = cellDate.toISOString().slice(0, 10);
+      const isoDate = toIsoDate(cellDate); // local date, not UTC
       const classesThisDay = classes.filter(c => c.date === isoDate);
       const coverCount = classesThisDay.filter(c => c.status === 'needsCover').length;
       const isToday = cellDate.getTime() === today.getTime();
@@ -1350,17 +1370,16 @@ function Home({ data, currentUser, isManager, onClassClick, onRequestCover, onCl
   const todayStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
   const todayIso = now.toISOString().slice(0, 10);
 
-  // Today's classes (all of them, for the date subhead count)
   const classesToday = data.classes.filter(c => c.date === todayIso);
 
-  // Open cover requests (where this user isn't the one who requested)
+  // Open cover requests (excluding ones the user posted themselves)
   const openCovers = data.coverRequests
     .filter(r => r.status === 'open' && r.requestedBy !== currentUser.id)
     .map(r => ({ ...r, cls: data.classes.find(c => c.id === r.classId) }))
     .filter(r => r.cls)
     .sort((a, b) => `${a.cls.date} ${a.cls.time}`.localeCompare(`${b.cls.date} ${b.cls.time}`));
 
-  // Pending requests (for managers to approve)
+  // Manager-only pending queue
   const pendingForManager = isManager
     ? data.coverRequests
         .filter(r => r.status === 'pending')
@@ -1368,11 +1387,33 @@ function Home({ data, currentUser, isManager, onClassClick, onRequestCover, onCl
         .filter(r => r.cls)
     : [];
 
-  // User's upcoming classes today + tomorrow (next 4)
+  // Upcoming classes — next 4
   const myUpcoming = data.classes
     .filter(c => c.coachId === currentUser.id && c.date >= todayIso)
     .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))
     .slice(0, 4);
+
+  const totalCoverAttention = openCovers.length + pendingForManager.length;
+  const [coverOpen, setCoverOpen] = useState(totalCoverAttention > 0);
+  const [dayOpen, setDayOpen] = useState(false);
+
+  // Summary line for collapsed cover tile
+  const coverSummary = (() => {
+    if (totalCoverAttention === 0) return 'All shifts covered';
+    const first = openCovers[0] || pendingForManager[0];
+    if (!first?.cls) return `${totalCoverAttention} need attention`;
+    const day = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][first.cls.day];
+    return `Next: ${day} ${first.cls.time} · ${first.cls.type}`;
+  })();
+
+  // Summary line for collapsed day tile
+  const daySummary = (() => {
+    if (myUpcoming.length === 0) return 'No upcoming classes';
+    const next = myUpcoming[0];
+    const isToday = next.date === todayIso;
+    const prefix = isToday ? 'Today' : new Date(next.date).toLocaleDateString('en-GB', { weekday: 'short' });
+    return `Up next: ${prefix} ${next.time} · ${next.type}`;
+  })();
 
   const firstName = currentUser.name?.split(' ')[0] || 'there';
 
@@ -1384,76 +1425,71 @@ function Home({ data, currentUser, isManager, onClassClick, onRequestCover, onCl
         <p style={styles.homeGreetSub}>{todayStr} · {classesToday.length} {classesToday.length === 1 ? 'class' : 'classes'} today</p>
       </div>
 
-      {/* Cover section */}
-      <section style={styles.homeSection}>
-        <div style={styles.homeSectionHead}>
-          <div style={styles.homeSectionTitle}>
-            Needs cover
-            {openCovers.length > 0 && <span style={styles.homeSectionCount}>{openCovers.length}</span>}
-          </div>
-          {openCovers.length > 0 && (
-            <button onClick={onViewAllCover} style={styles.homeSectionLink}>View all →</button>
-          )}
-        </div>
-
-        {openCovers.length === 0 && pendingForManager.length === 0 && (
+      {/* Cover tile */}
+      <HomeTile
+        title="Needs cover"
+        count={totalCoverAttention}
+        summary={coverSummary}
+        open={coverOpen}
+        onToggle={() => setCoverOpen(o => !o)}
+        urgent={totalCoverAttention > 0}
+        onViewAll={totalCoverAttention > 0 ? onViewAllCover : null}
+      >
+        {totalCoverAttention === 0 ? (
           <div style={styles.homeEmptyCover}>
             <div style={{ fontSize: 22, marginBottom: 4 }}>✓</div>
             <div style={{ fontSize: 13, fontWeight: 600, color: '#5c4a38' }}>All shifts covered</div>
             <div style={{ fontSize: 11, color: '#a59478', marginTop: 2 }}>Nothing on the board right now.</div>
           </div>
-        )}
-
-        {openCovers.map((req, idx) => (
-          <CoverHomeCard
-            key={req.id}
-            req={req}
-            users={data.users}
-            interested={data.users.filter(u => req.interestedCovers?.includes(u.id))}
-            urgent={idx === 0}
-            onClick={() => onClassClick(req.cls.id)}
-            onClaim={() => onClaim(req)}
-            currentUser={currentUser}
-          />
-        ))}
-
-        {pendingForManager.length > 0 && (
+        ) : (
           <>
-            <div style={{ ...styles.homeSectionTitle, marginTop: 18, marginBottom: 8, color: '#7a8270' }}>
-              Awaiting your approval
-            </div>
-            {pendingForManager.map(req => (
+            {openCovers.map((req, idx) => (
               <CoverHomeCard
                 key={req.id}
                 req={req}
                 users={data.users}
-                interested={[]}
-                pending={true}
+                interested={data.users.filter(u => req.interestedCovers?.includes(u.id))}
+                urgent={idx === 0}
                 onClick={() => onClassClick(req.cls.id)}
+                onClaim={() => onClaim(req)}
                 currentUser={currentUser}
               />
             ))}
+            {pendingForManager.length > 0 && (
+              <>
+                <div style={{ ...styles.homeSectionTitle, marginTop: 14, marginBottom: 8, color: '#7a8270', paddingLeft: 4 }}>
+                  Awaiting your approval
+                </div>
+                {pendingForManager.map(req => (
+                  <CoverHomeCard
+                    key={req.id}
+                    req={req}
+                    users={data.users}
+                    interested={[]}
+                    pending={true}
+                    onClick={() => onClassClick(req.cls.id)}
+                    currentUser={currentUser}
+                  />
+                ))}
+              </>
+            )}
           </>
         )}
-      </section>
+      </HomeTile>
 
-      {/* Request cover CTA */}
-      <button onClick={onRequestCover} style={styles.homeRequestCard} className="salus-btn">
-        <div style={styles.homeRequestIcon}><Plus size={18} /></div>
-        <div style={{ flex: 1, textAlign: 'left' }}>
-          <div style={styles.homeRequestTitle}>
-            {isManager ? 'Post a shift for cover' : 'I need cover for one of my classes'}
+      {/* Your day tile */}
+      <HomeTile
+        title="Your upcoming classes"
+        count={myUpcoming.length}
+        summary={daySummary}
+        open={dayOpen}
+        onToggle={() => setDayOpen(o => !o)}
+      >
+        {myUpcoming.length === 0 ? (
+          <div style={{ ...styles.homeEmptyCover, padding: '18px 14px' }}>
+            <div style={{ fontSize: 12, color: '#7a8270' }}>Nothing scheduled.</div>
           </div>
-          <div style={styles.homeRequestSub}>Your team will see it instantly</div>
-        </div>
-      </button>
-
-      {/* Your day */}
-      {myUpcoming.length > 0 && (
-        <section style={styles.homeSection}>
-          <div style={styles.homeSectionHead}>
-            <div style={styles.homeSectionTitle}>Your upcoming classes</div>
-          </div>
+        ) : (
           <div style={styles.homeDayCard}>
             {myUpcoming.map((cls, idx) => {
               const isToday = cls.date === todayIso;
@@ -1478,7 +1514,59 @@ function Home({ data, currentUser, isManager, onClassClick, onRequestCover, onCl
               );
             })}
           </div>
-        </section>
+        )}
+      </HomeTile>
+
+      {/* Request cover CTA */}
+      <button onClick={onRequestCover} style={styles.homeRequestCard} className="salus-btn">
+        <div style={styles.homeRequestIcon}><Plus size={18} /></div>
+        <div style={{ flex: 1, textAlign: 'left' }}>
+          <div style={styles.homeRequestTitle}>
+            {isManager ? 'Post a shift for cover' : 'I need cover for one of my classes'}
+          </div>
+          <div style={styles.homeRequestSub}>Your team will see it instantly</div>
+        </div>
+      </button>
+    </div>
+  );
+}
+
+function HomeTile({ title, count, summary, open, onToggle, urgent, onViewAll, children }) {
+  return (
+    <div style={styles.tile}>
+      <button onClick={onToggle} className="salus-btn" style={styles.tileHeader}>
+        <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+          <div style={styles.tileHeaderTitleRow}>
+            <span style={styles.tileTitle}>{title}</span>
+            {count > 0 && (
+              <span style={{
+                ...styles.tileCount,
+                background: urgent ? '#c8442a' : '#a59478',
+              }}>
+                {count}
+              </span>
+            )}
+          </div>
+          {!open && summary && <div style={styles.tileSummary}>{summary}</div>}
+        </div>
+        <ChevronRight
+          size={18}
+          color="#a59478"
+          style={{
+            transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+            transition: 'transform 0.2s ease',
+          }}
+        />
+      </button>
+      {open && (
+        <div style={styles.tileBody}>
+          {children}
+          {onViewAll && (
+            <button onClick={onViewAll} className="salus-btn" style={styles.tileViewAll}>
+              View all →
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
@@ -1552,19 +1640,45 @@ function CoverHomeCard({ req, users, interested, urgent, pending, onClick, onCla
 function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAddClass }) {
   const [filter, setFilter] = useState('all'); // all | mine | needsCover
   const [studioFilter, setStudioFilter] = useState('all'); // all | reformer | hybrid
-  const [selectedDay, setSelectedDay] = useState(0); // for mobile day-selector
-  const [viewMode, setViewMode] = useState('week'); // week | month
+  const [weekOffset, setWeekOffset] = useState(0); // 0 = this week, 1 = next, etc.
+  const [selectedDayIdx, setSelectedDayIdx] = useState(() => {
+    const today = new Date().getDay();
+    return today === 0 ? 6 : today - 1; // map Sun=0..Sat=6 → Mon=0..Sun=6
+  });
+  const [viewMode, setViewMode] = useState('week');
 
-  let classes = data.classes;
-  if (filter === 'mine') classes = classes.filter(c => c.coachId === currentUser.id);
-  if (filter === 'needsCover') classes = classes.filter(c => c.status === 'needsCover');
-  if (studioFilter !== 'all') classes = classes.filter(c => c.studio === studioFilter);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const currentMonday = getMonday(today);
+  const weekStart = addDays(currentMonday, weekOffset * 7);
+  const weekDates = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+  const weekIso = weekDates.map(toIsoDate);
+  const todayIso = toIsoDate(today);
 
-  const byDay = DAYS.map((_, i) =>
-    classes
-      .filter(c => c.day === i)
-      .sort((a, b) => a.time.localeCompare(b.time))
+  // Filter classes to just this visible week
+  const weekClasses = data.classes.filter(c => weekIso.includes(c.date));
+  let visibleClasses = weekClasses;
+  if (filter === 'mine') visibleClasses = visibleClasses.filter(c => c.coachId === currentUser.id);
+  if (filter === 'needsCover') visibleClasses = visibleClasses.filter(c => c.status === 'needsCover');
+  if (studioFilter !== 'all') visibleClasses = visibleClasses.filter(c => c.studio === studioFilter);
+
+  // Group by date index (0=Mon..6=Sun within the visible week)
+  const byDayIdx = weekIso.map(iso =>
+    visibleClasses.filter(c => c.date === iso).sort((a, b) => a.time.localeCompare(b.time))
   );
+
+  // Week range label
+  const weekRangeLabel = (() => {
+    const start = weekDates[0];
+    const end = weekDates[6];
+    const sameMonth = start.getMonth() === end.getMonth();
+    if (sameMonth) {
+      return `${start.getDate()}–${end.getDate()} ${start.toLocaleDateString('en-GB', { month: 'short' })}`;
+    }
+    return `${start.getDate()} ${start.toLocaleDateString('en-GB', { month: 'short' })} – ${end.getDate()} ${end.toLocaleDateString('en-GB', { month: 'short' })}`;
+  })();
+
+  const canGoForward = weekOffset < 12; // ~3 months ahead
+  const canGoBack = weekOffset > -2;
 
   // Renders a single class card — used in both desktop and mobile views
   const renderClassCard = (cls, variant = 'compact') => {
@@ -1634,13 +1748,45 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
 
   return (
     <div>
+      {/* Week navigator */}
+      {viewMode === 'week' && (
+        <div style={styles.weekNav}>
+          <button
+            onClick={() => canGoBack && setWeekOffset(o => o - 1)}
+            disabled={!canGoBack}
+            className="salus-btn"
+            style={{ ...styles.weekNavBtn, opacity: canGoBack ? 1 : 0.3 }}
+            title="Previous week"
+          >
+            <ChevronLeft size={20} />
+          </button>
+          <div style={styles.weekNavCenter}>
+            <div style={styles.weekNavRange}>{weekRangeLabel}</div>
+            <button
+              onClick={() => setWeekOffset(0)}
+              className="salus-btn"
+              style={styles.weekNavTodayBtn}
+              disabled={weekOffset === 0}
+            >
+              {weekOffset === 0 ? 'This week' : 'Jump to today'}
+            </button>
+          </div>
+          <button
+            onClick={() => canGoForward && setWeekOffset(o => o + 1)}
+            disabled={!canGoForward}
+            className="salus-btn"
+            style={{ ...styles.weekNavBtn, opacity: canGoForward ? 1 : 0.3 }}
+            title="Next week"
+          >
+            <ChevronRight size={20} />
+          </button>
+        </div>
+      )}
+
       <div className="salus-section-header" style={styles.sectionHeader}>
         <div>
-          <h2 className="salus-h2" style={styles.h2}>
-            {viewMode === 'month' ? 'Next 3 Months' : (isMobile ? 'This Week' : `Week of ${DAY_LABELS[0]}–${DAY_LABELS[6]} May`)}
-          </h2>
           <p style={styles.subtitle}>
-            {classes.length} classes · {data.classes.filter(c => c.status === 'needsCover').length} need cover
+            {visibleClasses.length} classes · {weekClasses.filter(c => c.status === 'needsCover').length} need cover
           </p>
         </div>
         <div style={styles.filterRow}>
@@ -1681,12 +1827,16 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
           coverRequests={data.coverRequests}
           currentUser={currentUser}
           onDayClick={(isoDate) => {
-            // Switch back to week view focused on that day
-            const targetClasses = data.classes.filter(c => c.date === isoDate);
-            if (targetClasses.length > 0) {
-              setViewMode('week');
-              setSelectedDay(targetClasses[0].day);
-            }
+            // Compute the week-offset that contains this date
+            const [y, m, d] = isoDate.split('-').map(Number);
+            const target = new Date(y, m - 1, d);
+            const targetMonday = getMonday(target);
+            const diffWeeks = Math.round((targetMonday - currentMonday) / (7 * 86400000));
+            setWeekOffset(diffWeeks);
+            // Day index within the week (Mon=0..Sun=6)
+            const dow = target.getDay();
+            setSelectedDayIdx(dow === 0 ? 6 : dow - 1);
+            setViewMode('week');
           }}
         />
       ) : (
@@ -1721,17 +1871,23 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
         <>
           <div style={styles.daySelector} className="salus-scroll">
             {DAYS.map((day, i) => {
-              const isActive = i === selectedDay;
+              const isActive = i === selectedDayIdx;
+              const date = weekDates[i];
+              const isToday = toIsoDate(date) === todayIso;
               return (
                 <button
                   key={day}
-                  onClick={() => setSelectedDay(i)}
+                  onClick={() => setSelectedDayIdx(i)}
                   className="salus-btn"
-                  style={{ ...styles.dayPill, ...(isActive ? styles.dayPillActive : {}) }}
+                  style={{
+                    ...styles.dayPill,
+                    ...(isActive ? styles.dayPillActive : {}),
+                    ...(isToday && !isActive ? { borderColor: '#5c4a38', borderWidth: 1.5 } : {}),
+                  }}
                 >
                   <div style={styles.dayPillDay}>{day}</div>
-                  <div style={styles.dayPillDate}>{DAY_LABELS[i].split(' ')[1]}</div>
-                  {byDay[i].length > 0 && <div style={{ ...styles.dayPillDot, background: isActive ? '#fff' : '#5c4a38' }} />}
+                  <div style={styles.dayPillDate}>{date.getDate()}</div>
+                  {byDayIdx[i].length > 0 && <div style={{ ...styles.dayPillDot, background: isActive ? '#fff' : '#5c4a38' }} />}
                 </button>
               );
             })}
@@ -1739,21 +1895,23 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
 
           <div style={styles.mobileDayHeader}>
             <div>
-              <div style={styles.mobileDayHeaderDay}>{DAYS[selectedDay]} {DAY_LABELS[selectedDay].split(' ')[1]} May</div>
+              <div style={styles.mobileDayHeaderDay}>
+                {DAYS[selectedDayIdx]} {weekDates[selectedDayIdx].getDate()} {weekDates[selectedDayIdx].toLocaleDateString('en-GB', { month: 'short' })}
+              </div>
               <div style={styles.subtitle}>
-                {byDay[selectedDay].length} class{byDay[selectedDay].length === 1 ? '' : 'es'}
+                {byDayIdx[selectedDayIdx].length} class{byDayIdx[selectedDayIdx].length === 1 ? '' : 'es'}
               </div>
             </div>
           </div>
 
           <div style={styles.mobileDayList}>
-            {byDay[selectedDay].length === 0 ? (
+            {byDayIdx[selectedDayIdx].length === 0 ? (
               <div style={{ ...styles.emptyState, padding: '32px 16px' }}>
                 <div style={styles.emptyTitle}>No classes</div>
                 <div style={styles.emptyText}>Nothing scheduled for this day with the current filters.</div>
               </div>
             ) : (
-              byDay[selectedDay].map(cls => renderClassCard(cls, 'mobile'))
+              byDayIdx[selectedDayIdx].map(cls => renderClassCard(cls, 'mobile'))
             )}
           </div>
         </>
@@ -1765,15 +1923,17 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
               <div style={styles.dayHeader}>
                 <div>
                   <div style={styles.dayName}>{day}</div>
-                  <div style={styles.dayDate}>{DAY_LABELS[i].split(' ')[1]} May</div>
+                  <div style={styles.dayDate}>
+                    {weekDates[i].getDate()} {weekDates[i].toLocaleDateString('en-GB', { month: 'short' })}
+                  </div>
                 </div>
-                <div style={styles.dayCount}>{byDay[i].length}</div>
+                <div style={styles.dayCount}>{byDayIdx[i].length}</div>
               </div>
               <div style={styles.dayClasses}>
-                {byDay[i].length === 0 && (
+                {byDayIdx[i].length === 0 && (
                   <div style={styles.emptyDay}>No classes</div>
                 )}
-                {byDay[i].map(cls => renderClassCard(cls, 'compact'))}
+                {byDayIdx[i].map(cls => renderClassCard(cls, 'compact'))}
               </div>
             </div>
           ))}
@@ -4418,6 +4578,56 @@ const styles = {
   homeSectionCount: { background: '#c8442a', color: '#fff', padding: '2px 7px', borderRadius: 8, fontSize: 10, marginLeft: 6, fontWeight: 700, letterSpacing: 0 },
   homeSectionLink: { fontSize: 11, color: '#7a8270', background: 'none', border: 'none', fontFamily: 'inherit', cursor: 'pointer', padding: 4 },
   homeEmptyCover: { padding: '24px 14px', background: '#fffdf7', borderRadius: 14, border: '1px solid #efe7d2', textAlign: 'center' },
+
+  // ─── Collapsible tile (Home) ───
+  tile: {
+    background: '#fffdf7', borderRadius: 14, border: '1px solid #efe7d2',
+    marginTop: 10, overflow: 'hidden',
+  },
+  tileHeader: {
+    display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+    padding: '14px 16px', background: 'transparent', border: 'none',
+    cursor: 'pointer', fontFamily: 'inherit',
+  },
+  tileHeaderTitleRow: { display: 'flex', alignItems: 'center', gap: 8 },
+  tileTitle: { fontSize: 14, fontWeight: 600, color: '#1a2620' },
+  tileCount: {
+    color: '#fff', fontSize: 10, fontWeight: 700,
+    padding: '2px 7px', borderRadius: 8, minWidth: 18, textAlign: 'center',
+  },
+  tileSummary: { fontSize: 12, color: '#7a8270', marginTop: 3 },
+  tileBody: { padding: '0 12px 12px' },
+  tileViewAll: {
+    width: '100%', marginTop: 6, padding: '8px',
+    background: 'transparent', border: 'none', color: '#7a8270',
+    fontSize: 12, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
+    textAlign: 'center',
+  },
+
+  // ─── Week navigator (Schedule) ───
+  weekNav: {
+    display: 'flex', alignItems: 'center', gap: 8,
+    background: '#fffdf7', borderRadius: 14, border: '1px solid #efe7d2',
+    padding: '8px', marginBottom: 12,
+  },
+  weekNavBtn: {
+    width: 40, height: 40, borderRadius: 10,
+    background: '#f5f1e8', border: 'none',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    color: '#5c4a38', cursor: 'pointer', flexShrink: 0,
+  },
+  weekNavCenter: {
+    flex: 1, textAlign: 'center', display: 'flex', flexDirection: 'column',
+    alignItems: 'center', gap: 2,
+  },
+  weekNavRange: {
+    fontSize: 15, fontWeight: 600, color: '#1a2620', fontFamily: '"Fraunces", serif',
+  },
+  weekNavTodayBtn: {
+    fontSize: 10, color: '#7a8270', background: 'transparent', border: 'none',
+    fontFamily: 'inherit', cursor: 'pointer', padding: '2px 8px',
+    textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 600,
+  },
 
   // Cover home cards
   coverHome: { background: '#fff', borderRadius: 14, border: '1px solid #efe7d2', marginBottom: 10, overflow: 'hidden' },
