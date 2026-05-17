@@ -605,84 +605,47 @@ export default function SalusStaff() {
       {/* Header */}
       <header className="salus-header" style={styles.header}>
         <div style={styles.headerLeft}>
-          <div style={styles.logo}>
-            <div style={styles.logoMark}>
-              <img src="https://cdn.prod.website-files.com/66803175747777a7dd2956e8/668c04b49ff0954ea73d39ef_download-compresskaru.com.png" alt="Salus" style={styles.logoMarkImg} />
-            </div>
-            {!isMobile && (
-              <div>
-                <div style={styles.logoText}>Salus Staff</div>
-                <div style={styles.logoSub}>Salus House · Sidcup</div>
-              </div>
-            )}
+          <div style={styles.logoNew}>
+            <img src="/icon-192.png" alt="Salus" style={styles.logoNewImg} />
           </div>
+          {!isMobile && (
+            <div style={styles.logoTextWrap}>
+              <div style={styles.logoText}>Salus</div>
+            </div>
+          )}
         </div>
 
         <div className="salus-header-right" style={styles.headerRight}>
-          {/* Bell pill removed on mobile — nav tab badges already show what's new */}
-          {!isMobile && (coverUnread + chatUnread) > 0 && (
+          {(coverUnread + chatUnread) > 0 && (
             <button
-              onClick={() => setTab(coverUnread > 0 ? 'cover' : 'chat')}
+              onClick={() => setTab(coverUnread > 0 ? 'home' : 'chat')}
               className="salus-btn"
-              style={styles.alertBadge}
+              style={styles.bellBtn}
               title={`${coverUnread} new cover · ${chatUnread} new messages`}
             >
-              <Bell size={14} />
-              <span>{coverUnread + chatUnread}{!isMobile && ' new'}</span>
+              <Bell size={18} color="#5c4a38" />
+              <span style={styles.bellBtnBadge}>{coverUnread + chatUnread}</span>
             </button>
           )}
-
-          <button
-            onClick={() => setModal({ type: 'settings' })}
-            className="salus-btn"
-            style={isMobile ? styles.userSelectorBare : styles.userSelector}
-            title="Your profile & settings"
-          >
-            <UserAvatar user={currentUser} size={28} fontSize={11} />
-            {!isMobile && (
-              <div>
-                <div style={styles.userSelectorName}>{currentUser.name.split(' ')[0]}</div>
-                <div style={styles.userSelectorRole}>
-                  {currentUser.role === 'manager'
-                    ? 'Manager'
-                    : currentUser.coachType === 'cover'
-                      ? 'Cover coach'
-                      : 'Coach'}
-                </div>
-              </div>
-            )}
-          </button>
-
-          <button
-            onClick={() => setModal({ type: 'timeOff' })}
-            className="salus-btn"
-            style={styles.iconBtn}
-            title="Upcoming bank holidays & time off"
-          >
-            <Calendar size={16} />
-          </button>
-
-          {/* Settings gear redundant on mobile — tap avatar instead */}
-          {!isMobile && (
+          {(coverUnread + chatUnread) === 0 && (
             <button
-              onClick={() => setModal({ type: 'settings' })}
               className="salus-btn"
-              style={styles.iconBtn}
-              title="Email notification settings"
+              style={styles.bellBtn}
+              title="No new notifications"
+              onClick={() => setTab('home')}
             >
-              <Settings size={16} />
+              <Bell size={18} color="#a59478" />
             </button>
           )}
 
           <button
-            onClick={handleLogout}
+            onClick={() => setTab('me')}
             className="salus-btn"
-            style={styles.iconBtn}
-            title="Sign out"
+            style={styles.headerAvBtn}
+            title="Profile & settings"
           >
-            <LogOut size={16} />
+            <UserAvatar user={currentUser} size={36} fontSize={13} />
           </button>
-
         </div>
       </header>
 
@@ -764,7 +727,8 @@ export default function SalusStaff() {
             isManager={isManager}
             onOpenSettings={() => setModal({ type: 'settings' })}
             onShowInvoices={() => setModal({ type: 'invoices' })}
-            onSignOut={() => supabase.auth.signOut()}
+            onShowTimeOff={() => setModal({ type: 'timeOff' })}
+            onSignOut={handleLogout}
           />
         )}
       </main>
@@ -2383,30 +2347,36 @@ const RATE_PER_SESSION = 30; // £ per class taught
 // ME — personal hub: profile, stats, settings link
 // ──────────────────────────────────────────────────────────────────────────────
 
-function MePage({ data, currentUser, isManager, onOpenSettings, onSignOut, onShowInvoices }) {
+function MePage({ data, currentUser, isManager, onOpenSettings, onSignOut, onShowInvoices, onShowTimeOff }) {
   const myClasses = data.classes.filter(c => c.coachId === currentUser.id);
-  const thisWeekClasses = myClasses; // For now showing all; can filter to this week later
-  const sessionCount = thisWeekClasses.length;
-  const totalMinutes = thisWeekClasses.reduce((acc, c) => acc + c.dur, 0);
+  const sessionCount = myClasses.length;
+  const totalMinutes = myClasses.reduce((acc, c) => acc + c.dur, 0);
   const owed = sessionCount * 30;
+
+  const roleLabel = isManager
+    ? 'Manager'
+    : (currentUser.coachType === 'permanent' ? 'Permanent coach' : 'Cover coach');
+
+  const maskBank = (acc) => {
+    if (!acc || acc.length < 4) return null;
+    return `••••${acc.slice(-4)}`;
+  };
 
   return (
     <div style={styles.homeContainer}>
-      {/* Profile header */}
+      {/* Profile card */}
       <div style={styles.meProfileCard}>
         <UserAvatar user={currentUser} size={64} fontSize={22} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={styles.meName}>{currentUser.name}</div>
-          <div style={styles.meRole}>
-            {isManager ? 'Manager' : (currentUser.coachType === 'permanent' ? 'Permanent coach' : 'Cover coach')}
-          </div>
+          <div style={styles.meRole}>{roleLabel}</div>
         </div>
         <button onClick={onOpenSettings} className="salus-btn" style={styles.meEditBtn}>
           Edit
         </button>
       </div>
 
-      {/* Stats card */}
+      {/* Stats */}
       <section style={styles.homeSection}>
         <div style={styles.homeSectionHead}>
           <div style={styles.homeSectionTitle}>This week</div>
@@ -2427,7 +2397,52 @@ function MePage({ data, currentUser, isManager, onOpenSettings, onSignOut, onSho
         </div>
       </section>
 
-      {/* Manager actions */}
+      {/* Push notifications — inline, not in a modal */}
+      <section style={styles.homeSection}>
+        <PushNotificationsSection />
+      </section>
+
+      {/* Time off & bank holidays */}
+      <section style={styles.homeSection}>
+        <div style={styles.homeSectionHead}>
+          <div style={styles.homeSectionTitle}>Calendar</div>
+        </div>
+        <div style={styles.meActionsList}>
+          <button onClick={onShowTimeOff} className="salus-btn" style={styles.meActionRow}>
+            <Calendar size={18} color="#5c4a38" />
+            <div style={{ flex: 1, textAlign: 'left' }}>
+              <div style={{ fontSize: 14, color: '#1a2620' }}>Time off & bank holidays</div>
+              <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Upcoming UK bank holidays</div>
+            </div>
+            <ChevronRight size={16} color="#a59478" />
+          </button>
+        </div>
+      </section>
+
+      {/* Bank details summary */}
+      <section style={styles.homeSection}>
+        <div style={styles.homeSectionHead}>
+          <div style={styles.homeSectionTitle}>Bank details</div>
+        </div>
+        <button onClick={onOpenSettings} className="salus-btn" style={styles.meBankCard}>
+          <div style={{ flex: 1, textAlign: 'left' }}>
+            <div style={styles.meBankLabel}>Account</div>
+            <div style={styles.meBankValue}>
+              {currentUser.bankAccount ? maskBank(currentUser.bankAccount) :
+                <span style={{ color: '#c8442a' }}>Not set — tap to add</span>}
+            </div>
+            {currentUser.bankSortCode && (
+              <>
+                <div style={{ ...styles.meBankLabel, marginTop: 8 }}>Sort code</div>
+                <div style={styles.meBankValue}>{currentUser.bankSortCode}</div>
+              </>
+            )}
+          </div>
+          <ChevronRight size={16} color="#a59478" />
+        </button>
+      </section>
+
+      {/* Manager tools */}
       {isManager && (
         <section style={styles.homeSection}>
           <div style={styles.homeSectionHead}>
@@ -2436,29 +2451,21 @@ function MePage({ data, currentUser, isManager, onOpenSettings, onSignOut, onSho
           <div style={styles.meActionsList}>
             <button onClick={onShowInvoices} className="salus-btn" style={styles.meActionRow}>
               <FileText size={18} color="#5c4a38" />
-              <span style={{ flex: 1, textAlign: 'left' }}>Generate invoices</span>
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 14, color: '#1a2620' }}>Generate invoices</div>
+                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>£30 per session, this week</div>
+              </div>
               <ChevronRight size={16} color="#a59478" />
             </button>
           </div>
         </section>
       )}
 
-      {/* Settings link */}
-      <section style={styles.homeSection}>
-        <div style={styles.homeSectionHead}>
-          <div style={styles.homeSectionTitle}>Settings</div>
-        </div>
-        <div style={styles.meActionsList}>
-          <button onClick={onOpenSettings} className="salus-btn" style={styles.meActionRow}>
-            <SettingsIcon size={18} color="#5c4a38" />
-            <span style={{ flex: 1, textAlign: 'left' }}>Profile, notifications, bank details</span>
-            <ChevronRight size={16} color="#a59478" />
-          </button>
-          <button onClick={onSignOut} className="salus-btn" style={{ ...styles.meActionRow, color: '#c8442a' }}>
-            <LogOut size={18} color="#c8442a" />
-            <span style={{ flex: 1, textAlign: 'left', color: '#c8442a' }}>Sign out</span>
-          </button>
-        </div>
+      {/* Sign out */}
+      <section style={{ ...styles.homeSection, marginBottom: 40 }}>
+        <button onClick={onSignOut} className="salus-btn" style={styles.meSignOutBtn}>
+          <LogOut size={16} /> Sign out
+        </button>
       </section>
     </div>
   );
@@ -4343,12 +4350,11 @@ const styles = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: '20px 32px',
-    background: '#fffdf7',
-    borderBottom: '1px solid #e8e0cc',
+    padding: '12px 18px',
+    background: '#f5f1e8',
   },
-  headerLeft: { display: 'flex', alignItems: 'center', gap: 16 },
-  headerRight: { display: 'flex', alignItems: 'center', gap: 12 },
+  headerLeft: { display: 'flex', alignItems: 'center', gap: 10 },
+  headerRight: { display: 'flex', alignItems: 'center', gap: 8 },
   quoteBar: {
     background: 'rgba(232, 224, 204, 0.35)',
     borderBottom: '1px solid #ebe3cf',
@@ -4448,6 +4454,31 @@ const styles = {
   homeDayMeta: { fontSize: 11, color: '#7a8270', marginTop: 2 },
   homeDayTagNow: { fontSize: 10, padding: '2px 8px', borderRadius: 4, background: '#5c4a38', color: '#fff', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 },
 
+  // ─── NEW SIMPLIFIED HEADER ───
+  logoNew: {
+    width: 40, height: 40, borderRadius: 10, overflow: 'hidden',
+    flexShrink: 0,
+  },
+  logoNewImg: { width: '100%', height: '100%', display: 'block' },
+  logoTextWrap: { display: 'flex', flexDirection: 'column' },
+  bellBtn: {
+    position: 'relative', width: 40, height: 40, borderRadius: 20,
+    background: '#fffdf7', border: '1px solid #ebe3cf',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    cursor: 'pointer',
+  },
+  bellBtnBadge: {
+    position: 'absolute', top: -3, right: -3,
+    background: '#c8442a', color: '#fff', fontSize: 10, fontWeight: 700,
+    minWidth: 18, height: 18, borderRadius: 9,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    padding: '0 5px', border: '2px solid #f5f1e8',
+  },
+  headerAvBtn: {
+    background: 'none', border: 'none', padding: 0,
+    cursor: 'pointer', borderRadius: '50%',
+  },
+
   // ─── ME PAGE ───
   meProfileCard: {
     display: 'flex', alignItems: 'center', gap: 14,
@@ -4475,6 +4506,25 @@ const styles = {
     background: 'none', border: 'none', fontFamily: 'inherit',
     fontSize: 14, color: '#1a2620', cursor: 'pointer',
     borderBottom: '1px solid #f5f0e0',
+  },
+  meBankCard: {
+    width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+    padding: 16, background: '#fffdf7', borderRadius: 14,
+    border: '1px solid #efe7d2', fontFamily: 'inherit', cursor: 'pointer',
+  },
+  meBankLabel: {
+    fontSize: 10, color: '#a59478', textTransform: 'uppercase',
+    letterSpacing: 0.8, fontWeight: 600, marginBottom: 2,
+  },
+  meBankValue: {
+    fontSize: 15, color: '#1a2620', fontFamily: 'monospace', letterSpacing: 1,
+  },
+  meSignOutBtn: {
+    width: '100%', padding: '14px 16px', background: '#fdfbf5',
+    border: '1px solid #ebe3cf', borderRadius: 12,
+    color: '#c8442a', fontSize: 14, fontWeight: 600,
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+    cursor: 'pointer', fontFamily: 'inherit',
   },
   pickClassRow: {
     display: 'flex', alignItems: 'center', gap: 12,
