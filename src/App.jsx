@@ -502,6 +502,42 @@ export default function SalusStaff() {
     await reloadData(true);
   };
 
+  const updateMessage = async (messageId, newText) => {
+    if (!messageId || !newText || !newText.trim()) return;
+    const { error } = await supabase
+      .from('messages')
+      .update({ text: newText.trim(), edited_at: new Date().toISOString() })
+      .eq('id', messageId);
+    if (error) { console.error('updateMessage', error); return; }
+    await reloadData(true);
+  };
+
+  // Create a studio hire (stored in classes table with is_hire=TRUE).
+  // Hires block off a studio at a given time for an event or 1:1 session.
+  const createStudioHire = async ({ date, time, dur, studio, hireType, notes }) => {
+    const dateObj = new Date(date + 'T' + time);
+    const jsDay = dateObj.getDay(); // 0=Sun..6=Sat
+    const day = jsDay === 0 ? 6 : jsDay - 1; // Map to Mon=0..Sun=6
+
+    const typeLabel = hireType === '1on1' ? '1:1 Session' : 'Studio Hire';
+    const { error } = await supabase.from('classes').insert({
+      date,
+      day,
+      time,
+      dur: Number(dur) || 60,
+      type: typeLabel,
+      coach_id: currentUserId,
+      studio,
+      status: 'assigned',
+      is_hire: true,
+      hire_type: hireType,
+      notes: notes || null,
+    });
+    if (error) { console.error('createStudioHire', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
   const clearAllMessages = async () => {
     // .neq trick: delete all rows (id is never equal to this fake UUID)
     const { error } = await supabase.from('messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
@@ -610,7 +646,7 @@ export default function SalusStaff() {
           .salus-header-right { gap: 4px !important; }
           .salus-nav { padding: 6px 8px 0 !important; gap: 2px !important; }
           .salus-nav-tab { padding: 8px 10px !important; font-size: 12px !important; }
-          .salus-main { padding: 14px !important; }
+          .salus-main { padding: 14px 14px 100px !important; }
           .salus-section-header { gap: 12px !important; }
           .salus-modal-card { max-width: 100% !important; border-radius: 12px !important; }
           .salus-stats-table { overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -672,7 +708,7 @@ export default function SalusStaff() {
       </header>
 
       {/* Main */}
-      <main className="salus-main" style={styles.main}>
+      <main className={tab === 'chat' ? 'salus-main salus-main-chat' : 'salus-main'} style={tab === 'chat' ? styles.mainChat : styles.main}>
         {tab === 'home' && (
           <Home
             data={data}
@@ -688,6 +724,7 @@ export default function SalusStaff() {
               }
             }}
             onRequestCover={() => setModal({ type: 'pickClassToRequestCover' })}
+            onHireStudio={() => setModal({ type: 'hireStudio' })}
             onClaim={(req) => setModal({ type: 'coverThread', coverRequestId: req.id })}
             onExpressInterest={expressInterest}
             onViewAllCover={() => setTab('cover')}
@@ -709,8 +746,16 @@ export default function SalusStaff() {
             currentUser={currentUser}
             isManager={isManager}
             isMobile={isMobile}
-            onClassClick={(classId) => setModal({ type: 'classDetail', classId })}
+            onClassClick={(classId) => {
+              const req = data.coverRequests.find(r => r.classId === classId && (r.status === 'open' || r.status === 'pending'));
+              if (req) {
+                setModal({ type: 'coverThread', coverRequestId: req.id });
+              } else {
+                setModal({ type: 'classDetail', classId });
+              }
+            }}
             onAddClass={() => setModal({ type: 'editClass', classId: null })}
+            onDayClick={(isoDate) => setModal({ type: 'dayDetail', isoDate })}
           />
         )}
         {tab === 'cover' && (
@@ -732,6 +777,7 @@ export default function SalusStaff() {
             isManager={isManager}
             onSend={sendMessage}
             onDeleteMessage={deleteMessage}
+            onEditMessage={updateMessage}
             onClearAll={() => setModal({ type: 'clearChat' })}
           />
         )}
@@ -806,6 +852,23 @@ export default function SalusStaff() {
           onClose={() => setModal(null)}
         />
       )}
+      {modal?.type === 'dayDetail' && (
+        <DayDetailModal
+          isoDate={modal.isoDate}
+          data={data}
+          currentUser={currentUser}
+          isManager={isManager}
+          onClose={() => setModal(null)}
+          onClassClick={(classId) => {
+            const req = data.coverRequests.find(r => r.classId === classId && (r.status === 'open' || r.status === 'pending'));
+            if (req) {
+              setModal({ type: 'coverThread', coverRequestId: req.id });
+            } else {
+              setModal({ type: 'classDetail', classId });
+            }
+          }}
+        />
+      )}
       {modal?.type === 'coverThread' && (() => {
         const req = data.coverRequests.find(r => r.id === modal.coverRequestId);
         const cls = req && data.classes.find(c => c.id === req.classId);
@@ -824,6 +887,13 @@ export default function SalusStaff() {
           />
         );
       })()}
+      {modal?.type === 'hireStudio' && (
+        <HireStudioModal
+          currentUser={currentUser}
+          onClose={() => setModal(null)}
+          onSubmit={createStudioHire}
+        />
+      )}
       {modal?.type === 'pickClassToRequestCover' && (
         <PickClassModal
           data={data}
@@ -1363,7 +1433,7 @@ function MonthView({ classes, coverRequests, currentUser, onDayClick }) {
 // HOME — cover-first dashboard, the new app landing screen
 // ──────────────────────────────────────────────────────────────────────────────
 
-function Home({ data, currentUser, isManager, onClassClick, onRequestCover, onClaim, onExpressInterest, onViewAllCover, onViewChat }) {
+function Home({ data, currentUser, isManager, onClassClick, onRequestCover, onHireStudio, onClaim, onExpressInterest, onViewAllCover, onViewChat }) {
   const now = new Date();
   const hour = now.getHours();
   const greeting = hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening';
@@ -1527,6 +1597,17 @@ function Home({ data, currentUser, isManager, onClassClick, onRequestCover, onCl
           <div style={styles.homeRequestSub}>Your team will see it instantly</div>
         </div>
       </button>
+
+      {/* Hire studio CTA */}
+      <button onClick={onHireStudio} style={styles.homeHireCard} className="salus-btn">
+        <div style={styles.homeHireIcon}>
+          <Calendar size={18} />
+        </div>
+        <div style={{ flex: 1, textAlign: 'left' }}>
+          <div style={styles.homeRequestTitle}>Hire a studio</div>
+          <div style={styles.homeRequestSub}>For a 1:1 session or private event</div>
+        </div>
+      </button>
     </div>
   );
 }
@@ -1637,7 +1718,7 @@ function CoverHomeCard({ req, users, interested, urgent, pending, onClick, onCla
   );
 }
 
-function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAddClass }) {
+function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAddClass, onDayClick }) {
   const [filter, setFilter] = useState('all'); // all | mine | needsCover
   const [studioFilter, setStudioFilter] = useState('all'); // all | reformer | hybrid
   const [weekOffset, setWeekOffset] = useState(0); // 0 = this week, 1 = next, etc.
@@ -1827,16 +1908,9 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
           coverRequests={data.coverRequests}
           currentUser={currentUser}
           onDayClick={(isoDate) => {
-            // Compute the week-offset that contains this date
-            const [y, m, d] = isoDate.split('-').map(Number);
-            const target = new Date(y, m - 1, d);
-            const targetMonday = getMonday(target);
-            const diffWeeks = Math.round((targetMonday - currentMonday) / (7 * 86400000));
-            setWeekOffset(diffWeeks);
-            // Day index within the week (Mon=0..Sun=6)
-            const dow = target.getDay();
-            setSelectedDayIdx(dow === 0 ? 6 : dow - 1);
-            setViewMode('week');
+            // Open the day-detail modal directly — fastest path to seeing a day's
+            // classes and requesting cover for one of yours.
+            if (onDayClick) onDayClick(isoDate);
           }}
         />
       ) : (
@@ -2393,9 +2467,10 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
 // CHAT
 // ──────────────────────────────────────────────────────────────────────────────
 
-function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onClearAll }) {
+function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onEditMessage, onClearAll }) {
   const [text, setText] = useState('');
-  const [hoveredMsgId, setHoveredMsgId] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [editText, setEditText] = useState('');
   const scrollRef = useRef(null);
 
   useEffect(() => {
@@ -2408,6 +2483,21 @@ function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onClearAl
     if (!text.trim()) return;
     onSend(text);
     setText('');
+  };
+
+  const startEdit = (msg) => {
+    setEditingId(msg.id);
+    setEditText(msg.text);
+  };
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditText('');
+  };
+  const saveEdit = (msgId) => {
+    if (!editText.trim()) return;
+    onEditMessage(msgId, editText.trim());
+    setEditingId(null);
+    setEditText('');
   };
 
   return (
@@ -2438,35 +2528,73 @@ function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onClearAl
                              (msg.timestamp - prevMsg.timestamp) > 600000;
           const isMine = msg.userId === currentUser.id;
           const canDelete = isManager || isMine;
-          const showDelete = canDelete && hoveredMsgId === msg.id;
+          const isEditing = editingId === msg.id;
           return (
             <div
               key={msg.id}
               style={{ ...styles.message, ...(isMine ? styles.messageMine : {}), position: 'relative' }}
-              onMouseEnter={() => setHoveredMsgId(msg.id)}
-              onMouseLeave={() => setHoveredMsgId(null)}
             >
               {showHeader && user && (
                 <div style={styles.messageHeader}>
                   <UserAvatar user={user} size={28} fontSize={11} />
                   <span style={styles.messageName}>{user.name}{user.role === 'manager' ? ' · Manager' : ''}</span>
-                  <span style={styles.messageTime}>{fmtTime(msg.timestamp)}</span>
+                  <span style={styles.messageTime}>
+                    {fmtTime(msg.timestamp)}
+                    {msg.editedAt && <span style={{ marginLeft: 4, fontStyle: 'italic' }}>· edited</span>}
+                  </span>
                 </div>
               )}
               <div style={{ ...styles.messageBubble, marginLeft: 36, position: 'relative' }}>
-                {msg.text}
-                {canDelete && (
-                  <button
-                    onClick={() => {
-                      if (window.confirm('Delete this message?')) onDeleteMessage(msg.id);
-                    }}
-                    className="salus-btn"
-                    style={{ ...styles.messageDeleteBtn, opacity: showDelete ? 1 : 0 }}
-                    title="Delete this message"
-                    aria-label="Delete message"
-                  >
-                    <X size={12} />
-                  </button>
+                {isEditing ? (
+                  <div style={styles.messageEditWrap}>
+                    <input
+                      type="text"
+                      value={editText}
+                      onChange={(e) => setEditText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') saveEdit(msg.id);
+                        if (e.key === 'Escape') cancelEdit();
+                      }}
+                      autoFocus
+                      style={styles.messageEditInput}
+                    />
+                    <div style={styles.messageEditActions}>
+                      <button onClick={cancelEdit} className="salus-btn" style={styles.messageEditCancel}>Cancel</button>
+                      <button onClick={() => saveEdit(msg.id)} className="salus-btn" style={styles.messageEditSave}>Save</button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div>{msg.text}</div>
+                    {(isMine || canDelete) && (
+                      <div style={styles.messageActions}>
+                        {isMine && (
+                          <button
+                            onClick={() => startEdit(msg)}
+                            className="salus-btn"
+                            style={styles.messageActionBtn}
+                            title="Edit"
+                            aria-label="Edit message"
+                          >
+                            Edit
+                          </button>
+                        )}
+                        {canDelete && (
+                          <button
+                            onClick={() => {
+                              if (window.confirm('Delete this message?')) onDeleteMessage(msg.id);
+                            }}
+                            className="salus-btn"
+                            style={{ ...styles.messageActionBtn, color: '#c8442a' }}
+                            title="Delete"
+                            aria-label="Delete message"
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -4483,6 +4611,264 @@ function CoverThreadModal({ coverRequest, classObj, data, currentUser, isManager
   );
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// DAY DETAIL MODAL — tap a date in 3-Month view → see schedule for that day
+// Direct flow: pick day → see classes → tap own class → request cover
+// ──────────────────────────────────────────────────────────────────────────────
+
+function DayDetailModal({ isoDate, data, currentUser, isManager, onClose, onClassClick }) {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  const dayLabel = date.toLocaleDateString('en-GB', { weekday: 'long' });
+  const dateLabel = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const daysDiff = Math.round((date - today) / 86400000);
+  const weeksDiff = Math.floor(Math.abs(daysDiff) / 7);
+  const relativeLabel =
+    daysDiff === 0  ? 'Today' :
+    daysDiff === 1  ? 'Tomorrow' :
+    daysDiff === -1 ? 'Yesterday' :
+    daysDiff > 0 && daysDiff < 7 ? `In ${daysDiff} days` :
+    daysDiff > 0 && daysDiff < 14 ? '1 week away' :
+    daysDiff > 0 ? `${weeksDiff} weeks away` :
+    daysDiff > -7 ? `${-daysDiff} days ago` :
+    `${weeksDiff} weeks ago`;
+
+  const dayClasses = data.classes
+    .filter(c => c.date === isoDate)
+    .sort((a, b) => a.time.localeCompare(b.time));
+
+  const myCount = dayClasses.filter(c => c.coachId === currentUser.id).length;
+  const coverCount = dayClasses.filter(c => c.status === 'needsCover').length;
+
+  return (
+    <div style={styles.threadBackdrop} onClick={onClose}>
+      <div style={styles.threadSheet} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.threadHeader}>
+          <button onClick={onClose} className="salus-btn" style={styles.threadCloseBtn}>
+            <X size={20} />
+          </button>
+          <div style={styles.threadHeaderTitle}>{dayLabel}</div>
+          <div style={{ width: 36 }} />
+        </div>
+
+        <div style={styles.dayDetailHeader}>
+          <div style={styles.dayDetailRelative}>{relativeLabel}</div>
+          <div style={styles.dayDetailTitle}>{dateLabel}</div>
+          <div style={styles.dayDetailMeta}>
+            {dayClasses.length} {dayClasses.length === 1 ? 'class' : 'classes'}
+            {myCount > 0 && ` · ${myCount} of yours`}
+            {coverCount > 0 && ` · ${coverCount} need cover`}
+          </div>
+        </div>
+
+        <div style={styles.dayDetailList}>
+          {dayClasses.length === 0 ? (
+            <div style={{ padding: 40, textAlign: 'center', color: '#7a8270', fontSize: 13 }}>
+              No classes scheduled this day.
+            </div>
+          ) : dayClasses.map(cls => {
+            const coach = data.users.find(u => u.id === cls.coachId);
+            const isMine = cls.coachId === currentUser.id;
+            const needsCover = cls.status === 'needsCover';
+            return (
+              <button
+                key={cls.id}
+                onClick={() => onClassClick(cls.id)}
+                className="salus-btn"
+                style={{
+                  ...styles.dayDetailRow,
+                  background: needsCover ? '#fef0ea' : '#fff',
+                  borderLeft: needsCover
+                    ? '3px solid #c8442a'
+                    : (isMine ? '3px solid #5c4a38' : '3px solid transparent'),
+                }}
+              >
+                <div style={styles.dayDetailRowTime}>
+                  <div style={{ fontFamily: '"Fraunces", serif', fontSize: 17, fontWeight: 600, color: '#1a2620' }}>{cls.time}</div>
+                  <div style={{ fontSize: 10, color: '#a59478', marginTop: 1 }}>{cls.dur}m</div>
+                </div>
+                <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                  <div style={{ fontSize: 14, fontWeight: 500, color: '#1a2620' }}>{cls.type}</div>
+                  <div style={{ fontSize: 11, color: '#7a8270', display: 'flex', alignItems: 'center', gap: 5, marginTop: 3 }}>
+                    {coach && <UserAvatar user={coach} size={16} fontSize={7} />}
+                    <span>{coach?.name?.split(' ')[0] || 'Unassigned'} · {STUDIOS[cls.studio]?.short}</span>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
+                  {needsCover && (
+                    <div style={styles.dayDetailTag}>Cover</div>
+                  )}
+                  {isMine && !needsCover && (
+                    <div style={styles.dayDetailTagMine}>Tap to request cover →</div>
+                  )}
+                  {!isMine && !needsCover && isManager && (
+                    <div style={{ ...styles.dayDetailTagMine, background: '#7a8270' }}>Tap to manage →</div>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// HIRE STUDIO MODAL — book a studio for an event or 1:1 session
+// ──────────────────────────────────────────────────────────────────────────────
+
+function HireStudioModal({ onClose, onSubmit, currentUser }) {
+  const [hireType, setHireType] = useState('1on1'); // '1on1' | 'event'
+  const [date, setDate] = useState('');
+  const [time, setTime] = useState('');
+  const [dur, setDur] = useState(60);
+  const [studio, setStudio] = useState('reformer');
+  const [notes, setNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const todayIso = toIsoDate(new Date());
+
+  const handleSubmit = async () => {
+    if (!date || !time) return;
+    setSubmitting(true);
+    const ok = await onSubmit({ date, time, dur, studio, hireType, notes });
+    setSubmitting(false);
+    if (ok) onClose();
+  };
+
+  return (
+    <div style={styles.threadBackdrop} onClick={onClose}>
+      <div style={styles.threadSheet} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.threadHeader}>
+          <button onClick={onClose} className="salus-btn" style={styles.threadCloseBtn}>
+            <X size={20} />
+          </button>
+          <div style={styles.threadHeaderTitle}>Hire studio</div>
+          <div style={{ width: 36 }} />
+        </div>
+
+        <div style={{ padding: 18, overflowY: 'auto', flex: 1 }}>
+          <p style={{ fontSize: 13, color: '#7a8270', marginBottom: 18, lineHeight: 1.5 }}>
+            Block off a studio for a private booking. Your team will see it on the schedule. Reception will be notified to update Xplor.
+          </p>
+
+          {/* Type toggle */}
+          <div style={styles.hireFieldLabel}>What's it for?</div>
+          <div style={styles.hireTypeToggle}>
+            <button
+              onClick={() => setHireType('1on1')}
+              className="salus-btn"
+              style={{ ...styles.hireTypeBtn, ...(hireType === '1on1' ? styles.hireTypeBtnActive : {}) }}
+            >
+              1:1 Session
+            </button>
+            <button
+              onClick={() => setHireType('event')}
+              className="salus-btn"
+              style={{ ...styles.hireTypeBtn, ...(hireType === 'event' ? styles.hireTypeBtnActive : {}) }}
+            >
+              Event / Private hire
+            </button>
+          </div>
+
+          {/* Date */}
+          <div style={styles.hireFieldLabel}>Date</div>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            min={todayIso}
+            className="salus-input"
+            style={styles.hireInput}
+          />
+
+          {/* Time + duration */}
+          <div style={{ display: 'flex', gap: 12 }}>
+            <div style={{ flex: 1 }}>
+              <div style={styles.hireFieldLabel}>Start time</div>
+              <input
+                type="time"
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+                className="salus-input"
+                style={styles.hireInput}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={styles.hireFieldLabel}>Duration</div>
+              <select
+                value={dur}
+                onChange={(e) => setDur(Number(e.target.value))}
+                className="salus-input"
+                style={styles.hireInput}
+              >
+                <option value={30}>30 min</option>
+                <option value={45}>45 min</option>
+                <option value={60}>60 min</option>
+                <option value={90}>90 min</option>
+                <option value={120}>2 hours</option>
+                <option value={180}>3 hours</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Studio */}
+          <div style={styles.hireFieldLabel}>Studio</div>
+          <div style={styles.hireTypeToggle}>
+            <button
+              onClick={() => setStudio('reformer')}
+              className="salus-btn"
+              style={{ ...styles.hireTypeBtn, ...(studio === 'reformer' ? styles.hireTypeBtnActive : {}) }}
+            >
+              Reformer
+            </button>
+            <button
+              onClick={() => setStudio('hybrid')}
+              className="salus-btn"
+              style={{ ...styles.hireTypeBtn, ...(studio === 'hybrid' ? styles.hireTypeBtnActive : {}) }}
+            >
+              Hybrid
+            </button>
+          </div>
+
+          {/* Notes */}
+          <div style={styles.hireFieldLabel}>
+            {hireType === '1on1' ? 'Client name' : 'Event details'}
+          </div>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder={hireType === '1on1'
+              ? "e.g. Sarah Williams - regular client"
+              : "e.g. Corporate wellness day for Acme Ltd, 12 attendees"}
+            className="salus-input"
+            style={{ ...styles.hireInput, minHeight: 80, resize: 'vertical' }}
+          />
+
+          <button
+            onClick={handleSubmit}
+            disabled={!date || !time || submitting}
+            className="salus-btn"
+            style={{
+              ...styles.hireSubmitBtn,
+              ...((!date || !time || submitting) ? styles.hireSubmitBtnDisabled : {}),
+            }}
+          >
+            {submitting ? 'Booking…' : 'Confirm booking'}
+          </button>
+
+          <p style={{ fontSize: 11, color: '#a59478', marginTop: 12, textAlign: 'center', lineHeight: 1.5 }}>
+            Reception will receive an email to update Xplor for members.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Modal({ children, onClose }) {
   return (
     <div style={styles.modalOverlay} onClick={onClose}>
@@ -4654,6 +5040,18 @@ const styles = {
   homeRequestIcon: { width: 36, height: 36, borderRadius: '50%', background: '#5c4a38', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   homeRequestTitle: { fontSize: 14, fontWeight: 600, color: '#1a2620' },
   homeRequestSub: { fontSize: 11, color: '#7a8270', marginTop: 1 },
+
+  // Hire studio CTA (sibling to homeRequestCard)
+  homeHireCard: {
+    background: '#fffdf7', border: '1px solid #efe7d2', borderRadius: 14,
+    padding: 16, marginTop: 10, display: 'flex', alignItems: 'center', gap: 12,
+    width: '100%', fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left',
+  },
+  homeHireIcon: {
+    width: 36, height: 36, borderRadius: '50%',
+    background: '#7a8c5c', color: '#fff',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
 
   // Your day
   homeDayCard: { background: '#fffdf7', borderRadius: 14, border: '1px solid #efe7d2', padding: '4px 14px' },
@@ -4865,6 +5263,73 @@ const styles = {
   },
   threadSendBtnDisabled: { background: '#c4b8a0', cursor: 'default' },
 
+  // ─── DAY DETAIL MODAL ───
+  dayDetailHeader: {
+    padding: '18px 18px 16px', flexShrink: 0,
+    borderBottom: '1px solid #ebe3cf', background: '#fffdf7',
+  },
+  dayDetailRelative: {
+    fontSize: 11, color: '#7a8270', fontWeight: 600,
+    textTransform: 'uppercase', letterSpacing: 0.8,
+  },
+  dayDetailTitle: {
+    fontFamily: '"Fraunces", serif', fontSize: 24, fontWeight: 500,
+    color: '#1a2620', marginTop: 4,
+  },
+  dayDetailMeta: {
+    fontSize: 12, color: '#7a8270', marginTop: 6,
+  },
+  dayDetailList: {
+    flex: 1, overflowY: 'auto', padding: '14px',
+    display: 'flex', flexDirection: 'column', gap: 8,
+  },
+  dayDetailRow: {
+    display: 'flex', alignItems: 'center', gap: 12,
+    padding: 14, borderRadius: 12, border: '1px solid #efe7d2',
+    fontFamily: 'inherit', cursor: 'pointer', width: '100%',
+  },
+  dayDetailRowTime: { minWidth: 56, textAlign: 'left' },
+  dayDetailTag: {
+    fontSize: 9, padding: '3px 7px', borderRadius: 4,
+    background: '#c8442a', color: '#fff', fontWeight: 700,
+    textTransform: 'uppercase', letterSpacing: 0.5, whiteSpace: 'nowrap',
+  },
+  dayDetailTagMine: {
+    fontSize: 9, padding: '3px 7px', borderRadius: 4,
+    background: '#5c4a38', color: '#fff', fontWeight: 700,
+    textTransform: 'uppercase', letterSpacing: 0.5, whiteSpace: 'nowrap',
+  },
+
+  // ─── HIRE STUDIO MODAL ───
+  hireFieldLabel: {
+    fontSize: 11, color: '#5c4a38', fontWeight: 700,
+    textTransform: 'uppercase', letterSpacing: 0.8,
+    marginBottom: 6, marginTop: 16,
+  },
+  hireInput: {
+    width: '100%', padding: '12px 14px', borderRadius: 10,
+    border: '1px solid #ebe3cf', background: '#fff',
+    fontSize: 15, fontFamily: 'inherit', color: '#1a2620',
+    outline: 'none', boxSizing: 'border-box',
+  },
+  hireTypeToggle: { display: 'flex', gap: 8 },
+  hireTypeBtn: {
+    flex: 1, padding: '12px', borderRadius: 10,
+    background: '#fff', border: '1px solid #ebe3cf',
+    color: '#5c4a38', fontSize: 13, fontWeight: 600,
+    fontFamily: 'inherit', cursor: 'pointer',
+  },
+  hireTypeBtnActive: {
+    background: '#5c4a38', borderColor: '#5c4a38', color: '#fff',
+  },
+  hireSubmitBtn: {
+    width: '100%', marginTop: 24, padding: '14px',
+    background: '#5c4a38', color: '#fff', borderRadius: 12,
+    border: 'none', fontSize: 15, fontWeight: 600,
+    fontFamily: 'inherit', cursor: 'pointer',
+  },
+  hireSubmitBtnDisabled: { background: '#c4b8a0', cursor: 'default' },
+
   // ─── COVER THREAD MODAL ends ───
 
   // ─── BOTTOM NAV ───
@@ -4998,6 +5463,16 @@ const styles = {
   },
 
   main: { padding: '28px 32px 100px', maxWidth: 1400, margin: '0 auto' },
+  mainChat: {
+    position: 'fixed',
+    top: 'calc(60px + env(safe-area-inset-top, 0px))',
+    bottom: 'calc(72px + env(safe-area-inset-bottom, 0px))',
+    left: 0, right: 0,
+    padding: 8,
+    display: 'flex', flexDirection: 'column',
+    overflow: 'hidden',
+    boxSizing: 'border-box',
+  },
 
   sectionHeader: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end',
@@ -5160,8 +5635,9 @@ const styles = {
   // Chat
   chatContainer: {
     background: '#fffdf7', borderRadius: 12, border: '1px solid #e8e0cc',
-    display: 'flex', flexDirection: 'column', height: 'calc(100vh - 200px)',
-    minHeight: 500, overflow: 'hidden',
+    display: 'flex', flexDirection: 'column',
+    flex: 1, minHeight: 0,
+    overflow: 'hidden',
   },
   chatHeader: {
     padding: '14px 18px', borderBottom: '1px solid #e8e0cc',
@@ -5195,6 +5671,37 @@ const styles = {
     boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
     transition: 'opacity 0.15s',
   },
+  messageActions: {
+    display: 'flex', gap: 12, marginTop: 4,
+  },
+  messageActionBtn: {
+    background: 'none', border: 'none', padding: 0,
+    fontSize: 11, color: '#7a8270', fontFamily: 'inherit',
+    cursor: 'pointer', fontWeight: 500,
+  },
+  messageEditWrap: {
+    display: 'flex', flexDirection: 'column', gap: 8,
+    padding: '4px 0',
+  },
+  messageEditInput: {
+    padding: '8px 12px', borderRadius: 8,
+    border: '1px solid #d4cdb8', background: '#fff',
+    fontSize: 14, fontFamily: 'inherit', color: '#1a2620',
+    outline: 'none',
+  },
+  messageEditActions: {
+    display: 'flex', gap: 8, justifyContent: 'flex-end',
+  },
+  messageEditCancel: {
+    padding: '4px 12px', borderRadius: 6,
+    background: 'transparent', color: '#7a8270', border: 'none',
+    fontSize: 12, fontFamily: 'inherit', cursor: 'pointer', fontWeight: 600,
+  },
+  messageEditSave: {
+    padding: '4px 12px', borderRadius: 6,
+    background: '#5c4a38', color: '#fff', border: 'none',
+    fontSize: 12, fontFamily: 'inherit', cursor: 'pointer', fontWeight: 600,
+  },
   messagesList: {
     flex: 1, overflowY: 'auto', padding: '18px 22px',
     display: 'flex', flexDirection: 'column', gap: 4,
@@ -5213,6 +5720,7 @@ const styles = {
   chatInputRow: {
     display: 'flex', gap: 8, padding: 16,
     borderTop: '1px solid #e8e0cc', background: '#fffdf7',
+    flexShrink: 0,
   },
   chatInput: {
     flex: 1, padding: '12px 16px', borderRadius: 24,
