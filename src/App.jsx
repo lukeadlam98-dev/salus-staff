@@ -574,6 +574,21 @@ export default function SalusStaff() {
     setTabInitialized(true);
   }
 
+  // Lock body scrolling when chat is active — chat has its own contained scroll.
+  // Prevents the iOS rubber-band effect on the background.
+  useEffect(() => {
+    if (tab === 'chat') {
+      const prevBody = document.body.style.overflow;
+      const prevHtml = document.documentElement.style.overflow;
+      document.body.style.overflow = 'hidden';
+      document.documentElement.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = prevBody;
+        document.documentElement.style.overflow = prevHtml;
+      };
+    }
+  }, [tab]);
+
   // Wrappers that match the names the inner components expect
   const assignCoverDirectly = (requestId, coachId) =>
     approveCoverRequest(requestId, 'assign', coachId);
@@ -1464,7 +1479,7 @@ function Home({ data, currentUser, isManager, onClassClick, onRequestCover, onHi
     .slice(0, 4);
 
   const totalCoverAttention = openCovers.length + pendingForManager.length;
-  const [coverOpen, setCoverOpen] = useState(totalCoverAttention > 0);
+  const [coverOpen, setCoverOpen] = useState(false);
   const [dayOpen, setDayOpen] = useState(false);
 
   // Summary line for collapsed cover tile
