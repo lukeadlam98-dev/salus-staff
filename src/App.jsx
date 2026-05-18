@@ -886,6 +886,17 @@ export default function SalusStaff() {
     return true;
   };
 
+  // Manager-only: flip is_coach or is_foh on another user
+  const toggleUserRole = async (userId, field, value) => {
+    if (!isManager || !userId) return false;
+    const dbField = field === 'isCoach' ? 'is_coach' : field === 'isFoh' ? 'is_foh' : null;
+    if (!dbField) return false;
+    const { error } = await supabase.from('profiles').update({ [dbField]: value }).eq('id', userId);
+    if (error) { console.error('toggleUserRole', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
   const clearAllMessages = async () => {
     // .neq trick: delete all rows (id is never equal to this fake UUID)
     const { error } = await supabase.from('messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
@@ -1311,8 +1322,10 @@ export default function SalusStaff() {
         <TeamDirectoryModal
           data={data}
           currentUser={currentUser}
+          isManager={isManager}
           onClose={() => setModal(null)}
           onMessageInChat={() => { setModal(null); setTab('chat'); }}
+          onToggleRole={toggleUserRole}
         />
       )}
       {modal?.type === 'createTask' && (
@@ -7769,20 +7782,41 @@ function TaskDetailModal({ task, data, currentUser, isManager, onClose, onMarkDo
   );
 }
 
-function TeamDirectoryModal({ data, currentUser, onClose, onMessageInChat }) {
-  // Group: manager first, then permanent coaches, then cover coaches
+function TeamDirectoryModal({ data, currentUser, isManager, onClose, onMessageInChat, onToggleRole }) {
+  // Sort: manager first, then everyone alphabetical
   const sorted = [...data.users].sort((a, b) => {
-    const rank = (u) => u.role === 'manager' ? 0 : u.coachType === 'permanent' ? 1 : 2;
-    const r = rank(a) - rank(b);
-    if (r !== 0) return r;
+    if (a.role === 'manager') return -1;
+    if (b.role === 'manager') return 1;
     return (a.name || '').localeCompare(b.name || '');
   });
   const manager = sorted.find(u => u.role === 'manager');
-  const permanent = sorted.filter(u => u.role === 'coach' && u.coachType === 'permanent');
-  const covers = sorted.filter(u => u.role === 'coach' && u.coachType === 'cover');
+  const coaches = sorted.filter(u => u.role !== 'manager' && u.isCoach);
+  const fohOnly = sorted.filter(u => u.role !== 'manager' && u.isFoh && !u.isCoach);
+  const unset = sorted.filter(u => u.role !== 'manager' && !u.isCoach && !u.isFoh);
+
+  const RoleChip = ({ active, label, onTap, color = '#5c4a38' }) => (
+    <button
+      onClick={onTap}
+      disabled={!onTap}
+      className="salus-btn"
+      style={{
+        fontSize: 10, fontWeight: 700, padding: '3px 8px',
+        borderRadius: 999, marginRight: 4,
+        background: active ? color : 'transparent',
+        color: active ? '#fff' : '#a59478',
+        border: `1px solid ${active ? color : '#ebe3cf'}`,
+        cursor: onTap ? 'pointer' : 'default',
+        textTransform: 'uppercase', letterSpacing: 0.6,
+        fontFamily: 'inherit',
+      }}
+    >
+      {label}
+    </button>
+  );
 
   const renderUser = (u) => {
     const isMe = u.id === currentUser.id;
+    const isMgr = u.role === 'manager';
     return (
       <div key={u.id} style={styles.teamRow}>
         <UserAvatar user={u} size={48} fontSize={16} />
@@ -7790,18 +7824,29 @@ function TeamDirectoryModal({ data, currentUser, onClose, onMessageInChat }) {
           <div style={styles.teamRowName}>
             {u.name} {isMe && <span style={styles.teamMeTag}>You</span>}
           </div>
-          <div style={styles.teamRowMeta}>
-            {u.role === 'manager' ? 'Manager' :
-             u.coachType === 'permanent' ? 'Permanent coach' : 'Cover coach'}
+          <div style={{ ...styles.teamRowMeta, display: 'flex', alignItems: 'center', marginTop: 4 }}>
+            {isMgr ? (
+              <RoleChip active label="Manager" color="#5c4a38" />
+            ) : (
+              <>
+                <RoleChip
+                  active={u.isCoach}
+                  label="Coach"
+                  color="#5c4a38"
+                  onTap={isManager && !isMe ? () => onToggleRole(u.id, 'isCoach', !u.isCoach) : null}
+                />
+                <RoleChip
+                  active={u.isFoh}
+                  label="FOH"
+                  color="#c6926a"
+                  onTap={isManager && !isMe ? () => onToggleRole(u.id, 'isFoh', !u.isFoh) : null}
+                />
+              </>
+            )}
           </div>
         </div>
         {!isMe && (
-          <button
-            onClick={() => onMessageInChat()}
-            className="salus-btn"
-            style={styles.teamMessageBtn}
-            title="Message the team chat"
-          >
+          <button onClick={() => onMessageInChat()} className="salus-btn" style={styles.teamMessageBtn} title="Message the team chat">
             <MessageSquare size={14} /> Chat
           </button>
         )}
@@ -7821,22 +7866,38 @@ function TeamDirectoryModal({ data, currentUser, onClose, onMessageInChat }) {
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '14px' }}>
+          {isManager && (
+            <div style={{
+              padding: '10px 12px', marginBottom: 12,
+              background: '#fef7e8', border: '1px solid #efe7d2',
+              borderRadius: 8, fontSize: 11, color: '#5c4a38', lineHeight: 1.5,
+            }}>
+              Tap a role chip on any person to toggle it.
+              A user can be both Coach and FOH.
+            </div>
+          )}
           {manager && (
             <>
               <div style={styles.teamSectionLabel}>Manager</div>
               {renderUser(manager)}
             </>
           )}
-          {permanent.length > 0 && (
+          {coaches.length > 0 && (
             <>
-              <div style={styles.teamSectionLabel}>Permanent coaches ({permanent.length})</div>
-              {permanent.map(renderUser)}
+              <div style={styles.teamSectionLabel}>Coaches ({coaches.length})</div>
+              {coaches.map(renderUser)}
             </>
           )}
-          {covers.length > 0 && (
+          {fohOnly.length > 0 && (
             <>
-              <div style={styles.teamSectionLabel}>Cover coaches ({covers.length})</div>
-              {covers.map(renderUser)}
+              <div style={styles.teamSectionLabel}>Front of House ({fohOnly.length})</div>
+              {fohOnly.map(renderUser)}
+            </>
+          )}
+          {unset.length > 0 && isManager && (
+            <>
+              <div style={styles.teamSectionLabel}>Awaiting role ({unset.length})</div>
+              {unset.map(renderUser)}
             </>
           )}
         </div>
@@ -8105,11 +8166,13 @@ function Modal({ children, onClose }) {
 
 const styles = {
   app: {
-    minHeight: '100vh',
+    height: '100%',
     background: '#f5f1e8',
     fontFamily: '"Geist", -apple-system, sans-serif',
     color: '#1a2620',
-    paddingBottom: 40,
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
   },
   header: {
     display: 'flex',
@@ -9127,7 +9190,16 @@ const styles = {
     padding: '2px 6px', borderRadius: 10, minWidth: 18, textAlign: 'center',
   },
 
-  main: { padding: '28px 32px 100px', maxWidth: 1400, margin: '0 auto' },
+  main: {
+    padding: '28px 32px 100px',
+    maxWidth: 1400,
+    margin: '0 auto',
+    width: '100%',
+    flex: 1,
+    overflowY: 'auto',
+    overscrollBehavior: 'contain',
+    WebkitOverflowScrolling: 'touch',
+  },
   mainChat: {
     position: 'fixed',
     top: 'calc(60px + env(safe-area-inset-top, 0px))',
