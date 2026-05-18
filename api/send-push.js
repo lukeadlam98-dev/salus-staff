@@ -56,6 +56,10 @@ export default async function handler(req, res) {
       const sent = await handleTask(record);
       return res.status(200).json({ sent });
     }
+    if (table === 'direct_messages') {
+      const sent = await handleDirectMessage(record);
+      return res.status(200).json({ sent });
+    }
     return res.status(200).json({ skipped: 'unknown table' });
   } catch (e) {
     console.error('send-push error:', e);
@@ -165,6 +169,28 @@ async function handleCoverMessage(record) {
     data: { url: '/?tab=home' },
   });
   return await sendAll(subs, payload);
+}
+
+async function handleDirectMessage(record) {
+  if (!record.recipient_id || !record.sender_id) return 0;
+  if (record.recipient_id === record.sender_id) return 0;
+
+  const { data: sender } = await supabase
+    .from('profiles').select('name').eq('id', record.sender_id).single();
+  const senderName = sender?.name?.split(' ')[0] || 'Someone';
+
+  const { data: subs } = await supabase
+    .from('push_subscriptions').select('id, subscription')
+    .eq('user_id', record.recipient_id);
+  if (!subs?.length) return 0;
+
+  const payload = JSON.stringify({
+    title: `${senderName} sent you a message`,
+    body: (record.text || '').slice(0, 120),
+    tag: `dm-${record.sender_id}`,
+    data: { url: '/?tab=chat' },
+  });
+  return await sendAll(subs, payload, { TTL: 86400 });
 }
 
 async function handleTask(record) {
