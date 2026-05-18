@@ -4603,68 +4603,47 @@ function ScheduleView({
 
 function FOHSchedule({ data, currentUser, isManager, isMobile, onShiftClick }) {
   const [weekOffset, setWeekOffset] = useState(0);
+  const [filter, setFilter] = useState('all');
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const currentMonday = getMonday(today);
   const weekStart = addDays(currentMonday, weekOffset * 7);
   const weekDates = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const weekIso = weekDates.map(toIsoDate);
+  const todayIso = toIsoDate(today);
+
+  const weekShifts = data.shifts.filter(s => weekIso.includes(s.date));
+  let visibleShifts = weekShifts;
+  if (filter === 'mine')       visibleShifts = visibleShifts.filter(s => s.staffId === currentUser.id);
+  if (filter === 'needsCover') visibleShifts = visibleShifts.filter(s => !s.staffId);
 
   const shiftsByDay = weekIso.map(iso =>
-    data.shifts
-      .filter(s => s.date === iso)
-      .sort((a, b) => a.startTime.localeCompare(b.startTime))
+    visibleShifts.filter(s => s.date === iso).sort((a, b) => a.startTime.localeCompare(b.startTime))
   );
 
-  const totalAssigned = shiftsByDay.flat().filter(s => s.staffId).length;
-  const totalOpen = shiftsByDay.flat().filter(s => !s.staffId).length;
-
+  const totalOpen = weekShifts.filter(s => !s.staffId).length;
+  const totalShifts = weekShifts.length;
   const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const userById = Object.fromEntries(data.users.map(u => [u.id, u]));
 
   return (
     <div style={styles.timetable}>
-      <div style={styles.weekNav}>
-        <button
-          onClick={() => setWeekOffset(w => Math.max(w - 1, -2))}
-          className="salus-btn"
-          style={styles.weekNavBtn}
-          disabled={weekOffset <= -2}
-        >
-          <ChevronLeft size={18} />
-        </button>
-        <div style={styles.weekNavLabel}>
-          {weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} – {
-            addDays(weekStart, 6).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
-          }
-        </div>
-        <button
-          onClick={() => setWeekOffset(w => Math.min(w + 1, 12))}
-          className="salus-btn"
-          style={styles.weekNavBtn}
-          disabled={weekOffset >= 12}
-        >
-          <ChevronRight size={18} />
-        </button>
-      </div>
+      <ScheduleWeekNav
+        weekStart={weekStart}
+        weekOffset={weekOffset}
+        setWeekOffset={setWeekOffset}
+      />
 
-      <div style={styles.fohStatsRow}>
-        <div style={styles.fohStat}>
-          <div style={styles.fohStatNumber}>{totalAssigned}</div>
-          <div style={styles.fohStatLabel}>Filled</div>
-        </div>
-        <div style={styles.fohStat}>
-          <div style={{ ...styles.fohStatNumber, color: '#c8442a' }}>{totalOpen}</div>
-          <div style={styles.fohStatLabel}>Needs cover</div>
-        </div>
-        <div style={styles.fohStat}>
-          <div style={styles.fohStatNumber}>{shiftsByDay.flat().length}</div>
-          <div style={styles.fohStatLabel}>Shifts this week</div>
-        </div>
-      </div>
+      <ScheduleStatsRow
+        coverCount={totalOpen}
+        totalCount={totalShifts}
+        totalLabel="shifts"
+      />
+
+      <ScheduleFilterRow filter={filter} setFilter={setFilter} isManager={isManager} />
 
       {weekDates.map((d, dayIdx) => {
         const dayShifts = shiftsByDay[dayIdx];
-        const isToday = toIsoDate(d) === toIsoDate(today);
+        const isToday = toIsoDate(d) === todayIso;
         if (dayShifts.length === 0) return null;
         return (
           <div key={dayIdx} style={styles.fohDayBlock}>
@@ -4681,33 +4660,18 @@ function FOHSchedule({ data, currentUser, isManager, isMobile, onShiftClick }) {
                 const open = !staff;
                 const isMine = s.staffId === currentUser.id;
                 return (
-                  <button
+                  <ScheduleCard
                     key={s.id}
                     onClick={() => onShiftClick(s.id)}
-                    className="salus-btn"
-                    style={{
-                      ...styles.fohShiftCard,
-                      ...(open ? styles.fohShiftCardOpen : {}),
-                      ...(isMine ? styles.fohShiftCardMine : {}),
-                    }}
-                  >
-                    <div style={styles.fohShiftTimes}>
-                      <span style={styles.fohShiftLabel}>{s.shiftLabel}</span>
-                      <span style={styles.fohShiftHours}>{s.startTime} – {s.endTime}</span>
-                    </div>
-                    <div style={styles.fohShiftStaff}>
-                      {staff ? (
-                        <>
-                          <UserAvatar user={staff} size={28} fontSize={11} />
-                          <span style={styles.fohShiftStaffName}>{staff.name}</span>
-                        </>
-                      ) : (
-                        <span style={styles.fohShiftOpen}>
-                          {isManager ? 'Tap to assign' : 'Unassigned'}
-                        </span>
-                      )}
-                    </div>
-                  </button>
+                    timeLeft={s.shiftLabel}
+                    timeBottom={`${s.startTime}–${s.endTime}`}
+                    title="FOH shift"
+                    subtitle={null}
+                    person={staff}
+                    needsCover={open}
+                    isMine={isMine}
+                    isManager={isManager}
+                  />
                 );
               })}
             </div>
@@ -4715,9 +4679,13 @@ function FOHSchedule({ data, currentUser, isManager, isMobile, onShiftClick }) {
         );
       })}
 
-      {shiftsByDay.every(d => d.length === 0) && (
+      {visibleShifts.length === 0 && (
         <div style={{ padding: 40, textAlign: 'center', color: '#7a8270' }}>
-          No shifts scheduled this week.
+          {filter === 'needsCover'
+            ? '🎉 All shifts covered this week.'
+            : filter === 'mine'
+              ? 'You have no shifts this week.'
+              : 'No shifts scheduled for this week.'}
         </div>
       )}
     </div>
@@ -4856,15 +4824,8 @@ function ShiftDetailModal({ shift, data, currentUser, isManager, onClose, onAssi
 }
 
 function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAddClass, onDayClick }) {
-  const [filter, setFilter] = useState('all'); // all | mine | needsCover
-  const [studioFilter, setStudioFilter] = useState('all'); // all | reformer | hybrid
-  const [weekOffset, setWeekOffset] = useState(0); // 0 = this week, 1 = next, etc.
-  const [selectedDayIdx, setSelectedDayIdx] = useState(() => {
-    const today = new Date().getDay();
-    return today === 0 ? 6 : today - 1; // map Sun=0..Sat=6 → Mon=0..Sun=6
-  });
-  const [viewMode, setViewMode] = useState('week');
-
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [filter, setFilter] = useState('all');  // all | needsCover | mine
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const currentMonday = getMonday(today);
   const weekStart = addDays(currentMonday, weekOffset * 7);
@@ -4872,287 +4833,230 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
   const weekIso = weekDates.map(toIsoDate);
   const todayIso = toIsoDate(today);
 
-  // Filter classes to just this visible week
   const weekClasses = data.classes.filter(c => weekIso.includes(c.date));
   let visibleClasses = weekClasses;
-  if (filter === 'mine') visibleClasses = visibleClasses.filter(c => c.coachId === currentUser.id);
+  if (filter === 'mine')       visibleClasses = visibleClasses.filter(c => c.coachId === currentUser.id);
   if (filter === 'needsCover') visibleClasses = visibleClasses.filter(c => c.status === 'needsCover');
-  if (studioFilter !== 'all') visibleClasses = visibleClasses.filter(c => c.studio === studioFilter);
 
-  // Group by date index (0=Mon..6=Sun within the visible week)
-  const byDayIdx = weekIso.map(iso =>
+  const classesByDay = weekIso.map(iso =>
     visibleClasses.filter(c => c.date === iso).sort((a, b) => a.time.localeCompare(b.time))
   );
 
-  // Week range label
-  const weekRangeLabel = (() => {
-    const start = weekDates[0];
-    const end = weekDates[6];
-    const sameMonth = start.getMonth() === end.getMonth();
-    if (sameMonth) {
-      return `${start.getDate()}–${end.getDate()} ${start.toLocaleDateString('en-GB', { month: 'short' })}`;
-    }
-    return `${start.getDate()} ${start.toLocaleDateString('en-GB', { month: 'short' })} – ${end.getDate()} ${end.toLocaleDateString('en-GB', { month: 'short' })}`;
-  })();
-
-  const canGoForward = weekOffset < 12; // ~3 months ahead
-  const canGoBack = weekOffset > -2;
-
-  // Renders a single class card — used in both desktop and mobile views
-  const renderClassCard = (cls, variant = 'compact') => {
-    const coach = data.users.find(u => u.id === cls.coachId);
-    const isMine = cls.coachId === currentUser.id;
-    const needsCover = cls.status === 'needsCover';
-    const isMobileVariant = variant === 'mobile';
-    return (
-      <button
-        key={cls.id}
-        onClick={() => onClassClick(cls.id)}
-        className="salus-card salus-btn"
-        style={{
-          ...styles.classCard,
-          ...(isMobileVariant ? styles.classCardMobile : {}),
-          background: needsCover ? '#fef0ea' : '#fff',
-          borderLeft: needsCover
-            ? '3px solid #c8442a'
-            : (isMine ? '3px solid #5c4a38' : '3px solid transparent'),
-        }}
-      >
-        {isMobileVariant ? (
-          <>
-            <div style={styles.mobileCardLeft}>
-              <div style={styles.mobileCardTime}>{cls.time}</div>
-              <div style={styles.mobileCardDur}>{cls.dur}m</div>
-            </div>
-            <div style={styles.mobileCardMid}>
-              <div style={styles.mobileCardType}>{cls.type}</div>
-              <div style={styles.mobileCardMeta}>
-                {coach && <UserAvatar user={coach} size={18} fontSize={8} />}
-                <span style={styles.mobileCardCoach}>{coach?.name || 'Unassigned'}</span>
-                <span style={styles.mobileCardStudio}>· {STUDIOS[cls.studio]?.short}</span>
-              </div>
-            </div>
-            {needsCover && (
-              <div style={styles.coverBadgeProminent}>
-                <AlertCircle size={12} />
-                <span>COVER</span>
-              </div>
-            )}
-          </>
-        ) : (
-          <>
-            <div style={styles.classCardTop}>
-              <div style={styles.classTime}>{cls.time}</div>
-              {needsCover && (
-                <div style={styles.coverBadgeProminent}>
-                  <AlertCircle size={12} />
-                  <span>COVER</span>
-                </div>
-              )}
-            </div>
-            <div style={styles.classType}>{cls.type}</div>
-            <div style={styles.classCoach}>
-              {coach && <UserAvatar user={coach} size={20} fontSize={9} />}
-              <span style={styles.classCoachName}>
-                {coach?.name?.split(' ')[0] || 'Unassigned'}
-              </span>
-            </div>
-            <div style={styles.studioTag}>{STUDIOS[cls.studio]?.short}</div>
-          </>
-        )}
-      </button>
-    );
-  };
+  const totalCover = weekClasses.filter(c => c.status === 'needsCover').length;
+  const totalClasses = weekClasses.length;
+  const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const userById = Object.fromEntries(data.users.map(u => [u.id, u]));
 
   return (
-    <div>
-      {/* Week navigator */}
-      {viewMode === 'week' && (
-        <div style={styles.weekNav}>
-          <button
-            onClick={() => canGoBack && setWeekOffset(o => o - 1)}
-            disabled={!canGoBack}
-            className="salus-btn"
-            style={{ ...styles.weekNavBtn, opacity: canGoBack ? 1 : 0.3 }}
-            title="Previous week"
-          >
-            <ChevronLeft size={20} />
-          </button>
-          <div style={styles.weekNavCenter}>
-            <div style={styles.weekNavRange}>{weekRangeLabel}</div>
-            <button
-              onClick={() => setWeekOffset(0)}
-              className="salus-btn"
-              style={styles.weekNavTodayBtn}
-              disabled={weekOffset === 0}
-            >
-              {weekOffset === 0 ? 'This week' : 'Jump to today'}
-            </button>
+    <div style={styles.timetable}>
+      <ScheduleWeekNav
+        weekStart={weekStart}
+        weekOffset={weekOffset}
+        setWeekOffset={setWeekOffset}
+      />
+
+      <ScheduleStatsRow
+        coverCount={totalCover}
+        totalCount={totalClasses}
+        totalLabel="classes"
+      />
+
+      <ScheduleFilterRow filter={filter} setFilter={setFilter} isManager={isManager} />
+
+      {weekDates.map((d, dayIdx) => {
+        const dayClasses = classesByDay[dayIdx];
+        const isToday = toIsoDate(d) === todayIso;
+        if (dayClasses.length === 0) return null;
+        return (
+          <div key={dayIdx} style={styles.fohDayBlock}>
+            <div style={{ ...styles.fohDayHeader, ...(isToday ? styles.fohDayHeaderToday : {}) }}>
+              <span style={styles.fohDayName}>{dayLabels[dayIdx]}</span>
+              <span style={styles.fohDayDate}>
+                {d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+              </span>
+              {isToday && <span style={styles.fohTodayBadge}>Today</span>}
+            </div>
+            <div style={styles.fohShiftList}>
+              {dayClasses.map(cls => {
+                const coach = cls.coachId ? userById[cls.coachId] : null;
+                const needsCover = cls.status === 'needsCover';
+                const isMine = cls.coachId === currentUser.id;
+                return (
+                  <ScheduleCard
+                    key={cls.id}
+                    onClick={() => onClassClick(cls.id)}
+                    timeLeft={cls.time}
+                    timeBottom={`${cls.dur} min`}
+                    title={cls.type}
+                    subtitle={STUDIOS[cls.studio]?.short || cls.studio}
+                    person={coach}
+                    needsCover={needsCover}
+                    isMine={isMine}
+                    isManager={isManager}
+                  />
+                );
+              })}
+            </div>
           </div>
-          <button
-            onClick={() => canGoForward && setWeekOffset(o => o + 1)}
-            disabled={!canGoForward}
-            className="salus-btn"
-            style={{ ...styles.weekNavBtn, opacity: canGoForward ? 1 : 0.3 }}
-            title="Next week"
-          >
-            <ChevronRight size={20} />
-          </button>
+        );
+      })}
+
+      {visibleClasses.length === 0 && (
+        <div style={{ padding: 40, textAlign: 'center', color: '#7a8270' }}>
+          {filter === 'needsCover'
+            ? '🎉 Nothing needs cover this week.'
+            : filter === 'mine'
+              ? 'You have no classes this week.'
+              : 'No classes scheduled for this week.'}
         </div>
       )}
 
-      <div className="salus-section-header" style={styles.sectionHeader}>
-        <div>
-          <p style={styles.subtitle}>
-            {visibleClasses.length} classes · {weekClasses.filter(c => c.status === 'needsCover').length} need cover
-          </p>
-        </div>
-        <div style={styles.filterRow}>
-          <div style={styles.viewToggle}>
-            <button
-              onClick={() => setViewMode('week')}
-              className="salus-btn"
-              style={{ ...styles.viewToggleBtn, ...(viewMode === 'week' ? styles.viewToggleBtnActive : {}) }}
-            >
-              Week
-            </button>
-            <button
-              onClick={() => setViewMode('month')}
-              className="salus-btn"
-              style={{ ...styles.viewToggleBtn, ...(viewMode === 'month' ? styles.viewToggleBtnActive : {}) }}
-            >
-              3-Month
-            </button>
-          </div>
-          {viewMode === 'week' && (
-            <>
-              <FilterPill label="All" active={filter==='all'} onClick={() => setFilter('all')} />
-              {!isManager && <FilterPill label="Mine" active={filter==='mine'} onClick={() => setFilter('mine')} />}
-              <FilterPill label="Cover" active={filter==='needsCover'} onClick={() => setFilter('needsCover')} />
-            </>
-          )}
-          {isManager && (
-            <button onClick={onAddClass} className="salus-btn" style={styles.btnPrimary}>
-              <Plus size={14} /> {isMobile ? 'Add' : 'Add class'}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {viewMode === 'month' ? (
-        <MonthView
-          classes={data.classes}
-          coverRequests={data.coverRequests}
-          currentUser={currentUser}
-          onDayClick={(isoDate) => {
-            // Open the day-detail modal directly — fastest path to seeing a day's
-            // classes and requesting cover for one of yours.
-            if (onDayClick) onDayClick(isoDate);
-          }}
-        />
-      ) : (
-        <>
-      {/* Studio toggle */}
-      <div style={styles.studioToggle}>
-        <button
-          onClick={() => setStudioFilter('all')}
-          className="salus-btn"
-          style={{ ...styles.studioPill, ...(studioFilter==='all' ? styles.studioPillActive : {}) }}
-        >
-          All studios
+      {isManager && (
+        <button onClick={onAddClass} className="salus-btn" style={styles.scheduleFab}>
+          <Plus size={16} /> Add class
         </button>
-        <button
-          onClick={() => setStudioFilter('reformer')}
-          className="salus-btn"
-          style={{ ...styles.studioPill, ...(studioFilter==='reformer' ? styles.studioPillActive : {}) }}
-        >
-          {isMobile ? 'Reformer' : 'Reformer Studio'}
-        </button>
-        <button
-          onClick={() => setStudioFilter('hybrid')}
-          className="salus-btn"
-          style={{ ...styles.studioPill, ...(studioFilter==='hybrid' ? styles.studioPillActive : {}) }}
-        >
-          Hybrid
-        </button>
-      </div>
-
-      {/* MOBILE: day selector + single day list */}
-      {isMobile ? (
-        <>
-          <div style={styles.daySelector} className="salus-scroll">
-            {DAYS.map((day, i) => {
-              const isActive = i === selectedDayIdx;
-              const date = weekDates[i];
-              const isToday = toIsoDate(date) === todayIso;
-              return (
-                <button
-                  key={day}
-                  onClick={() => setSelectedDayIdx(i)}
-                  className="salus-btn"
-                  style={{
-                    ...styles.dayPill,
-                    ...(isActive ? styles.dayPillActive : {}),
-                    ...(isToday && !isActive ? { borderColor: '#5c4a38', borderWidth: 1.5 } : {}),
-                  }}
-                >
-                  <div style={styles.dayPillDay}>{day}</div>
-                  <div style={styles.dayPillDate}>{date.getDate()}</div>
-                  {byDayIdx[i].length > 0 && <div style={{ ...styles.dayPillDot, background: isActive ? '#fff' : '#5c4a38' }} />}
-                </button>
-              );
-            })}
-          </div>
-
-          <div style={styles.mobileDayHeader}>
-            <div>
-              <div style={styles.mobileDayHeaderDay}>
-                {DAYS[selectedDayIdx]} {weekDates[selectedDayIdx].getDate()} {weekDates[selectedDayIdx].toLocaleDateString('en-GB', { month: 'short' })}
-              </div>
-              <div style={styles.subtitle}>
-                {byDayIdx[selectedDayIdx].length} class{byDayIdx[selectedDayIdx].length === 1 ? '' : 'es'}
-              </div>
-            </div>
-          </div>
-
-          <div style={styles.mobileDayList}>
-            {byDayIdx[selectedDayIdx].length === 0 ? (
-              <div style={{ ...styles.emptyState, padding: '32px 16px' }}>
-                <div style={styles.emptyTitle}>No classes</div>
-                <div style={styles.emptyText}>Nothing scheduled for this day with the current filters.</div>
-              </div>
-            ) : (
-              byDayIdx[selectedDayIdx].map(cls => renderClassCard(cls, 'mobile'))
-            )}
-          </div>
-        </>
-      ) : (
-        /* DESKTOP: full 7-day grid */
-        <div style={styles.weekGrid}>
-          {DAYS.map((day, i) => (
-            <div key={day} style={styles.dayColumn}>
-              <div style={styles.dayHeader}>
-                <div>
-                  <div style={styles.dayName}>{day}</div>
-                  <div style={styles.dayDate}>
-                    {weekDates[i].getDate()} {weekDates[i].toLocaleDateString('en-GB', { month: 'short' })}
-                  </div>
-                </div>
-                <div style={styles.dayCount}>{byDayIdx[i].length}</div>
-              </div>
-              <div style={styles.dayClasses}>
-                {byDayIdx[i].length === 0 && (
-                  <div style={styles.emptyDay}>No classes</div>
-                )}
-                {byDayIdx[i].map(cls => renderClassCard(cls, 'compact'))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-        </>
       )}
     </div>
+  );
+}
+
+// Shared subcomponents used by both Timetable and FOHSchedule
+function ScheduleWeekNav({ weekStart, weekOffset, setWeekOffset }) {
+  return (
+    <div style={styles.weekNav}>
+      <button
+        onClick={() => setWeekOffset(w => Math.max(w - 1, -2))}
+        className="salus-btn"
+        style={styles.weekNavBtn}
+        disabled={weekOffset <= -2}
+      >
+        <ChevronLeft size={18} />
+      </button>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        <div style={styles.weekNavLabel}>
+          {weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} – {
+            addDays(weekStart, 6).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+          }
+        </div>
+        {weekOffset !== 0 && (
+          <button
+            onClick={() => setWeekOffset(0)}
+            className="salus-btn"
+            style={styles.weekTodayLink}
+          >
+            Jump to this week
+          </button>
+        )}
+      </div>
+      <button
+        onClick={() => setWeekOffset(w => Math.min(w + 1, 12))}
+        className="salus-btn"
+        style={styles.weekNavBtn}
+        disabled={weekOffset >= 12}
+      >
+        <ChevronRight size={18} />
+      </button>
+    </div>
+  );
+}
+
+function ScheduleStatsRow({ coverCount, totalCount, totalLabel }) {
+  return (
+    <div style={styles.scheduleStatsRow}>
+      <div style={{ flex: 1 }}>
+        <div style={{
+          fontSize: 32, fontWeight: 700, lineHeight: 1,
+          color: coverCount > 0 ? '#c8442a' : '#5c8a5a',
+          fontFamily: '"Fraunces", Georgia, serif',
+        }}>
+          {coverCount}
+        </div>
+        <div style={{ fontSize: 11, color: '#7a8270', marginTop: 4, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6 }}>
+          {coverCount === 0 ? 'all filled this week' : `${coverCount === 1 ? 'needs' : 'need'} cover`}
+        </div>
+      </div>
+      <div style={{ textAlign: 'right' }}>
+        <div style={{ fontSize: 11, color: '#7a8270', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6 }}>
+          Total
+        </div>
+        <div style={{ fontSize: 14, color: '#5c4a38', marginTop: 4, fontWeight: 600 }}>
+          {totalCount} {totalLabel}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ScheduleFilterRow({ filter, setFilter, isManager }) {
+  return (
+    <div style={styles.scheduleFilterRow}>
+      <button
+        onClick={() => setFilter('all')}
+        className="salus-btn"
+        style={{ ...styles.scheduleFilterPill, ...(filter === 'all' ? styles.scheduleFilterPillActive : {}) }}
+      >
+        All
+      </button>
+      <button
+        onClick={() => setFilter('needsCover')}
+        className="salus-btn"
+        style={{
+          ...styles.scheduleFilterPill,
+          ...(filter === 'needsCover'
+            ? { background: '#c8442a', color: '#fff', borderColor: '#c8442a' }
+            : {}),
+        }}
+      >
+        Needs cover
+      </button>
+      {!isManager && (
+        <button
+          onClick={() => setFilter('mine')}
+          className="salus-btn"
+          style={{ ...styles.scheduleFilterPill, ...(filter === 'mine' ? styles.scheduleFilterPillActive : {}) }}
+        >
+          Mine
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ScheduleCard({ onClick, timeLeft, timeBottom, title, subtitle, person, needsCover, isMine, isManager }) {
+  const open = !person;
+  return (
+    <button
+      onClick={onClick}
+      className="salus-btn"
+      style={{
+        ...styles.scheduleCard,
+        ...(needsCover ? styles.scheduleCardCover : {}),
+        ...(isMine ? styles.scheduleCardMine : {}),
+      }}
+    >
+      <div style={styles.scheduleCardTime}>
+        <div style={styles.scheduleCardTimeMain}>{timeLeft}</div>
+        {timeBottom && <div style={styles.scheduleCardTimeSub}>{timeBottom}</div>}
+      </div>
+      <div style={styles.scheduleCardMid}>
+        <div style={styles.scheduleCardTitle}>{title}</div>
+        {subtitle && <div style={styles.scheduleCardSub}>{subtitle}</div>}
+      </div>
+      <div style={styles.scheduleCardRight}>
+        {needsCover ? (
+          <span style={styles.scheduleCoverChip}>Cover</span>
+        ) : person ? (
+          <>
+            <UserAvatar user={person} size={26} fontSize={11} />
+            <span style={styles.scheduleCardName}>{person.name?.split(' ')[0]}</span>
+          </>
+        ) : (
+          <span style={styles.scheduleUnassigned}>
+            {isManager ? 'Tap to assign' : 'Unassigned'}
+          </span>
+        )}
+      </div>
+    </button>
   );
 }
 
@@ -9425,6 +9329,84 @@ const styles = {
   fohShiftStaff: { display: 'flex', alignItems: 'center', gap: 8, flex: 1 },
   fohShiftStaffName: { fontSize: 13, color: '#1a2620', fontWeight: 500 },
   fohShiftOpen: { fontSize: 12, color: '#c8442a', fontStyle: 'italic' },
+
+  // ─── UNIFIED SCHEDULE (Studio + FOH) ───
+  weekTodayLink: {
+    background: 'transparent', border: 'none', padding: '2px 4px',
+    fontSize: 10, color: '#7a8270', fontWeight: 600,
+    fontFamily: 'inherit', cursor: 'pointer',
+    textDecoration: 'underline', textUnderlineOffset: 2,
+  },
+  scheduleStatsRow: {
+    display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+    padding: '14px 16px',
+    background: '#fffdf7',
+    borderBottom: '1px solid #efe7d2',
+  },
+  scheduleFilterRow: {
+    display: 'flex', gap: 6, padding: '10px 14px 4px',
+    overflowX: 'auto', WebkitOverflowScrolling: 'touch',
+  },
+  scheduleFilterPill: {
+    flexShrink: 0, padding: '7px 13px', borderRadius: 999,
+    background: '#fffdf7', border: '1px solid #ebe3cf',
+    color: '#5c4a38', fontSize: 12, fontWeight: 600,
+    fontFamily: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap',
+  },
+  scheduleFilterPillActive: {
+    background: '#5c4a38', color: '#fff', borderColor: '#5c4a38',
+  },
+  scheduleCard: {
+    display: 'flex', alignItems: 'center', gap: 10,
+    padding: '10px 12px', borderRadius: 10,
+    background: '#fffdf7', border: '1px solid #efe7d2',
+    fontFamily: 'inherit', cursor: 'pointer', width: '100%',
+    textAlign: 'left',
+  },
+  scheduleCardCover: {
+    background: '#fef0ea', borderColor: '#e8b8a8',
+    borderLeftWidth: 4, borderLeftColor: '#c8442a',
+  },
+  scheduleCardMine: {
+    background: '#f3f5ed', borderColor: '#7a8c5c', borderWidth: 2,
+  },
+  scheduleCardTime: {
+    display: 'flex', flexDirection: 'column', gap: 2,
+    minWidth: 78, flexShrink: 0,
+  },
+  scheduleCardTimeMain: {
+    fontSize: 13, fontWeight: 700, color: '#5c4a38',
+    textTransform: 'uppercase', letterSpacing: 0.4,
+  },
+  scheduleCardTimeSub: { fontSize: 11, color: '#7a8270' },
+  scheduleCardMid: { flex: 1, minWidth: 0 },
+  scheduleCardTitle: {
+    fontSize: 13, fontWeight: 600, color: '#1a2620',
+    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+  },
+  scheduleCardSub: { fontSize: 11, color: '#7a8270', marginTop: 2 },
+  scheduleCardRight: {
+    display: 'flex', alignItems: 'center', gap: 6,
+    flexShrink: 0,
+  },
+  scheduleCardName: {
+    fontSize: 12, fontWeight: 600, color: '#1a2620',
+  },
+  scheduleCoverChip: {
+    background: '#c8442a', color: '#fff',
+    fontSize: 10, fontWeight: 700, padding: '4px 10px',
+    borderRadius: 999, textTransform: 'uppercase', letterSpacing: 0.6,
+  },
+  scheduleUnassigned: { fontSize: 11, color: '#a59478', fontStyle: 'italic' },
+  scheduleFab: {
+    position: 'fixed', right: 16, bottom: 90,
+    background: '#5c4a38', color: '#fff', border: 'none',
+    padding: '12px 18px', borderRadius: 999,
+    fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
+    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+    boxShadow: '0 4px 16px rgba(92,74,56,0.25)',
+    zIndex: 50,
+  },
 
   // ─── ROLE PICKER ───
   rolePickerWrap: {
