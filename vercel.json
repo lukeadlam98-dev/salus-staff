@@ -7,10 +7,6 @@
     {
       "path": "/api/spawn-recurring-tasks",
       "schedule": "1 0 * * *"
-    },
-    {
-      "path": "/api/sync-tours",
-      "schedule": "*/15 * * * *"
     }
   ],
   "headers": [
