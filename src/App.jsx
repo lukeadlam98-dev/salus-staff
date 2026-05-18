@@ -15,6 +15,9 @@ import {
   messageFromDb,
   shiftFromDb,
   taskFromDb,
+  taskCommentFromDb,
+  shiftNoteFromDb,
+  tourFromDb,
   maintenanceFromDb,
   feedbackFromDb,
   coachPostFromDb,
@@ -61,6 +64,9 @@ const EMPTY_DATA = {
   messages: [],
   shifts: [],
   tasks: [],
+  taskComments: [],
+  shiftNotes: [],
+  tours: [],
   maintenance: [],
   feedback: [],
   posts: [],
@@ -116,6 +122,32 @@ function toIsoDate(date) {
   return d.getFullYear() + '-' +
     String(d.getMonth() + 1).padStart(2, '0') + '-' +
     String(d.getDate()).padStart(2, '0');
+}
+
+// Build a Google Calendar "render" URL that pre-fills a new event.
+// Tapping it opens Google Calendar in browser (or the app on mobile) with the event ready to save.
+function googleCalendarUrl({ title, dateIso, startTime, endTime, description, location }) {
+  const fmt = (d, t) => {
+    // YYYYMMDDTHHmmss — local time, no Z (Google interprets as floating; user's local zone applies)
+    const dt = new Date(`${d}T${t || '00:00'}:00`);
+    const pad = (n) => String(n).padStart(2, '0');
+    return dt.getFullYear()
+      + pad(dt.getMonth() + 1)
+      + pad(dt.getDate())
+      + 'T'
+      + pad(dt.getHours())
+      + pad(dt.getMinutes())
+      + '00';
+  };
+  const dates = `${fmt(dateIso, startTime)}/${fmt(dateIso, endTime || startTime)}`;
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: title || '',
+    dates,
+  });
+  if (description) params.set('details', description);
+  if (location)    params.set('location', location);
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
 
 
@@ -254,7 +286,7 @@ export default function SalusStaff() {
     if (!session) return;
     if (!silent) setLoading(true);
     try {
-      const [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes] = await Promise.all([
+      const [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes] = await Promise.all([
         supabase.from('profiles').select('*'),
         supabase.from('classes').select('*'),
         supabase.from('cover_requests').select('*'),
@@ -262,6 +294,9 @@ export default function SalusStaff() {
         supabase.from('messages').select('*').order('created_at', { ascending: true }),
         supabase.from('foh_shifts').select('*'),
         supabase.from('tasks').select('*').order('created_at', { ascending: false }),
+        supabase.from('task_comments').select('*').order('created_at', { ascending: true }),
+        supabase.from('shift_notes').select('*').order('created_at', { ascending: true }),
+        supabase.from('tours').select('*').order('start_time', { ascending: true }),
         supabase.from('maintenance_logs').select('*').order('created_at', { ascending: false }),
         supabase.from('member_feedback').select('*').order('created_at', { ascending: false }),
         supabase.from('coach_posts').select('*').order('created_at', { ascending: false }),
@@ -271,7 +306,7 @@ export default function SalusStaff() {
         supabase.from('direct_messages').select('*').order('created_at', { ascending: true }),
       ]);
 
-      const errors = [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes]
+      const errors = [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes]
         .filter(r => r.error)
         .map(r => r.error.message);
       if (errors.length) {
@@ -287,6 +322,9 @@ export default function SalusStaff() {
         messages: (messagesRes.data || []).map(messageFromDb),
         shifts: (shiftsRes.data || []).map(shiftFromDb),
         tasks: (tasksRes.data || []).map(taskFromDb),
+        taskComments: (taskCmRes.data || []).map(taskCommentFromDb),
+        shiftNotes: (shiftNotesRes.data || []).map(shiftNoteFromDb),
+        tours: (toursRes.data || []).map(tourFromDb),
         maintenance: (maintRes.data || []).map(maintenanceFromDb),
         feedback: (fbRes.data || []).map(feedbackFromDb),
         posts: (postsRes.data || []).map(coachPostFromDb),
@@ -333,6 +371,9 @@ export default function SalusStaff() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'coach_post_comments' }, silentReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'studio_bookings' }, silentReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'direct_messages' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_comments' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'shift_notes' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tours' }, silentReload)
       .subscribe();
     return () => { supabase.removeChannel(channel); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -651,9 +692,11 @@ export default function SalusStaff() {
   };
 
   // ─── Task mutations ───
-  const createTask = async ({ title, description, assigneeId, audience, dueDate, priority, recurrence, recurrenceDays }) => {
+  const createTask = async ({ title, description, assigneeId, audience, dueDate, priority, recurrence, recurrenceDays, taskKind }) => {
     if (!title?.trim()) return false;
     const isRecurring = recurrence && recurrence !== 'none';
+    const kind = taskKind || 'daily';
+    const initialStatus = kind === 'project' ? 'not_started' : 'todo';
 
     const basePayload = {
       title: title.trim(),
@@ -662,13 +705,13 @@ export default function SalusStaff() {
       audience: audience || 'specific',
       created_by: currentUserId,
       priority: priority || 'normal',
+      task_kind: kind,
     };
 
     if (!isRecurring) {
-      // Simple one-off task
       const { error } = await supabase.from('tasks').insert({
         ...basePayload,
-        status: 'todo',
+        status: initialStatus,
         due_date: dueDate || null,
       });
       if (error) { console.error('createTask', error); return false; }
@@ -676,7 +719,7 @@ export default function SalusStaff() {
       return true;
     }
 
-    // Recurring: create the template AND today's instance (if today matches)
+    // Recurring: only makes sense for daily-kind. Create template + today's instance.
     const { data: tplData, error: tplErr } = await supabase
       .from('tasks')
       .insert({
@@ -691,7 +734,7 @@ export default function SalusStaff() {
     if (tplErr) { console.error('createTask template', tplErr); return false; }
 
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    const todayDow = (today.getDay() + 6) % 7; // 0=Mon..6=Sun
+    const todayDow = (today.getDay() + 6) % 7;
     const todayDom = today.getDate();
     const fireToday =
       recurrence === 'daily' ||
@@ -710,13 +753,100 @@ export default function SalusStaff() {
     return true;
   };
 
-  const markTaskDone = async (taskId, done) => {
-    if (!taskId) return false;
-    const patch = done
-      ? { status: 'done',  completed_at: new Date().toISOString(), completed_by: currentUserId }
-      : { status: 'todo',  completed_at: null, completed_by: null };
+  // Set status to any value. Auto-posts a system comment for project tasks.
+  const setTaskStatus = async (taskId, newStatus) => {
+    if (!taskId || !newStatus) return false;
+    const task = data.tasks.find(t => t.id === taskId);
+    if (!task) return false;
+    const oldStatus = task.status;
+    if (oldStatus === newStatus) return true;
+
+    const patch = { status: newStatus };
+    if (newStatus === 'done') {
+      patch.completed_at = new Date().toISOString();
+      patch.completed_by = currentUserId;
+    } else {
+      patch.completed_at = null;
+      patch.completed_by = null;
+    }
     const { error } = await supabase.from('tasks').update(patch).eq('id', taskId);
-    if (error) { console.error('markTaskDone', error); return false; }
+    if (error) { console.error('setTaskStatus', error); return false; }
+
+    // For project tasks, log the status change as a system comment
+    if (task.taskKind === 'project') {
+      const meName = data.users.find(u => u.id === currentUserId)?.name?.split(' ')[0] || 'Someone';
+      const label = TASK_STATUS_LABELS[newStatus] || newStatus;
+      await supabase.from('task_comments').insert({
+        task_id: taskId,
+        user_id: currentUserId,
+        text: `${meName} moved this to ${label}`,
+        kind: 'status_change',
+      });
+    }
+    await reloadData(true);
+    return true;
+  };
+
+  // Keep old markTaskDone for daily tasks
+  const markTaskDone = async (taskId, done) => {
+    return await setTaskStatus(taskId, done ? 'done' : 'todo');
+  };
+
+  const addTaskComment = async (taskId, text) => {
+    if (!taskId || !text?.trim()) return false;
+    const { error } = await supabase.from('task_comments').insert({
+      task_id: taskId,
+      user_id: currentUserId,
+      text: text.trim(),
+      kind: 'comment',
+    });
+    if (error) { console.error('addTaskComment', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  const deleteTaskComment = async (commentId) => {
+    if (!commentId) return false;
+    const { error } = await supabase.from('task_comments').delete().eq('id', commentId);
+    if (error) { console.error('deleteTaskComment', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  // ─── Shift handover notes ───
+  const addShiftNote = async (shiftId, text) => {
+    if (!shiftId || !text?.trim()) return false;
+    const { error } = await supabase.from('shift_notes').insert({
+      shift_id: shiftId,
+      user_id: currentUserId,
+      text: text.trim(),
+    });
+    if (error) { console.error('addShiftNote', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  const deleteShiftNote = async (noteId) => {
+    if (!noteId) return false;
+    const { error } = await supabase.from('shift_notes').delete().eq('id', noteId);
+    if (error) { console.error('deleteShiftNote', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  // ─── Tours (synced from Google Calendar) ───
+  // Only notes + outcome can be updated; the rest is mirrored from Google.
+  const updateTourOutcome = async (tourId, { status, notes }) => {
+    if (!tourId) return false;
+    const patch = {};
+    if (status !== undefined) {
+      patch.status = status;
+      patch.outcome_by = currentUserId;
+      patch.outcome_at = new Date().toISOString();
+    }
+    if (notes !== undefined) patch.notes = (notes || '').trim() || null;
+    const { error } = await supabase.from('tours').update(patch).eq('id', tourId);
+    if (error) { console.error('updateTourOutcome', error); return false; }
     await reloadData(true);
     return true;
   };
@@ -910,10 +1040,46 @@ export default function SalusStaff() {
   // ─── Studio Bookings ───
   const createBooking = async (payload) => {
     if (!payload.title?.trim()) return false;
+
+    // If recurring, build a series of dates and insert one row per occurrence
+    const isRecurring = payload.recurrencePattern === 'weekly'
+      && Array.isArray(payload.recurrenceDays) && payload.recurrenceDays.length
+      && payload.recurrenceEndDate;
+
+    if (isRecurring) {
+      const dates = generateRecurringDates(payload.date, payload.recurrenceEndDate, payload.recurrenceDays);
+      if (dates.length === 0) return false;
+      const seriesId = crypto.randomUUID();
+      const rows = dates.map(d => ({
+        title: payload.title.trim(),
+        description: (payload.description || '').trim() || null,
+        booking_type: payload.bookingType,
+        hirer_name: (payload.hirerName || '').trim() || null,
+        hirer_contact: (payload.hirerContact || '').trim() || null,
+        price: payload.price ? Number(payload.price) : null,
+        studio: payload.studio || 'whole',
+        date: d,
+        start_time: payload.startTime,
+        end_time: payload.endTime,
+        status: payload.status || 'confirmed',
+        notes: (payload.notes || '').trim() || null,
+        created_by: currentUserId,
+        recurrence_pattern: 'weekly',
+        recurrence_days: payload.recurrenceDays,
+        recurrence_end_date: payload.recurrenceEndDate,
+        recurrence_series_id: seriesId,
+      }));
+      const { error } = await supabase.from('studio_bookings').insert(rows);
+      if (error) { console.error('createBooking (series)', error); return false; }
+      await reloadData(true);
+      return true;
+    }
+
+    // One-off booking
     const { error } = await supabase.from('studio_bookings').insert({
       title: payload.title.trim(),
       description: (payload.description || '').trim() || null,
-      booking_type: payload.bookingType || 'hire',
+      booking_type: payload.bookingType,
       hirer_name: (payload.hirerName || '').trim() || null,
       hirer_contact: (payload.hirerContact || '').trim() || null,
       price: payload.price ? Number(payload.price) : null,
@@ -926,6 +1092,14 @@ export default function SalusStaff() {
       created_by: currentUserId,
     });
     if (error) { console.error('createBooking', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  const deleteBookingSeries = async (seriesId) => {
+    if (!seriesId) return false;
+    const { error } = await supabase.from('studio_bookings').delete().eq('recurrence_series_id', seriesId);
+    if (error) { console.error('deleteBookingSeries', error); return false; }
     await reloadData(true);
     return true;
   };
@@ -1206,6 +1380,7 @@ export default function SalusStaff() {
             onViewChat={() => setTab('chat')}
             onCreateTask={() => setModal({ type: 'createTask' })}
             onOpenTask={(taskId) => setModal({ type: 'taskDetail', taskId })}
+            onOpenTour={(tourId) => setModal({ type: 'tourDetail', tourId })}
             onCreateMaintenance={() => setModal({ type: 'createMaintenance' })}
             onOpenMaintenance={(id) => setModal({ type: 'maintenanceDetail', id })}
             onCreateFeedback={() => setModal({ type: 'createFeedback' })}
@@ -1396,6 +1571,8 @@ export default function SalusStaff() {
             onClose={() => setModal(null)}
             onAssign={assignShift}
             onRequestCover={requestShiftCover}
+            onAddShiftNote={addShiftNote}
+            onDeleteShiftNote={deleteShiftNote}
           />
         );
       })()}
@@ -1435,7 +1612,10 @@ export default function SalusStaff() {
             isManager={isManager}
             onClose={() => setModal(null)}
             onMarkDone={markTaskDone}
+            onSetStatus={setTaskStatus}
             onDelete={deleteTask}
+            onAddComment={addTaskComment}
+            onDeleteComment={deleteTaskComment}
           />
         );
       })()}
@@ -1475,9 +1655,23 @@ export default function SalusStaff() {
           />
         );
       })()}
+      {modal?.type === 'tourDetail' && (() => {
+        const t = data.tours.find(x => x.id === modal.tourId);
+        if (!t) return null;
+        return (
+          <TourDetailModal
+            tour={t}
+            currentUser={currentUser}
+            onClose={() => setModal(null)}
+            onUpdate={updateTourOutcome}
+          />
+        );
+      })()}
       {modal?.type === 'createBooking' && (
         <CreateBookingModal
           existing={null}
+          currentUser={currentUser}
+          isManager={isManager}
           onClose={() => setModal(null)}
           onCreate={createBooking}
           onUpdate={updateBooking}
@@ -1489,6 +1683,8 @@ export default function SalusStaff() {
         return (
           <CreateBookingModal
             existing={b}
+            currentUser={currentUser}
+            isManager={isManager}
             onClose={() => setModal(null)}
             onCreate={createBooking}
             onUpdate={updateBooking}
@@ -1506,6 +1702,7 @@ export default function SalusStaff() {
             onClose={() => setModal(null)}
             onEdit={(id) => setModal({ type: 'editBooking', id })}
             onDelete={deleteBooking}
+            onDeleteSeries={deleteBookingSeries}
           />
         );
       })()}
@@ -3331,6 +3528,30 @@ const BOOKING_STUDIO_LABELS = {
   whole:    'Whole gym',
 };
 
+const BOOKING_TYPES = {
+  external_event: { label: 'External event',   category: 'External', short: 'EVENT',     color: '#c6926a' },
+  coach_1on1:     { label: '1:1 session',      category: 'Coach',    short: '1:1',       color: '#7a8c5c' },
+  coach_class:    { label: 'Extra class',      category: 'Coach',    short: 'CLASS',     color: '#5c4a38' },
+  coach_event:    { label: 'Workshop / event', category: 'Coach',    short: 'EVENT',     color: '#5c8a5a' },
+};
+
+const DOW_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+const DOW_FULL   = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+// Generate dates between start and end (inclusive) matching the chosen weekdays
+function generateRecurringDates(startIso, endIso, days /* 0=Mon..6=Sun */) {
+  const out = [];
+  const start = new Date(startIso); start.setHours(12, 0, 0, 0);
+  const end = new Date(endIso); end.setHours(12, 0, 0, 0);
+  const cur = new Date(start);
+  while (cur <= end && out.length < 200) {
+    const dow = (cur.getDay() + 6) % 7; // Mon=0
+    if (days.includes(dow)) out.push(toIsoDate(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return out;
+}
+
 function StudioBookingsView({ data, currentUser, isManager, onCreate, onOpenBooking }) {
   const [filter, setFilter] = useState('upcoming');
   const todayIso = toIsoDate(new Date());
@@ -3361,6 +3582,11 @@ function StudioBookingsView({ data, currentUser, isManager, onCreate, onOpenBook
           <div style={styles.bookingsSubtitle}>Hires, workshops, and special events.</div>
         </div>
         {isManager && (
+          <button onClick={onCreate} className="salus-btn" style={styles.flowsCreateBtn}>
+            <Plus size={18} />
+          </button>
+        )}
+        {!isManager && currentUser.isCoach && (
           <button onClick={onCreate} className="salus-btn" style={styles.flowsCreateBtn}>
             <Plus size={18} />
           </button>
@@ -3431,7 +3657,14 @@ function StudioBookingsView({ data, currentUser, isManager, onCreate, onOpenBook
 }
 
 function BookingCard({ booking, onOpen }) {
-  const isHire = booking.bookingType === 'hire';
+  const meta = BOOKING_TYPES[booking.bookingType] || BOOKING_TYPES.external_event;
+  const isExternal = booking.bookingType === 'external_event';
+  const sub = [
+    BOOKING_STUDIO_LABELS[booking.studio] || booking.studio,
+    isExternal ? booking.hirerName : null,
+    booking.price != null ? `£${booking.price}` : null,
+    booking.recurrenceSeriesId ? 'recurring' : null,
+  ].filter(Boolean).join(' · ');
   return (
     <button onClick={onOpen} className="salus-btn" style={{
       ...styles.fohShiftCard,
@@ -3439,48 +3672,76 @@ function BookingCard({ booking, onOpen }) {
       ...(booking.status === 'pending' ? { borderStyle: 'dashed' } : {}),
     }}>
       <div style={styles.fohShiftTimes}>
-        <span style={{ ...styles.fohShiftLabel, color: isHire ? '#c6926a' : '#5c8a5a' }}>
-          {isHire ? 'HIRE' : 'EVENT'}
+        <span style={{ ...styles.fohShiftLabel, color: meta.color }}>
+          {meta.short}
         </span>
         <span style={styles.fohShiftHours}>{booking.startTime} – {booking.endTime}</span>
       </div>
       <div style={{ flex: 1, textAlign: 'left' }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: '#1a2620' }}>{booking.title}</div>
-        <div style={{ fontSize: 11, color: '#7a8270', marginTop: 2 }}>
-          {BOOKING_STUDIO_LABELS[booking.studio] || booking.studio}
-          {booking.hirerName && <> · {booking.hirerName}</>}
-          {booking.price != null && <> · £{booking.price}</>}
-        </div>
+        <div style={{ fontSize: 11, color: '#7a8270', marginTop: 2 }}>{sub}</div>
       </div>
       <ChevronRight size={16} color="#a59478" />
     </button>
   );
 }
 
-function CreateBookingModal({ existing, onClose, onCreate, onUpdate }) {
+function CreateBookingModal({ existing, currentUser, isManager, onClose, onCreate, onUpdate }) {
   const isEdit = !!existing;
+  const [bookingType, setBookingType] = useState(existing?.bookingType || (isManager ? 'external_event' : 'coach_1on1'));
   const [title, setTitle] = useState(existing?.title || '');
-  const [bookingType, setBookingType] = useState(existing?.bookingType || 'hire');
   const [hirerName, setHirerName] = useState(existing?.hirerName || '');
   const [hirerContact, setHirerContact] = useState(existing?.hirerContact || '');
   const [price, setPrice] = useState(existing?.price ?? '');
   const [studio, setStudio] = useState(existing?.studio || 'whole');
   const [date, setDate] = useState(existing?.date || toIsoDate(new Date()));
   const [startTime, setStartTime] = useState(existing?.startTime || '09:00');
-  const [endTime, setEndTime] = useState(existing?.endTime || '11:00');
+  const [endTime, setEndTime] = useState(existing?.endTime || '10:00');
   const [status, setStatus] = useState(existing?.status || 'confirmed');
   const [description, setDescription] = useState(existing?.description || '');
   const [notes, setNotes] = useState(existing?.notes || '');
+  // Recurring (only available on new bookings, not when editing)
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [recDays, setRecDays] = useState([]);
+  const [recEndDate, setRecEndDate] = useState(() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() + 3);
+    return toIsoDate(d);
+  });
   const [saving, setSaving] = useState(false);
+
+  const meta = BOOKING_TYPES[bookingType];
+  const isExternal = bookingType === 'external_event';
+  const is1on1 = bookingType === 'coach_1on1';
+
+  const toggleDay = (idx) => {
+    setRecDays(d => d.includes(idx) ? d.filter(x => x !== idx) : [...d, idx].sort());
+  };
 
   const handleSubmit = async () => {
     if (!title.trim() || !date || !startTime || !endTime || saving) return;
+    if (isRecurring && !isEdit && recDays.length === 0) return;
     setSaving(true);
-    const payload = { title, bookingType, hirerName, hirerContact, price: price || null, studio, date, startTime, endTime, status, description, notes };
+    const payload = {
+      title, bookingType,
+      hirerName, hirerContact,
+      price: price || null,
+      studio, date, startTime, endTime, status, description, notes,
+      ...(isRecurring && !isEdit ? {
+        recurrencePattern: 'weekly',
+        recurrenceDays: recDays,
+        recurrenceEndDate: recEndDate,
+      } : {}),
+    };
     const ok = isEdit ? await onUpdate(existing.id, payload) : await onCreate(payload);
     setSaving(false);
     if (ok) onClose();
   };
+
+  // Which booking types can the current user create?
+  const availableTypes = isManager
+    ? ['external_event', 'coach_1on1', 'coach_class', 'coach_event']
+    : ['coach_1on1', 'coach_class', 'coach_event'];
 
   return (
     <div style={styles.threadBackdrop} onClick={onClose}>
@@ -3491,26 +3752,71 @@ function CreateBookingModal({ existing, onClose, onCreate, onUpdate }) {
           <div style={{ width: 36 }} />
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
-          <label style={styles.label}>Type</label>
-          <div style={styles.audienceRow}>
-            <button onClick={() => setBookingType('hire')} className="salus-btn"
-              style={{ ...styles.audiencePill, ...(bookingType === 'hire' ? { background: '#c6926a', color: '#fff', borderColor: '#c6926a' } : {}) }}>
-              Paid hire
-            </button>
-            <button onClick={() => setBookingType('internal')} className="salus-btn"
-              style={{ ...styles.audiencePill, ...(bookingType === 'internal' ? { background: '#5c8a5a', color: '#fff', borderColor: '#5c8a5a' } : {}) }}>
-              Internal event
-            </button>
-          </div>
+          {!isEdit && (
+            <>
+              <label style={styles.label}>Type</label>
+              {isManager && (
+                <>
+                  <div style={styles.bookingTypeCategoryLabel}>External</div>
+                  <div style={{ ...styles.audienceRow, marginBottom: 8 }}>
+                    <button onClick={() => setBookingType('external_event')} className="salus-btn"
+                      style={{
+                        ...styles.audiencePill,
+                        ...(bookingType === 'external_event'
+                          ? { background: BOOKING_TYPES.external_event.color, color: '#fff', borderColor: BOOKING_TYPES.external_event.color }
+                          : {}),
+                      }}>
+                      🏷️ Paid hire / event
+                    </button>
+                  </div>
+                </>
+              )}
+              <div style={styles.bookingTypeCategoryLabel}>Coach</div>
+              <div style={{ ...styles.audienceRow, marginBottom: 14 }}>
+                <button onClick={() => setBookingType('coach_1on1')} className="salus-btn"
+                  style={{
+                    ...styles.audiencePill,
+                    ...(bookingType === 'coach_1on1'
+                      ? { background: BOOKING_TYPES.coach_1on1.color, color: '#fff', borderColor: BOOKING_TYPES.coach_1on1.color }
+                      : {}),
+                  }}>
+                  🤝 1:1 session
+                </button>
+                <button onClick={() => setBookingType('coach_class')} className="salus-btn"
+                  style={{
+                    ...styles.audiencePill,
+                    ...(bookingType === 'coach_class'
+                      ? { background: BOOKING_TYPES.coach_class.color, color: '#fff', borderColor: BOOKING_TYPES.coach_class.color }
+                      : {}),
+                  }}>
+                  📅 Extra class
+                </button>
+                <button onClick={() => setBookingType('coach_event')} className="salus-btn"
+                  style={{
+                    ...styles.audiencePill,
+                    ...(bookingType === 'coach_event'
+                      ? { background: BOOKING_TYPES.coach_event.color, color: '#fff', borderColor: BOOKING_TYPES.coach_event.color }
+                      : {}),
+                  }}>
+                  🎉 Workshop / event
+                </button>
+              </div>
+            </>
+          )}
 
           <label style={styles.label}>Title</label>
           <input className="salus-input" type="text" value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder={bookingType === 'hire' ? 'e.g. PT 1:1 — John Smith' : 'e.g. Yoga workshop'}
+            placeholder={
+              isExternal ? 'e.g. Yoga retreat — Olivia G' :
+              is1on1     ? 'e.g. 1:1 with John Smith' :
+              bookingType === 'coach_class' ? 'e.g. Pop-up Reformer Sunday' :
+                            'e.g. Mobility workshop'
+            }
             style={{ width: '100%', marginBottom: 14 }} autoFocus
           />
 
-          <label style={styles.label}>Date</label>
+          <label style={styles.label}>{isRecurring ? 'First date' : 'Date'}</label>
           <input className="salus-input" type="date" value={date}
             onChange={(e) => setDate(e.target.value)}
             style={{ width: '100%', marginBottom: 14, fontFamily: 'inherit' }}
@@ -3545,7 +3851,7 @@ function CreateBookingModal({ existing, onClose, onCreate, onUpdate }) {
             ))}
           </div>
 
-          {bookingType === 'hire' && (
+          {isExternal && (
             <>
               <label style={styles.label}>Hirer name</label>
               <input className="salus-input" type="text" value={hirerName}
@@ -3568,6 +3874,17 @@ function CreateBookingModal({ existing, onClose, onCreate, onUpdate }) {
             </>
           )}
 
+          {is1on1 && (
+            <>
+              <label style={styles.label}>Client name (optional)</label>
+              <input className="salus-input" type="text" value={hirerName}
+                onChange={(e) => setHirerName(e.target.value)}
+                placeholder="e.g. John Smith"
+                style={{ width: '100%', marginBottom: 14 }}
+              />
+            </>
+          )}
+
           <label style={styles.label}>Status</label>
           <div style={styles.audienceRow}>
             {[
@@ -3584,19 +3901,72 @@ function CreateBookingModal({ existing, onClose, onCreate, onUpdate }) {
             ))}
           </div>
 
+          {!isEdit && (
+            <>
+              <label style={styles.label}>Repeat?</label>
+              <div style={{ ...styles.audienceRow, marginBottom: 8 }}>
+                <button onClick={() => setIsRecurring(false)} className="salus-btn"
+                  style={{ ...styles.audiencePill, ...(!isRecurring ? styles.audiencePillActive : {}) }}>
+                  One-off
+                </button>
+                <button onClick={() => setIsRecurring(true)} className="salus-btn"
+                  style={{ ...styles.audiencePill, ...(isRecurring ? styles.audiencePillActive : {}) }}>
+                  Weekly
+                </button>
+              </div>
+              {isRecurring && (
+                <div style={{
+                  background: '#fef7e8', border: '1px solid #efe7d2',
+                  borderRadius: 8, padding: 12, marginBottom: 14,
+                }}>
+                  <label style={{ ...styles.label, marginTop: 0 }}>Which days?</label>
+                  <div style={{ display: 'flex', gap: 4, marginBottom: 12 }}>
+                    {DOW_LABELS.map((d, i) => (
+                      <button key={i}
+                        onClick={() => toggleDay(i)}
+                        className="salus-btn"
+                        style={{
+                          flex: 1, padding: '8px 0', borderRadius: 8,
+                          background: recDays.includes(i) ? '#5c4a38' : '#fffdf7',
+                          color: recDays.includes(i) ? '#fff' : '#5c4a38',
+                          border: '1px solid ' + (recDays.includes(i) ? '#5c4a38' : '#ebe3cf'),
+                          fontSize: 13, fontWeight: 700, fontFamily: 'inherit',
+                          cursor: 'pointer',
+                        }}>
+                        {d}
+                      </button>
+                    ))}
+                  </div>
+                  <label style={{ ...styles.label, marginTop: 0 }}>Until</label>
+                  <input className="salus-input" type="date" value={recEndDate}
+                    onChange={(e) => setRecEndDate(e.target.value)}
+                    style={{ width: '100%', fontFamily: 'inherit' }}
+                  />
+                  <div style={{ fontSize: 11, color: '#7a8270', marginTop: 8, lineHeight: 1.4 }}>
+                    Will create one booking per chosen weekday between {new Date(date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} and {new Date(recEndDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}.
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
           <label style={styles.label}>Notes (optional)</label>
           <textarea className="salus-input" value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            placeholder="Special requirements, equipment needed, contact details, etc."
+            placeholder="Anything else…"
             rows={3}
             style={{ width: '100%', resize: 'vertical', marginBottom: 14, fontFamily: 'inherit' }}
           />
         </div>
         <div style={styles.threadActionBar}>
-          <button onClick={handleSubmit} disabled={!title.trim() || saving}
+          <button onClick={handleSubmit}
+            disabled={!title.trim() || saving || (isRecurring && !isEdit && recDays.length === 0)}
             className="salus-btn"
-            style={{ ...styles.threadClaimBtn, ...((!title.trim() || saving) ? styles.threadClaimBtnDisabled : {}) }}>
-            {saving ? 'Saving…' : (isEdit ? 'Save changes' : 'Add booking')}
+            style={{
+              ...styles.threadClaimBtn,
+              ...((!title.trim() || saving || (isRecurring && !isEdit && recDays.length === 0)) ? styles.threadClaimBtnDisabled : {}),
+            }}>
+            {saving ? 'Saving…' : (isEdit ? 'Save changes' : (isRecurring ? 'Create series' : 'Add booking'))}
           </button>
         </div>
       </div>
@@ -3604,10 +3974,14 @@ function CreateBookingModal({ existing, onClose, onCreate, onUpdate }) {
   );
 }
 
-function BookingDetailModal({ booking, currentUser, isManager, onClose, onEdit, onDelete }) {
+function BookingDetailModal({ booking, currentUser, isManager, onClose, onEdit, onDelete, onDeleteSeries }) {
   if (!booking) return null;
-  const isHire = booking.bookingType === 'hire';
+  const meta = BOOKING_TYPES[booking.bookingType] || BOOKING_TYPES.external_event;
+  const isExternal = booking.bookingType === 'external_event';
+  const isMine = booking.createdBy === currentUser.id;
+  const canEdit = isManager || isMine;
   const d = new Date(booking.date);
+  const inSeries = !!booking.recurrenceSeriesId;
 
   return (
     <div style={styles.threadBackdrop} onClick={onClose}>
@@ -3618,10 +3992,11 @@ function BookingDetailModal({ booking, currentUser, isManager, onClose, onEdit, 
           <div style={{ width: 36 }} />
         </div>
         <div style={styles.dayDetailHeader}>
-          <div style={{ ...styles.dayDetailRelative, color: isHire ? '#c6926a' : '#5c8a5a', fontWeight: 700 }}>
-            {isHire ? 'PAID HIRE' : 'INTERNAL EVENT'}
+          <div style={{ ...styles.dayDetailRelative, color: meta.color, fontWeight: 700 }}>
+            {meta.label.toUpperCase()}
             {booking.status === 'pending' && ' · PENDING'}
             {booking.status === 'cancelled' && ' · CANCELLED'}
+            {inSeries && ' · RECURRING'}
           </div>
           <div style={styles.dayDetailTitle}>{booking.title}</div>
           <div style={styles.dayDetailMeta}>
@@ -3630,11 +4005,26 @@ function BookingDetailModal({ booking, currentUser, isManager, onClose, onEdit, 
           <div style={styles.dayDetailMeta}>
             {booking.startTime} – {booking.endTime} · {BOOKING_STUDIO_LABELS[booking.studio]}
           </div>
+          <a
+            href={googleCalendarUrl({
+              title: `${booking.title} — Salus House`,
+              dateIso: booking.date,
+              startTime: booking.startTime,
+              endTime: booking.endTime,
+              description: [booking.notes, booking.hirerName ? `Hirer: ${booking.hirerName}` : null].filter(Boolean).join('\n\n'),
+              location: 'Salus House, Sidcup',
+            })}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={styles.gcalLink}
+          >
+            📅 Add to Google Calendar
+          </a>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
-          {booking.hirerName && (
+          {(isExternal || booking.bookingType === 'coach_1on1') && booking.hirerName && (
             <div style={{ marginBottom: 14 }}>
-              <div style={styles.label}>Hirer</div>
+              <div style={styles.label}>{isExternal ? 'Hirer' : 'Client'}</div>
               <div style={{ fontSize: 14, color: '#1a2620' }}>{booking.hirerName}</div>
               {booking.hirerContact && (
                 <div style={{ fontSize: 12, color: '#7a8270', marginTop: 2 }}>{booking.hirerContact}</div>
@@ -3654,15 +4044,27 @@ function BookingDetailModal({ booking, currentUser, isManager, onClose, onEdit, 
             </div>
           )}
         </div>
-        {isManager && (
+        {canEdit && (
           <div style={styles.threadActionBar}>
-            <button onClick={() => { onEdit(booking.id); }} className="salus-btn" style={styles.btnSecondary}>
-              Edit
+            <button onClick={() => onEdit(booking.id)} className="salus-btn" style={styles.btnSecondary}>
+              Edit this one
             </button>
             <button onClick={() => { if (confirm('Delete this booking?')) { onDelete(booking.id); onClose(); } }}
               className="salus-btn" style={{ ...styles.btnGhost, color: '#c8442a' }}>
               <Trash2 size={14} /> Delete
             </button>
+            {inSeries && (
+              <button onClick={() => {
+                if (confirm('Delete the ENTIRE recurring series? This removes all past and future bookings in this series.')) {
+                  onDeleteSeries(booking.recurrenceSeriesId);
+                  onClose();
+                }
+              }}
+                className="salus-btn"
+                style={{ ...styles.btnGhost, color: '#c8442a', flex: 1 }}>
+                Delete whole series
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -3796,7 +4198,7 @@ function NotificationsDrawer({ data, currentUser, isManager, onClose, onGoTo, on
 
   // Tasks assigned to me (or audience matches)
   data.tasks
-    .filter(t => t.status === 'todo' && !t.isTemplate)
+    .filter(t => t.status !== 'done' && !t.isTemplate)
     .filter(t =>
       (t.audience === 'specific' && t.assigneeId === currentUser.id) ||
       (t.audience === 'all_foh'  && currentUser.isFoh) ||
@@ -4219,7 +4621,7 @@ function MonthView({ classes, coverRequests, currentUser, onDayClick }) {
 // HOME — cover-first dashboard, the new app landing screen
 // ──────────────────────────────────────────────────────────────────────────────
 
-function Home({ data, currentUser, isManager, onClassClick, onRequestCover, onHireStudio, onClaim, onExpressInterest, onViewAllCover, onViewChat, onCreateTask, onOpenTask, onCreateMaintenance, onOpenMaintenance, onCreateFeedback, onOpenFeedback }) {
+function Home({ data, currentUser, isManager, onClassClick, onRequestCover, onHireStudio, onClaim, onExpressInterest, onViewAllCover, onViewChat, onCreateTask, onOpenTask, onOpenTour, onCreateMaintenance, onOpenMaintenance, onCreateFeedback, onOpenFeedback }) {
   const now = new Date();
   const hour = now.getHours();
   const greeting = hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening';
@@ -4372,6 +4774,13 @@ function Home({ data, currentUser, isManager, onClassClick, onRequestCover, onHi
           </div>
         )}
       </HomeTile>
+
+      {/* Tours (synced from Google Calendar) */}
+      <ToursTile
+        data={data}
+        currentUser={currentUser}
+        onOpenTour={onOpenTour}
+      />
 
       {/* Tasks / reminders */}
       <TasksTile
@@ -4678,9 +5087,11 @@ function FOHSchedule({ data, currentUser, isManager, isMobile, onShiftClick }) {
 // SHIFT DETAIL MODAL — view/assign a single FOH shift
 // ──────────────────────────────────────────────────────────────────────────────
 
-function ShiftDetailModal({ shift, data, currentUser, isManager, onClose, onAssign, onRequestCover }) {
+function ShiftDetailModal({ shift, data, currentUser, isManager, onClose, onAssign, onRequestCover, onAddShiftNote, onDeleteShiftNote }) {
   const [pickedStaffId, setPickedStaffId] = useState(shift?.staffId || null);
   const [saving, setSaving] = useState(false);
+  const [noteText, setNoteText] = useState('');
+  const [postingNote, setPostingNote] = useState(false);
   if (!shift) return null;
 
   const fohStaff = data.users
@@ -4693,12 +5104,48 @@ function ShiftDetailModal({ shift, data, currentUser, isManager, onClose, onAssi
     weekday: 'long', day: 'numeric', month: 'long',
   });
 
+  // Notes for THIS shift
+  const myNotes = data.shiftNotes
+    .filter(n => n.shiftId === shift.id)
+    .sort((a, b) => a.createdAt - b.createdAt);
+
+  // Notes from the PREVIOUS shift on the same day (to read what's been handed over)
+  const sameDayShifts = data.shifts
+    .filter(s => s.date === shift.date && s.id !== shift.id)
+    .sort((a, b) => a.startTime.localeCompare(b.startTime));
+  const previousShift = sameDayShifts
+    .filter(s => s.startTime < shift.startTime)
+    .pop();
+  const previousNotes = previousShift
+    ? data.shiftNotes.filter(n => n.shiftId === previousShift.id).sort((a, b) => a.createdAt - b.createdAt)
+    : [];
+
+  const canPostNote = isMine || isManager;
+
   const handleAssign = async () => {
     setSaving(true);
     await onAssign(shift.id, pickedStaffId || null);
     setSaving(false);
     onClose();
   };
+
+  const handleSendNote = async () => {
+    if (!noteText.trim() || postingNote) return;
+    setPostingNote(true);
+    await onAddShiftNote(shift.id, noteText);
+    setNoteText('');
+    setPostingNote(false);
+  };
+
+  // Google Calendar link — works for the person assigned (or anyone curious)
+  const calUrl = googleCalendarUrl({
+    title: `FOH ${shift.shiftLabel} shift — Salus House`,
+    dateIso: shift.date,
+    startTime: shift.startTime,
+    endTime: shift.endTime,
+    description: 'Front of House shift at Salus House.',
+    location: 'Salus House, Sidcup',
+  });
 
   return (
     <div style={styles.threadBackdrop} onClick={onClose}>
@@ -4717,36 +5164,28 @@ function ShiftDetailModal({ shift, data, currentUser, isManager, onClose, onAssi
           <div style={styles.dayDetailMeta}>
             {assignedStaff ? `Assigned to ${assignedStaff.name}` : 'Currently unassigned'}
           </div>
+          <a href={calUrl} target="_blank" rel="noopener noreferrer" style={styles.gcalLink}>
+            📅 Add to Google Calendar
+          </a>
         </div>
 
-        {isManager ? (
-          <>
-            <div style={{ padding: '14px 16px 4px', flexShrink: 0 }}>
-              <p style={{ fontSize: 13, color: '#7a8270', margin: 0 }}>
-                Pick an FOH staff member to assign, or leave blank to clear.
-              </p>
-            </div>
-            <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px' }}>
-              {fohStaff.length === 0 && (
-                <div style={{ padding: 20, textAlign: 'center', color: '#7a8270', fontSize: 13 }}>
-                  No FOH staff have signed up yet.
-                </div>
-              )}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px' }}>
+          {/* Manager — assign UI */}
+          {isManager && (
+            <>
+              <div style={styles.label}>Assign staff</div>
               <button
                 onClick={() => setPickedStaffId(null)}
                 className="salus-btn"
-                style={{
-                  ...styles.transferCoachRow,
-                  ...(!pickedStaffId ? styles.transferCoachRowActive : {}),
-                }}
+                style={{ ...styles.transferCoachRow, ...(!pickedStaffId ? styles.transferCoachRowActive : {}) }}
               >
-                <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#ebe3cf', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#7a8270', flexShrink: 0 }}>
-                  <X size={16} />
+                <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#ebe3cf', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#7a8270', flexShrink: 0 }}>
+                  <X size={14} />
                 </div>
                 <div style={{ flex: 1, textAlign: 'left' }}>
-                  <div style={{ fontSize: 14, fontWeight: 500, color: '#1a2620' }}>No one (clear assignment)</div>
+                  <div style={{ fontSize: 13, color: '#1a2620' }}>No one (clear)</div>
                 </div>
-                {!pickedStaffId && <Check size={20} color="#5c4a38" strokeWidth={2.5} />}
+                {!pickedStaffId && <Check size={18} color="#5c4a38" strokeWidth={2.5} />}
               </button>
               {fohStaff.map(s => {
                 const picked = pickedStaffId === s.id;
@@ -4755,49 +5194,122 @@ function ShiftDetailModal({ shift, data, currentUser, isManager, onClose, onAssi
                     key={s.id}
                     onClick={() => setPickedStaffId(s.id)}
                     className="salus-btn"
-                    style={{
-                      ...styles.transferCoachRow,
-                      ...(picked ? styles.transferCoachRowActive : {}),
-                    }}
+                    style={{ ...styles.transferCoachRow, ...(picked ? styles.transferCoachRowActive : {}) }}
                   >
-                    <UserAvatar user={s} size={36} fontSize={13} />
+                    <UserAvatar user={s} size={32} fontSize={11} />
                     <div style={{ flex: 1, textAlign: 'left' }}>
-                      <div style={{ fontSize: 14, fontWeight: 500, color: '#1a2620' }}>{s.name}</div>
-                      <div style={{ fontSize: 11, color: '#7a8270', marginTop: 2 }}>FOH</div>
+                      <div style={{ fontSize: 13, color: '#1a2620' }}>{s.name}</div>
                     </div>
-                    {picked && <Check size={20} color="#5c4a38" strokeWidth={2.5} />}
+                    {picked && <Check size={18} color="#5c4a38" strokeWidth={2.5} />}
                   </button>
                 );
               })}
-            </div>
-            <div style={styles.threadActionBar}>
               <button
                 onClick={handleAssign}
                 disabled={saving}
                 className="salus-btn"
-                style={{
-                  ...styles.threadClaimBtn,
-                  ...(saving ? styles.threadClaimBtnDisabled : {}),
-                }}
+                style={{ ...styles.threadClaimBtn, marginTop: 10, width: '100%', ...(saving ? styles.threadClaimBtnDisabled : {}) }}
               >
-                {saving ? 'Saving…' : (pickedStaffId ? 'Save assignment' : 'Clear assignment')}
+                {saving ? 'Saving…' : 'Save assignment'}
               </button>
-            </div>
-          </>
-        ) : (
-          <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px' }}>
-            <p style={{ fontSize: 14, color: '#5c4a38' }}>
+            </>
+          )}
+
+          {/* Non-manager — assigned to me CTA */}
+          {!isManager && (
+            <p style={{ fontSize: 13, color: '#5c4a38', margin: 0 }}>
               {isMine ? "This is your shift." : (assignedStaff ? `Assigned to ${assignedStaff.name}.` : 'No one is on this shift yet.')}
             </p>
-            {isMine && (
-              <button
-                onClick={() => { onRequestCover(shift.id); onClose(); }}
-                className="salus-btn"
-                style={{ ...styles.btnPrimary, marginTop: 16, width: '100%' }}
-              >
-                <AlertCircle size={14} /> Request cover for this shift
-              </button>
+          )}
+          {!isManager && isMine && (
+            <button
+              onClick={() => { onRequestCover(shift.id); onClose(); }}
+              className="salus-btn"
+              style={{ ...styles.btnPrimary, marginTop: 12, width: '100%' }}
+            >
+              <AlertCircle size={14} /> Request cover for this shift
+            </button>
+          )}
+
+          {/* Handover from previous shift (read-only) */}
+          {previousNotes.length > 0 && (
+            <div style={{ marginTop: 18, padding: 12, background: '#fef7e8', borderRadius: 10, border: '1px solid #efe7d2' }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 8 }}>
+                Handover from {previousShift.shiftLabel} shift
+              </div>
+              {previousNotes.map(n => {
+                const u = data.users.find(u => u.id === n.userId);
+                return (
+                  <div key={n.id} style={styles.shiftNoteCard}>
+                    <div style={styles.shiftNoteHead}>
+                      <strong style={{ fontSize: 11, color: '#5c4a38' }}>{u?.name?.split(' ')[0] || 'Someone'}</strong>
+                      <span style={{ fontSize: 10, color: '#a59478' }}>
+                        {new Date(n.createdAt).toLocaleString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                    <div style={styles.shiftNoteText}>{n.text}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Notes for THIS shift — what gets handed over to next shift */}
+          <div style={{ marginTop: 18 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 8 }}>
+              Handover notes {myNotes.length > 0 && `(${myNotes.length})`}
+            </div>
+            <div style={{ fontSize: 11, color: '#7a8270', marginBottom: 10, fontStyle: 'italic' }}>
+              Anything the next shift should know.
+            </div>
+            {myNotes.length === 0 && (
+              <div style={{ padding: 12, textAlign: 'center', color: '#a59478', fontSize: 12, background: '#fffdf7', borderRadius: 8, border: '1px dashed #ebe3cf' }}>
+                No notes yet.
+              </div>
             )}
+            {myNotes.map(n => {
+              const u = data.users.find(u => u.id === n.userId);
+              const canDelete = n.userId === currentUser.id || isManager;
+              return (
+                <div key={n.id} style={styles.shiftNoteCard}>
+                  <div style={styles.shiftNoteHead}>
+                    <strong style={{ fontSize: 11, color: '#5c4a38' }}>{u?.name?.split(' ')[0] || 'Someone'}</strong>
+                    <span style={{ fontSize: 10, color: '#a59478' }}>
+                      {new Date(n.createdAt).toLocaleString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    {canDelete && (
+                      <button onClick={() => { if (confirm('Delete this note?')) onDeleteShiftNote(n.id); }}
+                        className="salus-btn"
+                        style={{ background: 'transparent', border: 'none', padding: 2, color: '#a59478', marginLeft: 'auto' }}>
+                        <Trash2 size={11} />
+                      </button>
+                    )}
+                  </div>
+                  <div style={styles.shiftNoteText}>{n.text}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Composer at bottom — only for the assigned person or manager */}
+        {canPostNote && (
+          <div style={{ display: 'flex', gap: 6, padding: '10px 12px', borderTop: '1px solid #ebe3cf', background: '#fffdf7' }}>
+            <input
+              type="text"
+              className="salus-input"
+              value={noteText}
+              onChange={(e) => setNoteText(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSendNote()}
+              placeholder="Note for next shift…"
+              style={{ flex: 1, fontFamily: 'inherit' }}
+            />
+            <button onClick={handleSendNote}
+              disabled={!noteText.trim() || postingNote}
+              className="salus-btn"
+              style={{ ...styles.sendBtn, opacity: (!noteText.trim() || postingNote) ? 0.5 : 1 }}>
+              <Send size={16} />
+            </button>
           </div>
         )}
       </div>
@@ -6474,7 +6986,31 @@ function ClassDetailModal({ classObj, data, currentUser, isManager, onClose, onR
         </div>
 
         {mode === 'view' && (
-          <div style={{ marginTop: 24, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ marginTop: 16 }}>
+            <a
+              href={googleCalendarUrl({
+                title: `${classObj.type} — Salus House`,
+                dateIso: classObj.date,
+                startTime: classObj.time,
+                endTime: (() => {
+                  const [h, m] = classObj.time.split(':').map(Number);
+                  const total = h * 60 + m + (classObj.dur || 45);
+                  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+                })(),
+                description: `Teaching at ${STUDIOS[classObj.studio]?.name || classObj.studio}.`,
+                location: 'Salus House, Sidcup',
+              })}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={styles.gcalLink}
+            >
+              📅 Add to Google Calendar
+            </a>
+          </div>
+        )}
+
+        {mode === 'view' && (
+          <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {isManager && (
               <>
                 <button onClick={onEdit} className="salus-btn" style={styles.btnPrimary}>
@@ -8314,6 +8850,24 @@ function DayDetailModal({ isoDate, data, currentUser, isManager, onClose, onClas
 // ──────────────────────────────────────────────────────────────────────────────
 
 // Helper: which tasks are relevant to this user?
+const TASK_STATUS_LABELS = {
+  todo:        'To do',
+  not_started: 'Not started',
+  in_progress: 'In progress',
+  blocked:     'Blocked',
+  done:        'Done',
+};
+
+const PROJECT_STATUSES = ['not_started', 'in_progress', 'blocked', 'done'];
+
+const TASK_STATUS_COLORS = {
+  todo:        { bg: '#fffdf7', fg: '#5c4a38', border: '#ebe3cf' },
+  not_started: { bg: '#fffdf7', fg: '#5c4a38', border: '#ebe3cf' },
+  in_progress: { bg: '#fef7e8', fg: '#c6926a', border: '#d4b87a' },
+  blocked:     { bg: '#fef0ea', fg: '#c8442a', border: '#e8b8a8' },
+  done:        { bg: '#f3f5ed', fg: '#5c8a5a', border: '#a8c4a6' },
+};
+
 function tasksForUser(allTasks, user) {
   if (!user) return [];
   return allTasks.filter(t => {
@@ -8325,12 +8879,215 @@ function tasksForUser(allTasks, user) {
   });
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// TOURS — synced from Google Calendar
+// ──────────────────────────────────────────────────────────────────────────────
+
+function ToursTile({ data, currentUser, onOpenTour }) {
+  const [open, setOpen] = useState(false);
+  const now = Date.now();
+  const todayStart = (() => { const d = new Date(); d.setHours(0,0,0,0); return d.getTime(); })();
+  const tomorrowEnd = todayStart + 2 * 86400 * 1000;
+
+  // Show today + tomorrow's tours, scheduled only
+  const upcoming = data.tours
+    .filter(t => t.status !== 'cancelled' && t.startTime >= todayStart && t.startTime < tomorrowEnd)
+    .sort((a, b) => a.startTime - b.startTime);
+
+  const todays = upcoming.filter(t => t.startTime < todayStart + 86400 * 1000);
+  const tomorrows = upcoming.filter(t => t.startTime >= todayStart + 86400 * 1000);
+
+  const summary = upcoming.length === 0
+    ? 'No tours today or tomorrow'
+    : (todays.length > 0
+        ? `${todays.length} today${tomorrows.length ? ` · ${tomorrows.length} tomorrow` : ''}`
+        : `${tomorrows.length} tomorrow`);
+
+  return (
+    <HomeTile
+      title="Tours"
+      count={upcoming.length}
+      summary={summary}
+      open={open}
+      onToggle={() => setOpen(o => !o)}
+    >
+      {upcoming.length === 0 ? (
+        <div style={{ ...styles.homeEmptyCover, padding: '18px 14px' }}>
+          <div style={{ fontSize: 12, color: '#7a8270' }}>No tours scheduled in the next 48 hours.</div>
+          <div style={{ fontSize: 11, color: '#a59478', marginTop: 4 }}>Tours sync from your Google Calendar every 15 min.</div>
+        </div>
+      ) : (
+        <div style={styles.tasksList}>
+          {todays.length > 0 && (
+            <>
+              <div style={styles.toursSectionLabel}>Today</div>
+              {todays.map(t => <TourCard key={t.id} tour={t} onOpen={() => onOpenTour(t.id)} />)}
+            </>
+          )}
+          {tomorrows.length > 0 && (
+            <>
+              <div style={styles.toursSectionLabel}>Tomorrow</div>
+              {tomorrows.map(t => <TourCard key={t.id} tour={t} onOpen={() => onOpenTour(t.id)} />)}
+            </>
+          )}
+        </div>
+      )}
+    </HomeTile>
+  );
+}
+
+function TourCard({ tour, onOpen }) {
+  const start = new Date(tour.startTime);
+  const timeLabel = start.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  const passed = tour.startTime < Date.now();
+  return (
+    <button onClick={onOpen} className="salus-btn" style={{
+      ...styles.taskCard,
+      ...(passed && tour.status === 'scheduled' ? { opacity: 0.65 } : {}),
+      ...(tour.status === 'completed' ? { background: '#f3f5ed', borderColor: '#a8c4a6' } : {}),
+      ...(tour.status === 'no_show' ? { background: '#fef0ea', borderColor: '#e8b8a8' } : {}),
+    }}>
+      <div style={styles.tourCardTime}>
+        <div style={styles.tourCardTimeMain}>{timeLabel}</div>
+      </div>
+      <div style={{ flex: 1, textAlign: 'left' }}>
+        <div style={styles.taskCardTitle}>
+          {tour.guestName || tour.title || 'Tour'}
+        </div>
+        <div style={styles.taskCardMeta}>
+          {tour.status === 'completed' && <span style={{ color: '#5c8a5a' }}>✓ Done · </span>}
+          {tour.status === 'no_show' && <span style={{ color: '#c8442a' }}>✗ No-show · </span>}
+          {tour.guestPhone && <span>📱 {tour.guestPhone}</span>}
+          {tour.guestEmail && !tour.guestPhone && <span>✉ {tour.guestEmail}</span>}
+          {!tour.guestPhone && !tour.guestEmail && <span>Tour</span>}
+        </div>
+      </div>
+      <ChevronRight size={16} color="#a59478" />
+    </button>
+  );
+}
+
+function TourDetailModal({ tour, currentUser, onClose, onUpdate }) {
+  const [notes, setNotes] = useState(tour?.notes || '');
+  const [saving, setSaving] = useState(false);
+  if (!tour) return null;
+
+  const start = new Date(tour.startTime);
+  const end = tour.endTime ? new Date(tour.endTime) : null;
+  const dateLabel = start.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+  const timeLabel = start.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+    + (end ? ` – ${end.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : '');
+
+  const handleStatus = async (status) => {
+    setSaving(true);
+    await onUpdate(tour.id, { status });
+    setSaving(false);
+  };
+
+  const handleSaveNotes = async () => {
+    setSaving(true);
+    await onUpdate(tour.id, { notes });
+    setSaving(false);
+  };
+
+  return (
+    <div style={styles.threadBackdrop} onClick={onClose}>
+      <div style={styles.threadSheet} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.threadHeader}>
+          <button onClick={onClose} className="salus-btn" style={styles.threadCloseBtn}><X size={20} /></button>
+          <div style={styles.threadHeaderTitle}>Tour</div>
+          <div style={{ width: 36 }} />
+        </div>
+        <div style={styles.dayDetailHeader}>
+          <div style={styles.dayDetailRelative}>FROM GOOGLE CALENDAR</div>
+          <div style={styles.dayDetailTitle}>{tour.guestName || tour.title || 'Tour'}</div>
+          <div style={styles.dayDetailMeta}>{dateLabel}</div>
+          <div style={styles.dayDetailMeta}>{timeLabel}</div>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+          {(tour.guestEmail || tour.guestPhone) && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={styles.label}>Contact</div>
+              {tour.guestPhone && (
+                <a href={`tel:${tour.guestPhone}`} style={{ display: 'block', fontSize: 14, color: '#5c4a38', textDecoration: 'none', marginTop: 2 }}>
+                  📱 {tour.guestPhone}
+                </a>
+              )}
+              {tour.guestEmail && (
+                <a href={`mailto:${tour.guestEmail}`} style={{ display: 'block', fontSize: 14, color: '#5c4a38', textDecoration: 'none', marginTop: 4 }}>
+                  ✉ {tour.guestEmail}
+                </a>
+              )}
+            </div>
+          )}
+
+          {tour.description && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={styles.label}>Details from booking</div>
+              <div style={styles.taskNotes}>{tour.description}</div>
+            </div>
+          )}
+
+          <div style={styles.label}>Outcome</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6, marginBottom: 14 }}>
+            {[
+              { key: 'scheduled', label: 'Scheduled', color: '#5c4a38' },
+              { key: 'completed', label: '✓ Done',    color: '#5c8a5a' },
+              { key: 'no_show',   label: '✗ No-show', color: '#c8442a' },
+              { key: 'cancelled', label: 'Cancelled', color: '#a59478' },
+            ].map(s => {
+              const active = tour.status === s.key;
+              return (
+                <button
+                  key={s.key}
+                  onClick={() => handleStatus(s.key)}
+                  disabled={saving}
+                  className="salus-btn"
+                  style={{
+                    padding: '9px 12px', borderRadius: 8,
+                    background: active ? s.color : '#fffdf7',
+                    color: active ? '#fff' : s.color,
+                    border: '1px solid ' + s.color,
+                    fontSize: 12, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer',
+                  }}>
+                  {s.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={styles.label}>Internal notes (only visible in Salus)</div>
+          <textarea
+            className="salus-input"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="e.g. Member loved the reformer studio, mentioned signing up. Or — running 10 min late, called and rebooking."
+            rows={4}
+            style={{ width: '100%', resize: 'vertical', marginBottom: 10, fontFamily: 'inherit' }}
+          />
+          <button
+            onClick={handleSaveNotes}
+            disabled={saving || notes === (tour.notes || '')}
+            className="salus-btn"
+            style={{ ...styles.btnPrimary, opacity: (saving || notes === (tour.notes || '')) ? 0.5 : 1 }}>
+            {saving ? 'Saving…' : 'Save notes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TasksTile({ data, currentUser, isManager, onCreate, onOpenTask }) {
   const [open, setOpen] = useState(false);
 
   // Manager sees all open tasks; everyone else sees only theirs.
   // Templates are hidden — they only spawn instances via the cron.
-  const allOpen = data.tasks.filter(t => t.status === 'todo' && !t.isTemplate);
+  const allOpen = data.tasks.filter(t =>
+    !t.isTemplate
+    && t.status !== 'done'
+    && t.status !== 'completed'
+  );
   const relevant = isManager
     ? allOpen
     : tasksForUser(allOpen, currentUser);
@@ -8403,6 +9160,10 @@ function TaskCard({ task, data, currentUser, onOpen }) {
     ? (isToday ? 'Today' : new Date(task.dueDate).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }))
     : null;
 
+  const isProject = task.taskKind === 'project';
+  const statusColor = TASK_STATUS_COLORS[task.status];
+  const commentCount = data.taskComments?.filter(c => c.taskId === task.id && c.kind === 'comment').length || 0;
+
   return (
     <button
       onClick={onOpen}
@@ -8415,6 +9176,7 @@ function TaskCard({ task, data, currentUser, onOpen }) {
       <div style={{ flex: 1, textAlign: 'left' }}>
         <div style={styles.taskCardTitle}>
           {task.priority === 'urgent' && <span style={styles.taskUrgentDot}>●</span>}
+          {isProject && <span style={{ marginRight: 5 }}>🎯</span>}
           {task.title}
         </div>
         <div style={styles.taskCardMeta}>
@@ -8424,14 +9186,29 @@ function TaskCard({ task, data, currentUser, onOpen }) {
               · {dueLabel}{isOverdue ? ' (overdue)' : ''}
             </span>
           )}
+          {commentCount > 0 && (
+            <span style={{ color: '#7a8270' }}>· 💬 {commentCount}</span>
+          )}
         </div>
       </div>
+      {isProject && (
+        <span style={{
+          fontSize: 10, fontWeight: 700, padding: '4px 8px',
+          borderRadius: 999, marginRight: 6,
+          background: statusColor?.bg, color: statusColor?.fg,
+          border: '1px solid ' + statusColor?.border,
+          whiteSpace: 'nowrap',
+        }}>
+          {TASK_STATUS_LABELS[task.status]}
+        </span>
+      )}
       <ChevronRight size={16} color="#a59478" />
     </button>
   );
 }
 
 function CreateTaskModal({ data, currentUser, onClose, onCreate }) {
+  const [taskKind, setTaskKind] = useState('daily');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [audience, setAudience] = useState('specific');
@@ -8449,7 +9226,9 @@ function CreateTaskModal({ data, currentUser, onClose, onCreate }) {
     setSaving(true);
     const ok = await onCreate({
       title, description, assigneeId, audience, dueDate, priority,
-      recurrence, recurrenceDays,
+      recurrence: taskKind === 'project' ? 'none' : recurrence,
+      recurrenceDays: taskKind === 'project' ? [] : recurrenceDays,
+      taskKind,
     });
     setSaving(false);
     if (ok) onClose();
@@ -8481,13 +9260,43 @@ function CreateTaskModal({ data, currentUser, onClose, onCreate }) {
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+          <label style={styles.label}>Task kind</label>
+          <div style={{ ...styles.audienceRow, marginBottom: 14 }}>
+            <button onClick={() => setTaskKind('daily')} className="salus-btn"
+              style={{
+                ...styles.audiencePill,
+                flex: 1,
+                ...(taskKind === 'daily' ? styles.audiencePillActive : {}),
+              }}>
+              📋 Daily / routine
+            </button>
+            <button onClick={() => setTaskKind('project')} className="salus-btn"
+              style={{
+                ...styles.audiencePill,
+                flex: 1,
+                ...(taskKind === 'project'
+                  ? { background: '#7a8c5c', color: '#fff', borderColor: '#7a8c5c' }
+                  : {}),
+              }}>
+              🎯 Project / one-off
+            </button>
+          </div>
+          <div style={{ fontSize: 11, color: '#7a8270', marginBottom: 14, lineHeight: 1.4 }}>
+            {taskKind === 'daily'
+              ? 'Simple to-do. Tick off when done. Can repeat daily/weekly.'
+              : 'Multi-stage task with status, comments, and progress tracking — best for bigger jobs.'}
+          </div>
+
           <label style={styles.label}>What needs doing?</label>
           <input
             className="salus-input"
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="e.g. Restock towels in reformer studio"
+            placeholder={taskKind === 'project'
+              ? 'e.g. Set up new pricing tier and update marketing'
+              : 'e.g. Restock towels in reformer studio'
+            }
             style={{ width: '100%', marginBottom: 14 }}
             autoFocus
           />
@@ -8557,6 +9366,8 @@ function CreateTaskModal({ data, currentUser, onClose, onCreate }) {
             style={{ width: '100%', marginBottom: 14, fontFamily: 'inherit' }}
           />
 
+          {taskKind !== 'project' && (
+            <>
           <label style={styles.label}>Repeat</label>
           <div style={styles.audienceRow}>
             {[
@@ -8617,6 +9428,8 @@ function CreateTaskModal({ data, currentUser, onClose, onCreate }) {
               />
             </div>
           )}
+            </>
+          )}
 
           <label style={styles.label}>Priority</label>
           <div style={styles.audienceRow}>
@@ -8661,11 +9474,14 @@ function CreateTaskModal({ data, currentUser, onClose, onCreate }) {
   );
 }
 
-function TaskDetailModal({ task, data, currentUser, isManager, onClose, onMarkDone, onDelete }) {
+function TaskDetailModal({ task, data, currentUser, isManager, onClose, onMarkDone, onSetStatus, onDelete, onAddComment, onDeleteComment }) {
+  const [commentText, setCommentText] = useState('');
+  const [posting, setPosting] = useState(false);
   if (!task) return null;
   const assignee = task.assigneeId ? data.users.find(u => u.id === task.assigneeId) : null;
   const creator = task.createdBy ? data.users.find(u => u.id === task.createdBy) : null;
   const completer = task.completedBy ? data.users.find(u => u.id === task.completedBy) : null;
+  const isProject = task.taskKind === 'project';
   const isDone = task.status === 'done';
   const audienceLabel = {
     specific:  assignee ? `Assigned to ${assignee.name}` : 'Unassigned',
@@ -8674,12 +9490,23 @@ function TaskDetailModal({ task, data, currentUser, isManager, onClose, onMarkDo
     all_staff: 'Everyone at Salus',
   }[task.audience];
 
-  // Can this user mark it done?
-  const canMarkDone = isManager
+  const canUpdate = isManager
     || task.assigneeId === currentUser.id
     || (task.audience === 'all_foh'   && currentUser.isFoh)
     || (task.audience === 'all_coach' && currentUser.isCoach)
     || task.audience === 'all_staff';
+
+  const comments = data.taskComments
+    .filter(c => c.taskId === task.id)
+    .sort((a, b) => a.createdAt - b.createdAt);
+
+  const handleSendComment = async () => {
+    if (!commentText.trim() || posting) return;
+    setPosting(true);
+    await onAddComment(task.id, commentText);
+    setCommentText('');
+    setPosting(false);
+  };
 
   return (
     <div style={styles.threadBackdrop} onClick={onClose}>
@@ -8688,7 +9515,9 @@ function TaskDetailModal({ task, data, currentUser, isManager, onClose, onMarkDo
           <button onClick={onClose} className="salus-btn" style={styles.threadCloseBtn}>
             <X size={20} />
           </button>
-          <div style={styles.threadHeaderTitle}>Task</div>
+          <div style={styles.threadHeaderTitle}>
+            {isProject ? '🎯 Project task' : '📋 Task'}
+          </div>
           <div style={{ width: 36 }} />
         </div>
 
@@ -8714,38 +9543,155 @@ function TaskDetailModal({ task, data, currentUser, isManager, onClose, onMarkDo
           <div style={styles.taskCreatedBy}>
             Created by {creator ? creator.name : 'someone'} · {new Date(task.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
           </div>
-          {isDone && (
+
+          {/* Status picker — project tasks only */}
+          {isProject && canUpdate && (
+            <>
+              <div style={{ ...styles.label, marginTop: 14 }}>Status</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6, marginBottom: 14 }}>
+                {PROJECT_STATUSES.map(s => {
+                  const active = task.status === s;
+                  const c = TASK_STATUS_COLORS[s];
+                  return (
+                    <button
+                      key={s}
+                      onClick={() => onSetStatus(task.id, s)}
+                      className="salus-btn"
+                      style={{
+                        padding: '10px 12px', borderRadius: 8,
+                        background: active ? c.fg : c.bg,
+                        color: active ? '#fff' : c.fg,
+                        border: '1px solid ' + (active ? c.fg : c.border),
+                        fontSize: 12, fontWeight: 700, fontFamily: 'inherit',
+                        cursor: 'pointer', textAlign: 'left',
+                      }}
+                    >
+                      {TASK_STATUS_LABELS[s]}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {/* Status read-only for non-participants */}
+          {isProject && !canUpdate && (
+            <div style={{ marginTop: 14, marginBottom: 14 }}>
+              <div style={styles.label}>Status</div>
+              <span style={{
+                display: 'inline-block',
+                fontSize: 12, fontWeight: 700,
+                padding: '6px 12px', borderRadius: 999,
+                background: TASK_STATUS_COLORS[task.status]?.bg,
+                color: TASK_STATUS_COLORS[task.status]?.fg,
+                border: '1px solid ' + TASK_STATUS_COLORS[task.status]?.border,
+              }}>
+                {TASK_STATUS_LABELS[task.status]}
+              </span>
+            </div>
+          )}
+
+          {/* Comments thread — for project tasks */}
+          {isProject && (
+            <div style={{ marginTop: 8, borderTop: '1px solid #efe7d2', paddingTop: 14 }}>
+              <div style={styles.commentsLabel}>
+                {comments.length === 0 ? 'No activity yet' : `${comments.length} activity`}
+              </div>
+              {comments.map(c => {
+                const u = data.users.find(u => u.id === c.userId);
+                const isSystem = c.kind === 'status_change';
+                if (isSystem) {
+                  return (
+                    <div key={c.id} style={styles.taskCommentSystem}>
+                      <div>{c.text}</div>
+                      <div style={{ fontSize: 9, color: '#a59478', marginTop: 2 }}>
+                        {new Date(c.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                  <div key={c.id} style={styles.commentRow}>
+                    <UserAvatar user={u} size={28} fontSize={11} />
+                    <div style={{ flex: 1 }}>
+                      <div style={styles.commentHeader}>
+                        <span style={styles.commentAuthor}>{u?.name?.split(' ')[0] || 'Someone'}</span>
+                        <span style={styles.commentTime}>
+                          {new Date(c.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                      <div style={styles.commentText}>{c.text}</div>
+                    </div>
+                    {(c.userId === currentUser.id || isManager) && (
+                      <button
+                        onClick={() => { if (confirm('Delete this comment?')) onDeleteComment(c.id); }}
+                        className="salus-btn"
+                        style={{ background: 'transparent', border: 'none', padding: 4, color: '#a59478' }}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Daily task: keep the done-banner */}
+          {!isProject && isDone && (
             <div style={styles.taskCompletedBy}>
               ✓ Marked done by {completer ? completer.name : 'someone'} · {task.completedAt ? new Date(task.completedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}
             </div>
           )}
         </div>
 
-        <div style={styles.threadActionBar}>
-          {canMarkDone && (
-            <button
-              onClick={() => { onMarkDone(task.id, !isDone); onClose(); }}
+        {/* Comment composer (project tasks) OR Mark-done button (daily tasks) */}
+        {isProject ? (
+          <div style={{ display: 'flex', gap: 6, padding: '10px 12px', borderTop: '1px solid #ebe3cf', background: '#fffdf7' }}>
+            <input
+              type="text"
+              className="salus-input"
+              value={commentText}
+              onChange={(e) => setCommentText(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSendComment()}
+              placeholder="Add a note or share feedback…"
+              style={{ flex: 1, fontFamily: 'inherit' }}
+            />
+            <button onClick={handleSendComment}
+              disabled={!commentText.trim() || posting}
               className="salus-btn"
-              style={isDone ? styles.btnGhost : styles.threadClaimBtn}
-            >
-              {isDone ? 'Mark not done' : 'Mark done'}
+              style={{ ...styles.sendBtn, opacity: (!commentText.trim() || posting) ? 0.5 : 1 }}>
+              <Send size={16} />
             </button>
-          )}
-          {isManager && (
-            <button
-              onClick={() => {
-                if (confirm('Delete this task? It can\'t be undone.')) {
-                  onDelete(task.id);
-                  onClose();
-                }
-              }}
-              className="salus-btn"
-              style={{ ...styles.btnGhost, color: '#c8442a' }}
-            >
-              <Trash2 size={14} /> Delete
-            </button>
-          )}
-        </div>
+            {isManager && (
+              <button
+                onClick={() => { if (confirm('Delete this task?')) { onDelete(task.id); onClose(); } }}
+                className="salus-btn"
+                style={{ ...styles.btnGhost, color: '#c8442a' }}>
+                <Trash2 size={14} />
+              </button>
+            )}
+          </div>
+        ) : (
+          <div style={styles.threadActionBar}>
+            {canUpdate && (
+              <button
+                onClick={() => { onMarkDone(task.id, !isDone); onClose(); }}
+                className="salus-btn"
+                style={isDone ? styles.btnGhost : styles.threadClaimBtn}>
+                {isDone ? 'Mark not done' : 'Mark done'}
+              </button>
+            )}
+            {isManager && (
+              <button
+                onClick={() => { if (confirm('Delete this task?')) { onDelete(task.id); onClose(); } }}
+                className="salus-btn"
+                style={{ ...styles.btnGhost, color: '#c8442a' }}>
+                <Trash2 size={14} /> Delete
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -10168,6 +11114,46 @@ const styles = {
   commentAuthor: { fontSize: 12, fontWeight: 600, color: '#1a2620' },
   commentTime: { fontSize: 10, color: '#a59478' },
   commentText: { fontSize: 13, color: '#1a2620', lineHeight: 1.45 },
+  taskCommentSystem: {
+    fontSize: 11, color: '#7a8270', fontStyle: 'italic',
+    padding: '6px 10px', margin: '4px 0',
+    background: '#f5f1e8', borderRadius: 6,
+    textAlign: 'center', lineHeight: 1.4,
+  },
+
+  // ─── GOOGLE CALENDAR LINK ───
+  gcalLink: {
+    display: 'inline-flex', alignItems: 'center', gap: 5,
+    marginTop: 12, padding: '7px 13px',
+    background: '#fffdf7', border: '1px solid #ebe3cf',
+    borderRadius: 999, fontSize: 12, fontWeight: 600,
+    color: '#5c4a38', textDecoration: 'none',
+  },
+
+  // ─── SHIFT NOTES ───
+  shiftNoteCard: {
+    background: '#fffdf7', border: '1px solid #efe7d2',
+    borderRadius: 8, padding: '8px 10px', marginBottom: 6,
+  },
+  shiftNoteHead: {
+    display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4,
+  },
+  shiftNoteText: { fontSize: 13, color: '#1a2620', lineHeight: 1.5, whiteSpace: 'pre-wrap' },
+
+  // ─── TOURS ───
+  toursSectionLabel: {
+    fontSize: 10, fontWeight: 700, color: '#7a8270',
+    textTransform: 'uppercase', letterSpacing: 1.2,
+    padding: '8px 12px 2px',
+  },
+  tourCardTime: {
+    minWidth: 60, flexShrink: 0,
+    display: 'flex', flexDirection: 'column',
+  },
+  tourCardTimeMain: {
+    fontSize: 14, fontWeight: 700, color: '#5c4a38',
+    fontFamily: '"Fraunces", Georgia, serif',
+  },
 
   // ─── STUDIO BOOKINGS ───
   bookingsContainer: { paddingBottom: 80, background: '#f5f1e8', minHeight: '100%' },
@@ -10185,6 +11171,11 @@ const styles = {
     fontSize: 28, color: '#5c4a38', lineHeight: 1, marginTop: 4,
   },
   bookingsSubtitle: { fontSize: 12, color: '#7a8270', marginTop: 6, fontStyle: 'italic' },
+  bookingTypeCategoryLabel: {
+    fontSize: 10, fontWeight: 700, color: '#7a8270',
+    textTransform: 'uppercase', letterSpacing: 1.2,
+    marginBottom: 5, marginTop: 4,
+  },
 
   // ─── NOTIFICATIONS DRAWER ───
   notifsBackdrop: {
