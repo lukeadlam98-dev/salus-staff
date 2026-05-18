@@ -11284,52 +11284,6 @@ const styles = {
     display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px',
   },
 
-  // View toggle (Week / 3-Month)
-  viewToggle: {
-    display: 'flex', padding: 2, background: '#f0eee4',
-    borderRadius: 8, gap: 2,
-  },
-  viewToggleBtn: {
-    padding: '6px 12px', borderRadius: 6,
-    background: 'transparent', color: '#7a8270',
-    fontSize: 12, fontWeight: 500, border: 'none',
-    cursor: 'pointer', fontFamily: 'inherit',
-  },
-  viewToggleBtnActive: {
-    background: '#fffdf7', color: '#5c4a38', fontWeight: 600,
-    boxShadow: '0 1px 2px rgba(92, 74, 56, 0.08)',
-  },
-
-  // Month view
-  monthLegend: {
-    display: 'flex', gap: 16, marginBottom: 20, flexWrap: 'wrap',
-    fontSize: 11, color: '#7a8270',
-  },
-  monthLegendItem: { display: 'flex', alignItems: 'center', gap: 6 },
-  monthLegendDot: { width: 8, height: 8, borderRadius: '50%' },
-  monthLabel: {
-    fontFamily: '"Fraunces", serif', fontSize: 18, fontWeight: 500,
-    color: '#1a2620', margin: '0 0 12px',
-  },
-  monthGridHeader: {
-    display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)',
-    gap: 4, marginBottom: 4,
-  },
-  monthDayLabel: {
-    textAlign: 'center', fontSize: 10, fontWeight: 600,
-    color: '#a59478', textTransform: 'uppercase', letterSpacing: 0.6,
-  },
-  monthGrid: {
-    display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4,
-  },
-  monthCell: {
-    aspectRatio: '1 / 1', borderRadius: 8,
-    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between',
-    padding: '6px 4px', fontFamily: 'inherit', minHeight: 44,
-  },
-  monthCellEmpty: { aspectRatio: '1 / 1', minHeight: 44 },
-  monthCellDay: { fontSize: 13, fontWeight: 600 },
-  monthCellDots: { width: 6, height: 6, borderRadius: '50%' },
   urgentCoverRow: {
     display: 'flex', alignItems: 'center', gap: 12,
     padding: '12px 14px',
