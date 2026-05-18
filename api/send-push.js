@@ -95,14 +95,23 @@ async function handleMessage(record) {
 
   const senderName = sender?.name || 'Team chat';
   const body = (record.text || '').slice(0, 120);
+  const isUrgent = record.is_urgent === true;
 
-  const payload = JSON.stringify({
+  const payload = JSON.stringify(isUrgent ? {
+    title: `🚨 URGENT — ${senderName}`,
+    body: body,
+    tag: `urgent-${record.id}`,
+    requireInteraction: true,
+    data: { url: '/?tab=chat' },
+  } : {
     title: senderName,
     body: body,
     tag: 'team-chat',
     data: { url: '/?tab=chat' },
   });
-  return await sendAll(subs, payload);
+
+  const options = isUrgent ? { urgency: 'high', TTL: 86400 } : { TTL: 86400 };
+  return await sendAll(subs, payload, options);
 }
 
 // Notify everyone involved in a cover thread
@@ -154,11 +163,11 @@ async function handleCoverMessage(record) {
   return await sendAll(subs, payload);
 }
 
-async function sendAll(subs, payload) {
+async function sendAll(subs, payload, options = {}) {
   let sent = 0;
   await Promise.all(subs.map(async (row) => {
     try {
-      await webpush.sendNotification(row.subscription, payload);
+      await webpush.sendNotification(row.subscription, payload, options);
       sent++;
     } catch (err) {
       if (err.statusCode === 404 || err.statusCode === 410) {
