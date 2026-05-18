@@ -84,7 +84,7 @@ export const bookingFromDb = (row) => ({
   id: row.id,
   title: row.title,
   description: row.description || '',
-  bookingType: row.booking_type || 'hire',
+  bookingType: row.booking_type || 'external_event',
   hirerName: row.hirer_name || '',
   hirerContact: row.hirer_contact || '',
   price: row.price != null ? Number(row.price) : null,
@@ -96,6 +96,10 @@ export const bookingFromDb = (row) => ({
   notes: row.notes || '',
   createdBy: row.created_by,
   createdAt: row.created_at ? new Date(row.created_at).getTime() : 0,
+  recurrencePattern: row.recurrence_pattern || 'none',
+  recurrenceDays: row.recurrence_days || null,
+  recurrenceEndDate: row.recurrence_end_date || null,
+  recurrenceSeriesId: row.recurrence_series_id || null,
 });
 
 export const dmFromDb = (row) => ({
@@ -187,7 +191,7 @@ export const taskFromDb = (row) => ({
   assigneeId: row.assignee_id,
   audience: row.audience || 'specific',
   createdBy: row.created_by,
-  status: row.status || 'todo',
+  status: row.status || (row.task_kind === 'project' ? 'not_started' : 'todo'),
   priority: row.priority || 'normal',
   dueDate: row.due_date,
   createdAt: row.created_at ? new Date(row.created_at).getTime() : 0,
@@ -197,4 +201,39 @@ export const taskFromDb = (row) => ({
   recurrence: row.recurrence || null,
   recurrenceDays: row.recurrence_days || null,
   recurrenceParentId: row.recurrence_parent_id || null,
+  taskKind: row.task_kind || 'daily',
+});
+
+export const taskCommentFromDb = (row) => ({
+  id: row.id,
+  taskId: row.task_id,
+  userId: row.user_id,
+  text: row.text,
+  kind: row.kind || 'comment',
+  createdAt: row.created_at ? new Date(row.created_at).getTime() : 0,
+});
+
+export const shiftNoteFromDb = (row) => ({
+  id: row.id,
+  shiftId: row.shift_id,
+  userId: row.user_id,
+  text: row.text,
+  createdAt: row.created_at ? new Date(row.created_at).getTime() : 0,
+});
+
+export const tourFromDb = (row) => ({
+  id: row.id,
+  icalUid: row.ical_uid,
+  title: row.title || '',
+  description: row.description || '',
+  guestName: row.guest_name || '',
+  guestEmail: row.guest_email || '',
+  guestPhone: row.guest_phone || '',
+  startTime: row.start_time ? new Date(row.start_time).getTime() : 0,
+  endTime: row.end_time ? new Date(row.end_time).getTime() : null,
+  status: row.status || 'scheduled',
+  notes: row.notes || '',
+  outcomeBy: row.outcome_by || null,
+  outcomeAt: row.outcome_at ? new Date(row.outcome_at).getTime() : null,
+  lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at).getTime() : null,
 });
