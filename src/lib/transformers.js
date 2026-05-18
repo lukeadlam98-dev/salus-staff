@@ -15,6 +15,69 @@ export const profileFromDb = (row, authEmail) => ({
   termsAcceptedAt: row.terms_accepted_at,
   bankAccount: row.bank_account || null,
   bankSortCode: row.bank_sort_code || null,
+  isCoach: row.is_coach === true,
+  isFoh: row.is_foh === true,
+  codeOfConductAckedAt: row.code_of_conduct_acked_at,
+  duringClassAckedAt: row.during_class_acked_at,
+  afterClassAckedAt: row.after_class_acked_at,
+  uniformAckedAt: row.uniform_acked_at,
+  onboardingCompletedAt: row.onboarding_completed_at,
+});
+
+export const maintenanceFromDb = (row) => ({
+  id: row.id,
+  title: row.title,
+  description: row.description || '',
+  location: row.location,
+  equipment: row.equipment,
+  urgency: row.urgency || 'normal',
+  status: row.status || 'reported',
+  reportedBy: row.reported_by,
+  resolvedBy: row.resolved_by,
+  resolutionNotes: row.resolution_notes,
+  createdAt: row.created_at ? new Date(row.created_at).getTime() : 0,
+  resolvedAt: row.resolved_at ? new Date(row.resolved_at).getTime() : null,
+});
+
+export const feedbackFromDb = (row) => ({
+  id: row.id,
+  memberName: row.member_name,
+  context: row.context,
+  feedback: row.feedback,
+  sentiment: row.sentiment || 'neutral',
+  status: row.status || 'new',
+  loggedBy: row.logged_by,
+  addressedBy: row.addressed_by,
+  addressedAt: row.addressed_at ? new Date(row.addressed_at).getTime() : null,
+  addressedNotes: row.addressed_notes,
+  createdAt: row.created_at ? new Date(row.created_at).getTime() : 0,
+});
+
+export const coachPostFromDb = (row) => ({
+  id: row.id,
+  title: row.title,
+  description: row.description || '',
+  postType: row.post_type || 'flow',
+  videoUrl: row.video_url || null,
+  tags: row.tags || [],
+  postedBy: row.posted_by,
+  createdAt: row.created_at ? new Date(row.created_at).getTime() : 0,
+  editedAt: row.edited_at ? new Date(row.edited_at).getTime() : null,
+});
+
+export const postReactionFromDb = (row) => ({
+  postId: row.post_id,
+  userId: row.user_id,
+  reaction: row.reaction,
+  createdAt: row.created_at ? new Date(row.created_at).getTime() : 0,
+});
+
+export const postCommentFromDb = (row) => ({
+  id: row.id,
+  postId: row.post_id,
+  userId: row.user_id,
+  text: row.text,
+  createdAt: row.created_at ? new Date(row.created_at).getTime() : 0,
 });
 
 export const classFromDb = (row) => ({
@@ -74,4 +137,37 @@ export const messageFromDb = (row) => ({
   text: row.text,
   timestamp: new Date(row.created_at).getTime(),
   editedAt: row.edited_at ? new Date(row.edited_at).getTime() : null,
+  isUrgent: row.is_urgent === true,
+});
+
+export const shiftFromDb = (row) => ({
+  id: row.id,
+  date: row.date,
+  day: row.day,
+  startTime: (row.start_time || '').slice(0, 5),
+  endTime: (row.end_time || '').slice(0, 5),
+  shiftLabel: row.shift_label,
+  staffId: row.staff_id,
+  status: row.status,
+  originalStaffId: row.original_staff_id,
+  notes: row.notes,
+});
+
+export const taskFromDb = (row) => ({
+  id: row.id,
+  title: row.title,
+  description: row.description || '',
+  assigneeId: row.assignee_id,
+  audience: row.audience || 'specific',
+  createdBy: row.created_by,
+  status: row.status || 'todo',
+  priority: row.priority || 'normal',
+  dueDate: row.due_date,
+  createdAt: row.created_at ? new Date(row.created_at).getTime() : 0,
+  completedAt: row.completed_at ? new Date(row.completed_at).getTime() : null,
+  completedBy: row.completed_by,
+  isTemplate: row.is_template === true,
+  recurrence: row.recurrence || null,
+  recurrenceDays: row.recurrence_days || null,
+  recurrenceParentId: row.recurrence_parent_id || null,
 });
