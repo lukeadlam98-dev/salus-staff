@@ -1263,6 +1263,7 @@ export default function SalusStaff() {
             onDeleteMessage={deleteMessage}
             onEditMessage={updateMessage}
             onClearAll={() => setModal({ type: 'clearChat' })}
+            onOpenDm={(userId) => setModal({ type: 'dm', otherUserId: userId })}
           />
         )}
         {tab === 'stats' && (
@@ -4381,24 +4382,6 @@ function Home({ data, currentUser, isManager, onClassClick, onRequestCover, onHi
         onOpenTask={onOpenTask}
       />
 
-      {/* Maintenance / equipment */}
-      <MaintenanceTile
-        data={data}
-        currentUser={currentUser}
-        isManager={isManager}
-        onCreate={onCreateMaintenance}
-        onOpenLog={onOpenMaintenance}
-      />
-
-      {/* Member feedback */}
-      <FeedbackTile
-        data={data}
-        currentUser={currentUser}
-        isManager={isManager}
-        onCreate={onCreateFeedback}
-        onOpen={onOpenFeedback}
-      />
-
       {/* Request cover CTA */}
       <button onClick={onRequestCover} style={styles.homeRequestCard} className="salus-btn">
         <div style={styles.homeRequestIcon}><Plus size={18} /></div>
@@ -4602,91 +4585,90 @@ function ScheduleView({
 // ──────────────────────────────────────────────────────────────────────────────
 
 function FOHSchedule({ data, currentUser, isManager, isMobile, onShiftClick }) {
+  const [viewMode, setViewMode] = useState('week');
   const [weekOffset, setWeekOffset] = useState(0);
+  const [dayOffset, setDayOffset] = useState(0);
+  const [monthOffset, setMonthOffset] = useState(0);
   const [filter, setFilter] = useState('all');
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const currentMonday = getMonday(today);
-  const weekStart = addDays(currentMonday, weekOffset * 7);
-  const weekDates = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-  const weekIso = weekDates.map(toIsoDate);
-  const todayIso = toIsoDate(today);
 
-  const weekShifts = data.shifts.filter(s => weekIso.includes(s.date));
-  let visibleShifts = weekShifts;
-  if (filter === 'mine')       visibleShifts = visibleShifts.filter(s => s.staffId === currentUser.id);
-  if (filter === 'needsCover') visibleShifts = visibleShifts.filter(s => !s.staffId);
+  const renderCard = (s) => {
+    const userById = Object.fromEntries(data.users.map(u => [u.id, u]));
+    const staff = s.staffId ? userById[s.staffId] : null;
+    return (
+      <ScheduleCard
+        key={s.id}
+        onClick={() => onShiftClick(s.id)}
+        timeLeft={s.shiftLabel}
+        timeBottom={`${s.startTime}–${s.endTime}`}
+        title="FOH shift"
+        subtitle={null}
+        person={staff}
+        needsCover={!staff}
+        isMine={s.staffId === currentUser.id}
+        isManager={isManager}
+      />
+    );
+  };
 
-  const shiftsByDay = weekIso.map(iso =>
-    visibleShifts.filter(s => s.date === iso).sort((a, b) => a.startTime.localeCompare(b.startTime))
-  );
-
-  const totalOpen = weekShifts.filter(s => !s.staffId).length;
-  const totalShifts = weekShifts.length;
-  const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const userById = Object.fromEntries(data.users.map(u => [u.id, u]));
+  const filterFn = (s) => {
+    if (filter === 'mine')       return s.staffId === currentUser.id;
+    if (filter === 'needsCover') return !s.staffId;
+    return true;
+  };
 
   return (
     <div style={styles.timetable}>
-      <ScheduleWeekNav
-        weekStart={weekStart}
-        weekOffset={weekOffset}
-        setWeekOffset={setWeekOffset}
-      />
+      <SchedulePeriodToggle viewMode={viewMode} setViewMode={setViewMode} />
 
-      <ScheduleStatsRow
-        coverCount={totalOpen}
-        totalCount={totalShifts}
-        totalLabel="shifts"
-      />
+      {viewMode === 'day' && (
+        <DayView
+          items={data.shifts.filter(filterFn)}
+          allItems={data.shifts}
+          dayOffset={dayOffset}
+          setDayOffset={setDayOffset}
+          getDate={(s) => s.date}
+          getTime={(s) => s.startTime}
+          isCover={(s) => !s.staffId}
+          totalLabel="shifts"
+          filter={filter}
+          setFilter={setFilter}
+          isManager={isManager}
+          renderCard={renderCard}
+        />
+      )}
 
-      <ScheduleFilterRow filter={filter} setFilter={setFilter} isManager={isManager} />
+      {viewMode === 'week' && (
+        <WeekViewBody
+          items={data.shifts.filter(filterFn)}
+          allItems={data.shifts}
+          weekOffset={weekOffset}
+          setWeekOffset={setWeekOffset}
+          getDate={(s) => s.date}
+          getTime={(s) => s.startTime}
+          isCover={(s) => !s.staffId}
+          totalLabel="shifts"
+          filter={filter}
+          setFilter={setFilter}
+          isManager={isManager}
+          renderCard={renderCard}
+        />
+      )}
 
-      {weekDates.map((d, dayIdx) => {
-        const dayShifts = shiftsByDay[dayIdx];
-        const isToday = toIsoDate(d) === todayIso;
-        if (dayShifts.length === 0) return null;
-        return (
-          <div key={dayIdx} style={styles.fohDayBlock}>
-            <div style={{ ...styles.fohDayHeader, ...(isToday ? styles.fohDayHeaderToday : {}) }}>
-              <span style={styles.fohDayName}>{dayLabels[dayIdx]}</span>
-              <span style={styles.fohDayDate}>
-                {d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
-              </span>
-              {isToday && <span style={styles.fohTodayBadge}>Today</span>}
-            </div>
-            <div style={styles.fohShiftList}>
-              {dayShifts.map(s => {
-                const staff = s.staffId ? userById[s.staffId] : null;
-                const open = !staff;
-                const isMine = s.staffId === currentUser.id;
-                return (
-                  <ScheduleCard
-                    key={s.id}
-                    onClick={() => onShiftClick(s.id)}
-                    timeLeft={s.shiftLabel}
-                    timeBottom={`${s.startTime}–${s.endTime}`}
-                    title="FOH shift"
-                    subtitle={null}
-                    person={staff}
-                    needsCover={open}
-                    isMine={isMine}
-                    isManager={isManager}
-                  />
-                );
-              })}
-            </div>
-          </div>
-        );
-      })}
-
-      {visibleShifts.length === 0 && (
-        <div style={{ padding: 40, textAlign: 'center', color: '#7a8270' }}>
-          {filter === 'needsCover'
-            ? '🎉 All shifts covered this week.'
-            : filter === 'mine'
-              ? 'You have no shifts this week.'
-              : 'No shifts scheduled for this week.'}
-        </div>
+      {viewMode === 'month' && (
+        <MonthGrid
+          items={data.shifts}
+          monthOffset={monthOffset}
+          setMonthOffset={setMonthOffset}
+          getDate={(s) => s.date}
+          isCover={(s) => !s.staffId}
+          onDayTap={(iso) => {
+            const targetDate = new Date(iso);
+            const today = new Date(); today.setHours(0,0,0,0);
+            const days = Math.round((targetDate - today) / 86400000);
+            setDayOffset(days);
+            setViewMode('day');
+          }}
+        />
       )}
     </div>
   );
@@ -4824,8 +4806,195 @@ function ShiftDetailModal({ shift, data, currentUser, isManager, onClose, onAssi
 }
 
 function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAddClass, onDayClick }) {
+  const [viewMode, setViewMode] = useState('week');  // 'day' | 'week' | 'month'
   const [weekOffset, setWeekOffset] = useState(0);
-  const [filter, setFilter] = useState('all');  // all | needsCover | mine
+  const [dayOffset, setDayOffset] = useState(0);     // days from today
+  const [monthOffset, setMonthOffset] = useState(0); // months from current
+  const [filter, setFilter] = useState('all');
+
+  const renderCard = (cls, isMine) => {
+    const userById = Object.fromEntries(data.users.map(u => [u.id, u]));
+    const coach = cls.coachId ? userById[cls.coachId] : null;
+    const needsCover = cls.status === 'needsCover';
+    return (
+      <ScheduleCard
+        key={cls.id}
+        onClick={() => onClassClick(cls.id)}
+        timeLeft={cls.time}
+        timeBottom={`${cls.dur} min`}
+        title={cls.type}
+        subtitle={STUDIOS[cls.studio]?.short || cls.studio}
+        person={coach}
+        needsCover={needsCover}
+        isMine={cls.coachId === currentUser.id}
+        isManager={isManager}
+      />
+    );
+  };
+
+  const filterFn = (cls) => {
+    if (filter === 'mine')       return cls.coachId === currentUser.id;
+    if (filter === 'needsCover') return cls.status === 'needsCover';
+    return true;
+  };
+
+  return (
+    <div style={styles.timetable}>
+      <SchedulePeriodToggle viewMode={viewMode} setViewMode={setViewMode} />
+
+      {viewMode === 'day' && (
+        <DayView
+          items={data.classes.filter(filterFn)}
+          allItems={data.classes}
+          dayOffset={dayOffset}
+          setDayOffset={setDayOffset}
+          getDate={(c) => c.date}
+          getTime={(c) => c.time}
+          isCover={(c) => c.status === 'needsCover'}
+          totalLabel="classes"
+          filter={filter}
+          setFilter={setFilter}
+          isManager={isManager}
+          renderCard={renderCard}
+        />
+      )}
+
+      {viewMode === 'week' && (
+        <WeekViewBody
+          items={data.classes.filter(filterFn)}
+          allItems={data.classes}
+          weekOffset={weekOffset}
+          setWeekOffset={setWeekOffset}
+          getDate={(c) => c.date}
+          getTime={(c) => c.time}
+          isCover={(c) => c.status === 'needsCover'}
+          totalLabel="classes"
+          filter={filter}
+          setFilter={setFilter}
+          isManager={isManager}
+          renderCard={renderCard}
+        />
+      )}
+
+      {viewMode === 'month' && (
+        <MonthGrid
+          items={data.classes}
+          monthOffset={monthOffset}
+          setMonthOffset={setMonthOffset}
+          getDate={(c) => c.date}
+          isCover={(c) => c.status === 'needsCover'}
+          onDayTap={(iso) => {
+            // Switch to day view at that day
+            const targetDate = new Date(iso);
+            const today = new Date(); today.setHours(0,0,0,0);
+            const days = Math.round((targetDate - today) / 86400000);
+            setDayOffset(days);
+            setViewMode('day');
+          }}
+        />
+      )}
+
+      {isManager && (
+        <button onClick={onAddClass} className="salus-btn" style={styles.scheduleFab}>
+          <Plus size={16} /> Add class
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SHARED SCHEDULE PIECES
+// ──────────────────────────────────────────────────────────────────────────────
+
+function SchedulePeriodToggle({ viewMode, setViewMode }) {
+  return (
+    <div style={styles.periodToggleRow}>
+      {[
+        { key: 'day',   label: 'Day' },
+        { key: 'week',  label: 'Week' },
+        { key: 'month', label: 'Month' },
+      ].map(opt => (
+        <button
+          key={opt.key}
+          onClick={() => setViewMode(opt.key)}
+          className="salus-btn"
+          style={{
+            ...styles.periodToggleBtn,
+            ...(viewMode === opt.key ? styles.periodToggleBtnActive : {}),
+          }}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function DayView({ items, allItems, dayOffset, setDayOffset, getDate, getTime, isCover, totalLabel, filter, setFilter, isManager, renderCard }) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const targetDate = addDays(today, dayOffset);
+  const iso = toIsoDate(targetDate);
+  const dayItems = items.filter(it => getDate(it) === iso).sort((a, b) => getTime(a).localeCompare(getTime(b)));
+  const allDayItems = allItems.filter(it => getDate(it) === iso);
+  const coverCount = allDayItems.filter(isCover).length;
+  const totalCount = allDayItems.length;
+
+  // Limits: 14 days back, ~3 months ahead
+  const canBack = dayOffset > -14;
+  const canFwd  = dayOffset < 90;
+  const isToday = dayOffset === 0;
+
+  const headerLabel = targetDate.toLocaleDateString('en-GB', {
+    weekday: 'long', day: 'numeric', month: 'short',
+  });
+
+  return (
+    <>
+      <div style={styles.weekNav}>
+        <button onClick={() => canBack && setDayOffset(d => d - 1)}
+          disabled={!canBack} className="salus-btn"
+          style={{ ...styles.weekNavBtn, opacity: canBack ? 1 : 0.3 }}>
+          <ChevronLeft size={18} />
+        </button>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <div style={styles.weekNavLabel}>{headerLabel}</div>
+          {!isToday && (
+            <button onClick={() => setDayOffset(0)} className="salus-btn" style={styles.weekTodayLink}>
+              Jump to today
+            </button>
+          )}
+          {isToday && (
+            <span style={{ ...styles.fohTodayBadge, marginTop: 2 }}>Today</span>
+          )}
+        </div>
+        <button onClick={() => canFwd && setDayOffset(d => d + 1)}
+          disabled={!canFwd} className="salus-btn"
+          style={{ ...styles.weekNavBtn, opacity: canFwd ? 1 : 0.3 }}>
+          <ChevronRight size={18} />
+        </button>
+      </div>
+
+      <ScheduleStatsRow coverCount={coverCount} totalCount={totalCount} totalLabel={totalLabel} />
+
+      <ScheduleFilterRow filter={filter} setFilter={setFilter} isManager={isManager} />
+
+      <div style={{ padding: '12px 14px 0' }}>
+        <div style={styles.fohShiftList}>
+          {dayItems.length === 0 ? (
+            <div style={{ padding: 40, textAlign: 'center', color: '#7a8270' }}>
+              Nothing on this day.
+            </div>
+          ) : (
+            dayItems.map(item => renderCard(item))
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function WeekViewBody({ items, allItems, weekOffset, setWeekOffset, getDate, getTime, isCover, totalLabel, filter, setFilter, isManager, renderCard }) {
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const currentMonday = getMonday(today);
   const weekStart = addDays(currentMonday, weekOffset * 7);
@@ -4833,40 +5002,27 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
   const weekIso = weekDates.map(toIsoDate);
   const todayIso = toIsoDate(today);
 
-  const weekClasses = data.classes.filter(c => weekIso.includes(c.date));
-  let visibleClasses = weekClasses;
-  if (filter === 'mine')       visibleClasses = visibleClasses.filter(c => c.coachId === currentUser.id);
-  if (filter === 'needsCover') visibleClasses = visibleClasses.filter(c => c.status === 'needsCover');
+  const visible = items.filter(it => weekIso.includes(getDate(it)));
+  const allWeek = allItems.filter(it => weekIso.includes(getDate(it)));
 
-  const classesByDay = weekIso.map(iso =>
-    visibleClasses.filter(c => c.date === iso).sort((a, b) => a.time.localeCompare(b.time))
+  const byDay = weekIso.map(iso =>
+    visible.filter(it => getDate(it) === iso).sort((a, b) => getTime(a).localeCompare(getTime(b)))
   );
 
-  const totalCover = weekClasses.filter(c => c.status === 'needsCover').length;
-  const totalClasses = weekClasses.length;
+  const totalCover = allWeek.filter(isCover).length;
+  const totalCount = allWeek.length;
   const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const userById = Object.fromEntries(data.users.map(u => [u.id, u]));
 
   return (
-    <div style={styles.timetable}>
-      <ScheduleWeekNav
-        weekStart={weekStart}
-        weekOffset={weekOffset}
-        setWeekOffset={setWeekOffset}
-      />
-
-      <ScheduleStatsRow
-        coverCount={totalCover}
-        totalCount={totalClasses}
-        totalLabel="classes"
-      />
-
+    <>
+      <ScheduleWeekNav weekStart={weekStart} weekOffset={weekOffset} setWeekOffset={setWeekOffset} />
+      <ScheduleStatsRow coverCount={totalCover} totalCount={totalCount} totalLabel={totalLabel} />
       <ScheduleFilterRow filter={filter} setFilter={setFilter} isManager={isManager} />
 
       {weekDates.map((d, dayIdx) => {
-        const dayClasses = classesByDay[dayIdx];
+        const dayItems = byDay[dayIdx];
         const isToday = toIsoDate(d) === todayIso;
-        if (dayClasses.length === 0) return null;
+        if (dayItems.length === 0) return null;
         return (
           <div key={dayIdx} style={styles.fohDayBlock}>
             <div style={{ ...styles.fohDayHeader, ...(isToday ? styles.fohDayHeaderToday : {}) }}>
@@ -4877,46 +5033,137 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
               {isToday && <span style={styles.fohTodayBadge}>Today</span>}
             </div>
             <div style={styles.fohShiftList}>
-              {dayClasses.map(cls => {
-                const coach = cls.coachId ? userById[cls.coachId] : null;
-                const needsCover = cls.status === 'needsCover';
-                const isMine = cls.coachId === currentUser.id;
-                return (
-                  <ScheduleCard
-                    key={cls.id}
-                    onClick={() => onClassClick(cls.id)}
-                    timeLeft={cls.time}
-                    timeBottom={`${cls.dur} min`}
-                    title={cls.type}
-                    subtitle={STUDIOS[cls.studio]?.short || cls.studio}
-                    person={coach}
-                    needsCover={needsCover}
-                    isMine={isMine}
-                    isManager={isManager}
-                  />
-                );
-              })}
+              {dayItems.map(item => renderCard(item))}
             </div>
           </div>
         );
       })}
 
-      {visibleClasses.length === 0 && (
+      {visible.length === 0 && (
         <div style={{ padding: 40, textAlign: 'center', color: '#7a8270' }}>
           {filter === 'needsCover'
             ? '🎉 Nothing needs cover this week.'
             : filter === 'mine'
-              ? 'You have no classes this week.'
-              : 'No classes scheduled for this week.'}
+              ? `You have no ${totalLabel} this week.`
+              : `No ${totalLabel} scheduled for this week.`}
         </div>
       )}
+    </>
+  );
+}
 
-      {isManager && (
-        <button onClick={onAddClass} className="salus-btn" style={styles.scheduleFab}>
-          <Plus size={16} /> Add class
+function MonthGrid({ items, monthOffset, setMonthOffset, getDate, isCover, onDayTap }) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const todayIso = toIsoDate(today);
+
+  // Compute target month
+  const target = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1);
+  const monthLabel = target.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+
+  // Build calendar cells: Mon as first day of week
+  const firstOfMonth = new Date(target.getFullYear(), target.getMonth(), 1);
+  const lastOfMonth = new Date(target.getFullYear(), target.getMonth() + 1, 0);
+  const startDayOfWeek = (firstOfMonth.getDay() + 6) % 7; // 0=Mon..6=Sun
+  const daysInMonth = lastOfMonth.getDate();
+  const totalCells = Math.ceil((startDayOfWeek + daysInMonth) / 7) * 7;
+
+  // Group items by date for quick lookup
+  const byDate = {};
+  items.forEach(it => {
+    const d = getDate(it);
+    if (!byDate[d]) byDate[d] = { count: 0, cover: 0 };
+    byDate[d].count++;
+    if (isCover(it)) byDate[d].cover++;
+  });
+
+  const canBack = monthOffset > 0;
+  const canFwd = monthOffset < 3;
+  const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
+  const cells = [];
+  for (let i = 0; i < totalCells; i++) {
+    const dayNum = i - startDayOfWeek + 1;
+    if (dayNum < 1 || dayNum > daysInMonth) {
+      cells.push(null);
+    } else {
+      const d = new Date(target.getFullYear(), target.getMonth(), dayNum);
+      const iso = toIsoDate(d);
+      cells.push({ date: d, iso, info: byDate[iso] });
+    }
+  }
+
+  return (
+    <>
+      <div style={styles.weekNav}>
+        <button onClick={() => canBack && setMonthOffset(m => m - 1)}
+          disabled={!canBack} className="salus-btn"
+          style={{ ...styles.weekNavBtn, opacity: canBack ? 1 : 0.3 }}>
+          <ChevronLeft size={18} />
         </button>
-      )}
-    </div>
+        <div style={styles.weekNavLabel}>{monthLabel}</div>
+        <button onClick={() => canFwd && setMonthOffset(m => m + 1)}
+          disabled={!canFwd} className="salus-btn"
+          style={{ ...styles.weekNavBtn, opacity: canFwd ? 1 : 0.3 }}>
+          <ChevronRight size={18} />
+        </button>
+      </div>
+
+      <div style={styles.monthGridDayHeader}>
+        {dayLabels.map((lbl, i) => (
+          <div key={i} style={styles.monthGridDayLabel}>{lbl}</div>
+        ))}
+      </div>
+
+      <div style={styles.monthGrid}>
+        {cells.map((cell, i) => {
+          if (!cell) {
+            return <div key={i} style={styles.monthGridEmpty} />;
+          }
+          const isToday = cell.iso === todayIso;
+          const info = cell.info;
+          return (
+            <button
+              key={i}
+              onClick={() => onDayTap(cell.iso)}
+              className="salus-btn"
+              style={{
+                ...styles.monthGridCell,
+                ...(isToday ? styles.monthGridCellToday : {}),
+                ...(info?.cover > 0 ? styles.monthGridCellCover : {}),
+              }}
+            >
+              <span style={{
+                ...styles.monthGridCellDate,
+                ...(isToday ? { color: '#fff', fontWeight: 700 } : {}),
+              }}>
+                {cell.date.getDate()}
+              </span>
+              {info && (
+                <div style={styles.monthGridDots}>
+                  {info.cover > 0 && (
+                    <span style={{ ...styles.monthGridDot, background: '#c8442a' }} />
+                  )}
+                  {info.count > info.cover && (
+                    <span style={{ ...styles.monthGridDot, background: isToday ? '#fff' : '#5c4a38' }} />
+                  )}
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={styles.monthGridLegend}>
+        <div style={styles.monthGridLegendItem}>
+          <span style={{ ...styles.monthGridDot, background: '#c8442a' }} />
+          Needs cover
+        </div>
+        <div style={styles.monthGridLegendItem}>
+          <span style={{ ...styles.monthGridDot, background: '#5c4a38' }} />
+          Scheduled
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -5508,7 +5755,8 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
 // CHAT
 // ──────────────────────────────────────────────────────────────────────────────
 
-function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onEditMessage, onClearAll }) {
+function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onEditMessage, onClearAll, onOpenDm }) {
+  const [chatView, setChatView] = useState('team');  // 'team' | 'dms'
   const [text, setText] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [editText, setEditText] = useState('');
@@ -5548,8 +5796,67 @@ function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onEditMes
     setEditText('');
   };
 
+  // Build DMs grouped by the other person
+  const dmThreads = (() => {
+    const byOther = {};
+    data.dms.forEach(m => {
+      const otherId = m.senderId === currentUser.id ? m.recipientId : m.senderId;
+      if (!otherId) return;
+      if (!byOther[otherId]) {
+        byOther[otherId] = { otherId, messages: [], lastAt: 0, unread: 0 };
+      }
+      byOther[otherId].messages.push(m);
+      if (m.createdAt > byOther[otherId].lastAt) {
+        byOther[otherId].lastAt = m.createdAt;
+        byOther[otherId].lastMessage = m;
+      }
+      if (m.recipientId === currentUser.id && m.readAt == null) {
+        byOther[otherId].unread++;
+      }
+    });
+    return Object.values(byOther).sort((a, b) => b.lastAt - a.lastAt);
+  })();
+
+  const totalDmUnread = dmThreads.reduce((sum, t) => sum + t.unread, 0);
+
   return (
     <div style={styles.chatContainer}>
+      <div style={styles.chatToggleRow}>
+        <button
+          onClick={() => setChatView('team')}
+          className="salus-btn"
+          style={{
+            ...styles.chatToggleBtn,
+            ...(chatView === 'team' ? styles.chatToggleBtnActive : {}),
+          }}
+        >
+          Team chat
+        </button>
+        <button
+          onClick={() => setChatView('dms')}
+          className="salus-btn"
+          style={{
+            ...styles.chatToggleBtn,
+            ...(chatView === 'dms' ? styles.chatToggleBtnActive : {}),
+            position: 'relative',
+          }}
+        >
+          Private messages
+          {totalDmUnread > 0 && (
+            <span style={styles.chatToggleBadge}>{totalDmUnread}</span>
+          )}
+        </button>
+      </div>
+
+      {chatView === 'dms' ? (
+        <DmsListView
+          threads={dmThreads}
+          data={data}
+          currentUser={currentUser}
+          onOpenDm={onOpenDm}
+        />
+      ) : (
+        <>
       <div style={styles.chatHeader}>
         <div style={{ flex: 1 }}>
           <h2 style={styles.chatTitle}>Team Salus</h2>
@@ -5683,6 +5990,72 @@ function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onEditMes
           <Send size={16} />
         </button>
       </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function DmsListView({ threads, data, currentUser, onOpenDm }) {
+  const timeAgo = (ts) => {
+    const sec = Math.floor((Date.now() - ts) / 1000);
+    if (sec < 60) return 'now';
+    if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+    if (sec < 86400) return `${Math.floor(sec / 3600)}h`;
+    if (sec < 604800) return `${Math.floor(sec / 86400)}d`;
+    return new Date(ts).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  };
+
+  if (threads.length === 0) {
+    return (
+      <div style={{ padding: '40px 24px', textAlign: 'center' }}>
+        <div style={{ fontSize: 36 }}>✉️</div>
+        <div style={{ fontFamily: '"Fraunces", serif', fontSize: 18, color: '#5c4a38', marginTop: 8 }}>
+          No private messages yet
+        </div>
+        <div style={{ fontSize: 12, color: '#7a8270', marginTop: 6, lineHeight: 1.5 }}>
+          Go to <strong>Me → Team</strong> and tap <strong>DM</strong> next to anyone to start a private thread.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto' }}>
+      {threads.map(t => {
+        const other = data.users.find(u => u.id === t.otherId);
+        if (!other) return null;
+        const last = t.lastMessage;
+        const lastWasMine = last?.senderId === currentUser.id;
+        const preview = last
+          ? (lastWasMine ? 'You: ' : '') + (last.text.length > 50 ? last.text.slice(0, 50) + '…' : last.text)
+          : '';
+        return (
+          <button
+            key={t.otherId}
+            onClick={() => onOpenDm(t.otherId)}
+            className="salus-btn"
+            style={styles.dmRow}
+          >
+            <UserAvatar user={other} size={44} fontSize={15} />
+            <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+              <div style={styles.dmRowTop}>
+                <div style={styles.dmRowName}>{other.name}</div>
+                {last && <div style={styles.dmRowTime}>{timeAgo(last.createdAt)}</div>}
+              </div>
+              <div style={{
+                ...styles.dmRowPreview,
+                ...(t.unread > 0 ? { fontWeight: 600, color: '#1a2620' } : {}),
+              }}>
+                {preview || 'No messages yet'}
+              </div>
+            </div>
+            {t.unread > 0 && (
+              <span style={styles.dmUnreadBadge}>{t.unread}</span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -9408,6 +9781,69 @@ const styles = {
     zIndex: 50,
   },
 
+  // ─── PERIOD TOGGLE (Day/Week/Month) ───
+  periodToggleRow: {
+    display: 'flex', gap: 4, padding: '10px 14px 6px',
+    background: '#fffdf7',
+  },
+  periodToggleBtn: {
+    flex: 1, padding: '7px 12px', borderRadius: 8,
+    background: 'transparent', border: '1px solid transparent',
+    fontSize: 12, fontWeight: 600, color: '#7a8270',
+    fontFamily: 'inherit', cursor: 'pointer',
+  },
+  periodToggleBtnActive: {
+    background: '#5c4a38', color: '#fff',
+  },
+
+  // ─── MONTH GRID ───
+  monthGridDayHeader: {
+    display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)',
+    padding: '6px 14px',
+    gap: 4,
+  },
+  monthGridDayLabel: {
+    textAlign: 'center', fontSize: 10, fontWeight: 700,
+    color: '#7a8270', letterSpacing: 0.4, textTransform: 'uppercase',
+    padding: '4px 0',
+  },
+  monthGrid: {
+    display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)',
+    gap: 4, padding: '0 14px',
+  },
+  monthGridCell: {
+    aspectRatio: '1 / 1',
+    background: '#fffdf7', border: '1px solid #efe7d2',
+    borderRadius: 8, padding: 4,
+    display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+    fontFamily: 'inherit', cursor: 'pointer',
+  },
+  monthGridCellToday: {
+    background: '#5c4a38', borderColor: '#5c4a38',
+  },
+  monthGridCellCover: {
+    background: '#fef0ea', borderColor: '#e8b8a8',
+  },
+  monthGridEmpty: {
+    aspectRatio: '1 / 1',
+  },
+  monthGridCellDate: {
+    fontSize: 13, fontWeight: 600, color: '#1a2620', textAlign: 'center',
+  },
+  monthGridDots: {
+    display: 'flex', justifyContent: 'center', gap: 3,
+  },
+  monthGridDot: {
+    width: 5, height: 5, borderRadius: '50%',
+  },
+  monthGridLegend: {
+    display: 'flex', gap: 14, padding: '14px',
+    fontSize: 11, color: '#7a8270', justifyContent: 'center',
+  },
+  monthGridLegendItem: {
+    display: 'flex', alignItems: 'center', gap: 5,
+  },
+
   // ─── ROLE PICKER ───
   rolePickerWrap: {
     minHeight: '100vh', background: '#f5f1e8',
@@ -9796,6 +10232,51 @@ const styles = {
   notifTitle: { fontSize: 13, fontWeight: 600, color: '#1a2620' },
   notifBody: { fontSize: 12, color: '#7a8270', marginTop: 3, lineHeight: 1.4 },
   notifTime: { fontSize: 10, color: '#a59478', flexShrink: 0, marginTop: 3 },
+
+  // ─── CHAT TOGGLE + DMs LIST ───
+  chatToggleRow: {
+    display: 'flex', gap: 4, padding: '10px 12px 6px',
+    background: '#fffdf7', borderBottom: '1px solid #ebe3cf',
+  },
+  chatToggleBtn: {
+    flex: 1, padding: '7px 12px', borderRadius: 8,
+    background: 'transparent', border: '1px solid transparent',
+    fontSize: 12, fontWeight: 600, color: '#7a8270',
+    fontFamily: 'inherit', cursor: 'pointer',
+  },
+  chatToggleBtnActive: {
+    background: '#5c4a38', color: '#fff',
+  },
+  chatToggleBadge: {
+    position: 'absolute', top: 2, right: 6,
+    background: '#c8442a', color: '#fff', fontSize: 9, fontWeight: 700,
+    padding: '1px 5px', borderRadius: 8, minWidth: 14, textAlign: 'center',
+  },
+  dmRow: {
+    display: 'flex', alignItems: 'center', gap: 12,
+    padding: '12px 16px', width: '100%',
+    background: '#fffdf7', border: 'none',
+    borderBottom: '1px solid #f4ecd8',
+    fontFamily: 'inherit', cursor: 'pointer',
+  },
+  dmRowTop: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 6,
+  },
+  dmRowName: {
+    fontSize: 14, fontWeight: 600, color: '#1a2620',
+    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+  },
+  dmRowTime: { fontSize: 11, color: '#a59478', flexShrink: 0 },
+  dmRowPreview: {
+    fontSize: 12, color: '#7a8270', marginTop: 2,
+    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+  },
+  dmUnreadBadge: {
+    background: '#c8442a', color: '#fff',
+    fontSize: 11, fontWeight: 700, padding: '2px 7px',
+    borderRadius: 999, minWidth: 18, textAlign: 'center',
+    flexShrink: 0,
+  },
 
   // ─── COVER THREAD MODAL ends ───
 
