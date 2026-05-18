@@ -80,6 +80,33 @@ export const postCommentFromDb = (row) => ({
   createdAt: row.created_at ? new Date(row.created_at).getTime() : 0,
 });
 
+export const bookingFromDb = (row) => ({
+  id: row.id,
+  title: row.title,
+  description: row.description || '',
+  bookingType: row.booking_type || 'hire',
+  hirerName: row.hirer_name || '',
+  hirerContact: row.hirer_contact || '',
+  price: row.price != null ? Number(row.price) : null,
+  studio: row.studio || 'whole',
+  date: row.date,
+  startTime: (row.start_time || '').slice(0, 5),
+  endTime: (row.end_time || '').slice(0, 5),
+  status: row.status || 'confirmed',
+  notes: row.notes || '',
+  createdBy: row.created_by,
+  createdAt: row.created_at ? new Date(row.created_at).getTime() : 0,
+});
+
+export const dmFromDb = (row) => ({
+  id: row.id,
+  senderId: row.sender_id,
+  recipientId: row.recipient_id,
+  text: row.text,
+  readAt: row.read_at ? new Date(row.read_at).getTime() : null,
+  createdAt: row.created_at ? new Date(row.created_at).getTime() : 0,
+});
+
 export const classFromDb = (row) => ({
   id: row.id,
   day: row.day,
