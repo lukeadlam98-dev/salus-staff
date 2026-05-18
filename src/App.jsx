@@ -20,6 +20,8 @@ import {
   coachPostFromDb,
   postReactionFromDb,
   postCommentFromDb,
+  bookingFromDb,
+  dmFromDb,
 } from './lib/transformers';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -64,6 +66,8 @@ const EMPTY_DATA = {
   posts: [],
   postReactions: [],
   postComments: [],
+  bookings: [],
+  dms: [],
 };
 
 const CLASS_TYPES = {
@@ -250,7 +254,7 @@ export default function SalusStaff() {
     if (!session) return;
     if (!silent) setLoading(true);
     try {
-      const [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, maintRes, fbRes, postsRes, postRxRes, postCmRes] = await Promise.all([
+      const [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes] = await Promise.all([
         supabase.from('profiles').select('*'),
         supabase.from('classes').select('*'),
         supabase.from('cover_requests').select('*'),
@@ -263,9 +267,11 @@ export default function SalusStaff() {
         supabase.from('coach_posts').select('*').order('created_at', { ascending: false }),
         supabase.from('coach_post_reactions').select('*'),
         supabase.from('coach_post_comments').select('*').order('created_at', { ascending: true }),
+        supabase.from('studio_bookings').select('*').order('date', { ascending: true }),
+        supabase.from('direct_messages').select('*').order('created_at', { ascending: true }),
       ]);
 
-      const errors = [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, maintRes, fbRes, postsRes, postRxRes, postCmRes]
+      const errors = [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes]
         .filter(r => r.error)
         .map(r => r.error.message);
       if (errors.length) {
@@ -286,6 +292,8 @@ export default function SalusStaff() {
         posts: (postsRes.data || []).map(coachPostFromDb),
         postReactions: (postRxRes.data || []).map(postReactionFromDb),
         postComments: (postCmRes.data || []).map(postCommentFromDb),
+        bookings: (bookingsRes.data || []).map(bookingFromDb),
+        dms: (dmsRes.data || []).map(dmFromDb),
       });
     } catch (e) {
       console.error('Failed to load data:', e);
@@ -323,6 +331,8 @@ export default function SalusStaff() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'coach_posts' }, silentReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'coach_post_reactions' }, silentReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'coach_post_comments' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'studio_bookings' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'direct_messages' }, silentReload)
       .subscribe();
     return () => { supabase.removeChannel(channel); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -897,6 +907,83 @@ export default function SalusStaff() {
     return true;
   };
 
+  // ─── Studio Bookings ───
+  const createBooking = async (payload) => {
+    if (!payload.title?.trim()) return false;
+    const { error } = await supabase.from('studio_bookings').insert({
+      title: payload.title.trim(),
+      description: (payload.description || '').trim() || null,
+      booking_type: payload.bookingType || 'hire',
+      hirer_name: (payload.hirerName || '').trim() || null,
+      hirer_contact: (payload.hirerContact || '').trim() || null,
+      price: payload.price ? Number(payload.price) : null,
+      studio: payload.studio || 'whole',
+      date: payload.date,
+      start_time: payload.startTime,
+      end_time: payload.endTime,
+      status: payload.status || 'confirmed',
+      notes: (payload.notes || '').trim() || null,
+      created_by: currentUserId,
+    });
+    if (error) { console.error('createBooking', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  const updateBooking = async (id, payload) => {
+    if (!id) return false;
+    const dbPatch = { updated_at: new Date().toISOString() };
+    if (payload.title !== undefined)        dbPatch.title = payload.title.trim();
+    if (payload.description !== undefined)  dbPatch.description = (payload.description || '').trim() || null;
+    if (payload.bookingType !== undefined)  dbPatch.booking_type = payload.bookingType;
+    if (payload.hirerName !== undefined)    dbPatch.hirer_name = (payload.hirerName || '').trim() || null;
+    if (payload.hirerContact !== undefined) dbPatch.hirer_contact = (payload.hirerContact || '').trim() || null;
+    if (payload.price !== undefined)        dbPatch.price = payload.price ? Number(payload.price) : null;
+    if (payload.studio !== undefined)       dbPatch.studio = payload.studio;
+    if (payload.date !== undefined)         dbPatch.date = payload.date;
+    if (payload.startTime !== undefined)    dbPatch.start_time = payload.startTime;
+    if (payload.endTime !== undefined)      dbPatch.end_time = payload.endTime;
+    if (payload.status !== undefined)       dbPatch.status = payload.status;
+    if (payload.notes !== undefined)        dbPatch.notes = (payload.notes || '').trim() || null;
+    const { error } = await supabase.from('studio_bookings').update(dbPatch).eq('id', id);
+    if (error) { console.error('updateBooking', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  const deleteBooking = async (id) => {
+    if (!id) return false;
+    const { error } = await supabase.from('studio_bookings').delete().eq('id', id);
+    if (error) { console.error('deleteBooking', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  // ─── Direct Messages ───
+  const sendDm = async (recipientId, text) => {
+    if (!recipientId || !text?.trim()) return false;
+    const { error } = await supabase.from('direct_messages').insert({
+      sender_id: currentUserId,
+      recipient_id: recipientId,
+      text: text.trim(),
+    });
+    if (error) { console.error('sendDm', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  const markDmsRead = async (otherUserId) => {
+    if (!otherUserId) return;
+    const { error } = await supabase
+      .from('direct_messages')
+      .update({ read_at: new Date().toISOString() })
+      .eq('sender_id', otherUserId)
+      .eq('recipient_id', currentUserId)
+      .is('read_at', null);
+    if (error) console.error('markDmsRead', error);
+    await reloadData(true);
+  };
+
   const clearAllMessages = async () => {
     // .neq trick: delete all rows (id is never equal to this fake UUID)
     const { error } = await supabase.from('messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
@@ -958,6 +1045,10 @@ export default function SalusStaff() {
     r.requestedBy !== currentUserId &&
     (r.status === 'pending' || r.status === 'open') &&
     r.timestamp > (lastViewed.cover || 0)
+  ).length;
+
+  const dmUnread = data.dms.filter(m =>
+    m.recipientId === currentUserId && m.readAt == null
   ).length;
 
   // Everyone lands on Home — the cover-first dashboard.
@@ -1068,27 +1159,17 @@ export default function SalusStaff() {
         </div>
 
         <div className="salus-header-right" style={styles.headerRight}>
-          {(coverUnread + chatUnread) > 0 && (
-            <button
-              onClick={() => setTab(coverUnread > 0 ? 'home' : 'chat')}
-              className="salus-btn"
-              style={styles.bellBtn}
-              title={`${coverUnread} new cover · ${chatUnread} new messages`}
-            >
-              <Bell size={18} color="#5c4a38" />
-              <span style={styles.bellBtnBadge}>{coverUnread + chatUnread}</span>
-            </button>
-          )}
-          {(coverUnread + chatUnread) === 0 && (
-            <button
-              className="salus-btn"
-              style={styles.bellBtn}
-              title="No new notifications"
-              onClick={() => setTab('home')}
-            >
-              <Bell size={18} color="#a59478" />
-            </button>
-          )}
+          <button
+            onClick={() => setModal({ type: 'notifications' })}
+            className="salus-btn"
+            style={styles.bellBtn}
+            title="Notifications"
+          >
+            <Bell size={18} color={(coverUnread + chatUnread + dmUnread) > 0 ? '#5c4a38' : '#a59478'} />
+            {(coverUnread + chatUnread + dmUnread) > 0 && (
+              <span style={styles.bellBtnBadge}>{coverUnread + chatUnread + dmUnread}</span>
+            )}
+          </button>
 
           <button
             onClick={() => setTab('me')}
@@ -1189,14 +1270,13 @@ export default function SalusStaff() {
             ? <ManagerStats data={data} onShowInvoices={() => setModal({ type: 'invoices' })} />
             : <CoachStats data={data} currentUser={currentUser} />
         )}
-        {tab === 'flows' && (
-          <FlowsFeed
+        {tab === 'bookings' && (
+          <StudioBookingsView
             data={data}
             currentUser={currentUser}
             isManager={isManager}
-            onCreate={() => setModal({ type: 'createPost' })}
-            onOpenPost={(postId) => setModal({ type: 'postDetail', postId })}
-            onToggleReaction={togglePostReaction}
+            onCreate={() => setModal({ type: 'createBooking' })}
+            onOpenBooking={(id) => setModal({ type: 'bookingDetail', id })}
           />
         )}
         {tab === 'me' && (
@@ -1217,8 +1297,8 @@ export default function SalusStaff() {
       <nav style={styles.bottomNav}>
         <BottomTab icon={HomeIcon} label="Home" active={tab==='home'} onClick={() => setTab('home')} />
         <BottomTab icon={Calendar} label="Schedule" active={tab==='timetable'} onClick={() => setTab('timetable')} />
-        <BottomTab icon={Sparkles} label="Flows" active={tab==='flows'} onClick={() => setTab('flows')} />
-        <BottomTab icon={MessageSquare} label="Chat" active={tab==='chat'} onClick={() => setTab('chat')} badge={chatUnread} />
+        <BottomTab icon={Bookmark} label="Bookings" active={tab==='bookings'} onClick={() => setTab('bookings')} />
+        <BottomTab icon={MessageSquare} label="Chat" active={tab==='chat'} onClick={() => setTab('chat')} badge={chatUnread + dmUnread} />
         <BottomTab icon={UserIcon} label="Me" active={tab==='me'} onClick={() => setTab('me')} />
       </nav>
 
@@ -1324,7 +1404,14 @@ export default function SalusStaff() {
           currentUser={currentUser}
           isManager={isManager}
           onClose={() => setModal(null)}
-          onMessageInChat={() => { setModal(null); setTab('chat'); }}
+          onMessageInChat={(userId) => {
+            if (userId) {
+              setModal({ type: 'dm', otherUserId: userId });
+            } else {
+              setModal(null);
+              setTab('chat');
+            }
+          }}
           onToggleRole={toggleUserRole}
         />
       )}
@@ -1387,48 +1474,64 @@ export default function SalusStaff() {
           />
         );
       })()}
-      {modal?.type === 'createPost' && (
-        <CreatePostModal
-          data={data}
-          currentUser={currentUser}
+      {modal?.type === 'createBooking' && (
+        <CreateBookingModal
           existing={null}
           onClose={() => setModal(null)}
-          onCreate={createPost}
-          onUpdate={updatePost}
+          onCreate={createBooking}
+          onUpdate={updateBooking}
         />
       )}
-      {modal?.type === 'editPost' && (() => {
-        const p = data.posts.find(x => x.id === modal.postId);
-        if (!p) return null;
+      {modal?.type === 'editBooking' && (() => {
+        const b = data.bookings.find(x => x.id === modal.id);
+        if (!b) return null;
         return (
-          <CreatePostModal
-            data={data}
-            currentUser={currentUser}
-            existing={p}
+          <CreateBookingModal
+            existing={b}
             onClose={() => setModal(null)}
-            onCreate={createPost}
-            onUpdate={updatePost}
+            onCreate={createBooking}
+            onUpdate={updateBooking}
           />
         );
       })()}
-      {modal?.type === 'postDetail' && (() => {
-        const p = data.posts.find(x => x.id === modal.postId);
-        if (!p) return null;
+      {modal?.type === 'bookingDetail' && (() => {
+        const b = data.bookings.find(x => x.id === modal.id);
+        if (!b) return null;
         return (
-          <PostDetailModal
-            post={p}
-            data={data}
+          <BookingDetailModal
+            booking={b}
             currentUser={currentUser}
             isManager={isManager}
             onClose={() => setModal(null)}
-            onEdit={(pid) => setModal({ type: 'editPost', postId: pid })}
-            onDelete={deletePost}
-            onToggleReaction={togglePostReaction}
-            onComment={addPostComment}
-            onDeleteComment={deletePostComment}
+            onEdit={(id) => setModal({ type: 'editBooking', id })}
+            onDelete={deleteBooking}
           />
         );
       })()}
+      {modal?.type === 'dm' && (() => {
+        const other = data.users.find(u => u.id === modal.otherUserId);
+        if (!other) return null;
+        return (
+          <DmThreadModal
+            otherUser={other}
+            data={data}
+            currentUser={currentUser}
+            onClose={() => setModal(null)}
+            onSend={sendDm}
+            onMarkRead={markDmsRead}
+          />
+        );
+      })()}
+      {modal?.type === 'notifications' && (
+        <NotificationsDrawer
+          data={data}
+          currentUser={currentUser}
+          isManager={isManager}
+          onClose={() => setModal(null)}
+          onGoTo={(tab) => setTab(tab)}
+          onOpenDm={(userId) => setModal({ type: 'dm', otherUserId: userId })}
+        />
+      )}
       {modal?.type === 'transferClass' && (() => {
         const cls = data.classes.find(c => c.id === modal.classId);
         if (!cls) return null;
@@ -3212,6 +3315,606 @@ function PostDetailModal({ post, data, currentUser, isManager, onClose, onEdit, 
             <Send size={16} />
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// STUDIO BOOKINGS — calendar for room hires & internal events
+// ──────────────────────────────────────────────────────────────────────────────
+
+const BOOKING_STUDIO_LABELS = {
+  reformer: 'Reformer studio',
+  hybrid:   'HYBRID studio',
+  whole:    'Whole gym',
+};
+
+function StudioBookingsView({ data, currentUser, isManager, onCreate, onOpenBooking }) {
+  const [filter, setFilter] = useState('upcoming');
+  const todayIso = toIsoDate(new Date());
+
+  let bookings = [...data.bookings];
+  if (filter === 'upcoming') bookings = bookings.filter(b => b.date >= todayIso && b.status !== 'cancelled');
+  else if (filter === 'past') bookings = bookings.filter(b => b.date < todayIso);
+  else if (filter === 'cancelled') bookings = bookings.filter(b => b.status === 'cancelled');
+  bookings.sort((a, b) => {
+    if (a.date !== b.date) return filter === 'past' ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date);
+    return a.startTime.localeCompare(b.startTime);
+  });
+
+  // Group by date for the upcoming list
+  const groups = {};
+  bookings.forEach(b => {
+    if (!groups[b.date]) groups[b.date] = [];
+    groups[b.date].push(b);
+  });
+  const orderedDates = Object.keys(groups);
+
+  return (
+    <div style={styles.bookingsContainer}>
+      <div style={styles.bookingsHero}>
+        <div>
+          <div style={styles.bookingsEyebrow}>Salus House</div>
+          <div style={styles.bookingsTitle}>Studio Bookings</div>
+          <div style={styles.bookingsSubtitle}>Hires, workshops, and special events.</div>
+        </div>
+        {isManager && (
+          <button onClick={onCreate} className="salus-btn" style={styles.flowsCreateBtn}>
+            <Plus size={18} />
+          </button>
+        )}
+      </div>
+
+      <div style={styles.flowsFilterRow}>
+        {[
+          { key: 'upcoming',  label: 'Upcoming' },
+          { key: 'past',      label: 'Past' },
+          { key: 'cancelled', label: 'Cancelled' },
+        ].map(f => (
+          <button
+            key={f.key}
+            onClick={() => setFilter(f.key)}
+            className="salus-btn"
+            style={{
+              ...styles.flowsFilterPill,
+              ...(filter === f.key ? styles.flowsFilterPillActive : {}),
+            }}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {bookings.length === 0 ? (
+        <div style={styles.flowsEmpty}>
+          <div style={styles.flowsEmptyIcon}>📅</div>
+          <div style={styles.flowsEmptyTitle}>
+            {filter === 'upcoming' ? 'Nothing booked yet' :
+             filter === 'past'     ? 'No past bookings' :
+                                      'No cancelled bookings'}
+          </div>
+          <div style={styles.flowsEmptySub}>
+            {filter === 'upcoming' && isManager && 'Add a booking with the + button above.'}
+            {filter === 'upcoming' && !isManager && 'Bookings will appear here when added.'}
+          </div>
+        </div>
+      ) : (
+        <div style={{ padding: '0 14px' }}>
+          {orderedDates.map(dateIso => {
+            const d = new Date(dateIso);
+            const isToday = dateIso === todayIso;
+            return (
+              <div key={dateIso} style={styles.fohDayBlock}>
+                <div style={{ ...styles.fohDayHeader, ...(isToday ? styles.fohDayHeaderToday : {}) }}>
+                  <span style={styles.fohDayName}>
+                    {d.toLocaleDateString('en-GB', { weekday: 'long' })}
+                  </span>
+                  <span style={styles.fohDayDate}>
+                    {d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                  </span>
+                  {isToday && <span style={styles.fohTodayBadge}>Today</span>}
+                </div>
+                <div style={styles.fohShiftList}>
+                  {groups[dateIso].map(b => (
+                    <BookingCard key={b.id} booking={b} onOpen={() => onOpenBooking(b.id)} />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BookingCard({ booking, onOpen }) {
+  const isHire = booking.bookingType === 'hire';
+  return (
+    <button onClick={onOpen} className="salus-btn" style={{
+      ...styles.fohShiftCard,
+      ...(booking.status === 'cancelled' ? { opacity: 0.5, textDecoration: 'line-through' } : {}),
+      ...(booking.status === 'pending' ? { borderStyle: 'dashed' } : {}),
+    }}>
+      <div style={styles.fohShiftTimes}>
+        <span style={{ ...styles.fohShiftLabel, color: isHire ? '#c6926a' : '#5c8a5a' }}>
+          {isHire ? 'HIRE' : 'EVENT'}
+        </span>
+        <span style={styles.fohShiftHours}>{booking.startTime} – {booking.endTime}</span>
+      </div>
+      <div style={{ flex: 1, textAlign: 'left' }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: '#1a2620' }}>{booking.title}</div>
+        <div style={{ fontSize: 11, color: '#7a8270', marginTop: 2 }}>
+          {BOOKING_STUDIO_LABELS[booking.studio] || booking.studio}
+          {booking.hirerName && <> · {booking.hirerName}</>}
+          {booking.price != null && <> · £{booking.price}</>}
+        </div>
+      </div>
+      <ChevronRight size={16} color="#a59478" />
+    </button>
+  );
+}
+
+function CreateBookingModal({ existing, onClose, onCreate, onUpdate }) {
+  const isEdit = !!existing;
+  const [title, setTitle] = useState(existing?.title || '');
+  const [bookingType, setBookingType] = useState(existing?.bookingType || 'hire');
+  const [hirerName, setHirerName] = useState(existing?.hirerName || '');
+  const [hirerContact, setHirerContact] = useState(existing?.hirerContact || '');
+  const [price, setPrice] = useState(existing?.price ?? '');
+  const [studio, setStudio] = useState(existing?.studio || 'whole');
+  const [date, setDate] = useState(existing?.date || toIsoDate(new Date()));
+  const [startTime, setStartTime] = useState(existing?.startTime || '09:00');
+  const [endTime, setEndTime] = useState(existing?.endTime || '11:00');
+  const [status, setStatus] = useState(existing?.status || 'confirmed');
+  const [description, setDescription] = useState(existing?.description || '');
+  const [notes, setNotes] = useState(existing?.notes || '');
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!title.trim() || !date || !startTime || !endTime || saving) return;
+    setSaving(true);
+    const payload = { title, bookingType, hirerName, hirerContact, price: price || null, studio, date, startTime, endTime, status, description, notes };
+    const ok = isEdit ? await onUpdate(existing.id, payload) : await onCreate(payload);
+    setSaving(false);
+    if (ok) onClose();
+  };
+
+  return (
+    <div style={styles.threadBackdrop} onClick={onClose}>
+      <div style={styles.threadSheet} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.threadHeader}>
+          <button onClick={onClose} className="salus-btn" style={styles.threadCloseBtn}><X size={20} /></button>
+          <div style={styles.threadHeaderTitle}>{isEdit ? 'Edit booking' : 'New booking'}</div>
+          <div style={{ width: 36 }} />
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+          <label style={styles.label}>Type</label>
+          <div style={styles.audienceRow}>
+            <button onClick={() => setBookingType('hire')} className="salus-btn"
+              style={{ ...styles.audiencePill, ...(bookingType === 'hire' ? { background: '#c6926a', color: '#fff', borderColor: '#c6926a' } : {}) }}>
+              Paid hire
+            </button>
+            <button onClick={() => setBookingType('internal')} className="salus-btn"
+              style={{ ...styles.audiencePill, ...(bookingType === 'internal' ? { background: '#5c8a5a', color: '#fff', borderColor: '#5c8a5a' } : {}) }}>
+              Internal event
+            </button>
+          </div>
+
+          <label style={styles.label}>Title</label>
+          <input className="salus-input" type="text" value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder={bookingType === 'hire' ? 'e.g. PT 1:1 — John Smith' : 'e.g. Yoga workshop'}
+            style={{ width: '100%', marginBottom: 14 }} autoFocus
+          />
+
+          <label style={styles.label}>Date</label>
+          <input className="salus-input" type="date" value={date}
+            onChange={(e) => setDate(e.target.value)}
+            style={{ width: '100%', marginBottom: 14, fontFamily: 'inherit' }}
+          />
+
+          <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+            <div style={{ flex: 1 }}>
+              <label style={styles.label}>Start</label>
+              <input className="salus-input" type="time" value={startTime}
+                onChange={(e) => setStartTime(e.target.value)}
+                style={{ width: '100%', fontFamily: 'inherit' }}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={styles.label}>End</label>
+              <input className="salus-input" type="time" value={endTime}
+                onChange={(e) => setEndTime(e.target.value)}
+                style={{ width: '100%', fontFamily: 'inherit' }}
+              />
+            </div>
+          </div>
+
+          <label style={styles.label}>Studio</label>
+          <div style={styles.audienceRow}>
+            {Object.entries(BOOKING_STUDIO_LABELS).map(([key, label]) => (
+              <button key={key}
+                onClick={() => setStudio(key)}
+                className="salus-btn"
+                style={{ ...styles.audiencePill, ...(studio === key ? styles.audiencePillActive : {}) }}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {bookingType === 'hire' && (
+            <>
+              <label style={styles.label}>Hirer name</label>
+              <input className="salus-input" type="text" value={hirerName}
+                onChange={(e) => setHirerName(e.target.value)}
+                placeholder="Person or company"
+                style={{ width: '100%', marginBottom: 14 }}
+              />
+              <label style={styles.label}>Hirer contact (optional)</label>
+              <input className="salus-input" type="text" value={hirerContact}
+                onChange={(e) => setHirerContact(e.target.value)}
+                placeholder="Phone or email"
+                style={{ width: '100%', marginBottom: 14 }}
+              />
+              <label style={styles.label}>Price (£)</label>
+              <input className="salus-input" type="number" min="0" step="0.01" value={price}
+                onChange={(e) => setPrice(e.target.value)}
+                placeholder="0.00"
+                style={{ width: '100%', marginBottom: 14, fontFamily: 'inherit' }}
+              />
+            </>
+          )}
+
+          <label style={styles.label}>Status</label>
+          <div style={styles.audienceRow}>
+            {[
+              { key: 'pending',   label: 'Pending' },
+              { key: 'confirmed', label: 'Confirmed' },
+              { key: 'cancelled', label: 'Cancelled' },
+            ].map(s => (
+              <button key={s.key}
+                onClick={() => setStatus(s.key)}
+                className="salus-btn"
+                style={{ ...styles.audiencePill, ...(status === s.key ? styles.audiencePillActive : {}) }}>
+                {s.label}
+              </button>
+            ))}
+          </div>
+
+          <label style={styles.label}>Notes (optional)</label>
+          <textarea className="salus-input" value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Special requirements, equipment needed, contact details, etc."
+            rows={3}
+            style={{ width: '100%', resize: 'vertical', marginBottom: 14, fontFamily: 'inherit' }}
+          />
+        </div>
+        <div style={styles.threadActionBar}>
+          <button onClick={handleSubmit} disabled={!title.trim() || saving}
+            className="salus-btn"
+            style={{ ...styles.threadClaimBtn, ...((!title.trim() || saving) ? styles.threadClaimBtnDisabled : {}) }}>
+            {saving ? 'Saving…' : (isEdit ? 'Save changes' : 'Add booking')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BookingDetailModal({ booking, currentUser, isManager, onClose, onEdit, onDelete }) {
+  if (!booking) return null;
+  const isHire = booking.bookingType === 'hire';
+  const d = new Date(booking.date);
+
+  return (
+    <div style={styles.threadBackdrop} onClick={onClose}>
+      <div style={styles.threadSheet} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.threadHeader}>
+          <button onClick={onClose} className="salus-btn" style={styles.threadCloseBtn}><X size={20} /></button>
+          <div style={styles.threadHeaderTitle}>Booking</div>
+          <div style={{ width: 36 }} />
+        </div>
+        <div style={styles.dayDetailHeader}>
+          <div style={{ ...styles.dayDetailRelative, color: isHire ? '#c6926a' : '#5c8a5a', fontWeight: 700 }}>
+            {isHire ? 'PAID HIRE' : 'INTERNAL EVENT'}
+            {booking.status === 'pending' && ' · PENDING'}
+            {booking.status === 'cancelled' && ' · CANCELLED'}
+          </div>
+          <div style={styles.dayDetailTitle}>{booking.title}</div>
+          <div style={styles.dayDetailMeta}>
+            {d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
+          </div>
+          <div style={styles.dayDetailMeta}>
+            {booking.startTime} – {booking.endTime} · {BOOKING_STUDIO_LABELS[booking.studio]}
+          </div>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+          {booking.hirerName && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={styles.label}>Hirer</div>
+              <div style={{ fontSize: 14, color: '#1a2620' }}>{booking.hirerName}</div>
+              {booking.hirerContact && (
+                <div style={{ fontSize: 12, color: '#7a8270', marginTop: 2 }}>{booking.hirerContact}</div>
+              )}
+            </div>
+          )}
+          {booking.price != null && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={styles.label}>Price</div>
+              <div style={{ fontSize: 18, fontWeight: 600, color: '#5c4a38' }}>£{booking.price}</div>
+            </div>
+          )}
+          {booking.notes && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={styles.label}>Notes</div>
+              <div style={styles.taskNotes}>{booking.notes}</div>
+            </div>
+          )}
+        </div>
+        {isManager && (
+          <div style={styles.threadActionBar}>
+            <button onClick={() => { onEdit(booking.id); }} className="salus-btn" style={styles.btnSecondary}>
+              Edit
+            </button>
+            <button onClick={() => { if (confirm('Delete this booking?')) { onDelete(booking.id); onClose(); } }}
+              className="salus-btn" style={{ ...styles.btnGhost, color: '#c8442a' }}>
+              <Trash2 size={14} /> Delete
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// DIRECT MESSAGES — 1-to-1 thread with another team member
+// ──────────────────────────────────────────────────────────────────────────────
+
+function DmThreadModal({ otherUser, data, currentUser, onClose, onSend, onMarkRead }) {
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+  const scrollRef = useRef(null);
+
+  // Get all messages between currentUser and otherUser
+  const thread = data.dms.filter(m =>
+    (m.senderId === currentUser.id && m.recipientId === otherUser.id) ||
+    (m.senderId === otherUser.id && m.recipientId === currentUser.id)
+  ).sort((a, b) => a.createdAt - b.createdAt);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [thread.length]);
+
+  // Mark unread DMs as read when opening
+  useEffect(() => {
+    const hasUnread = thread.some(m => m.senderId === otherUser.id && m.readAt == null);
+    if (hasUnread) onMarkRead(otherUser.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [otherUser.id]);
+
+  const handleSend = async () => {
+    if (!text.trim() || sending) return;
+    setSending(true);
+    await onSend(otherUser.id, text);
+    setText('');
+    setSending(false);
+  };
+
+  return (
+    <div style={styles.threadBackdrop} onClick={onClose}>
+      <div style={styles.threadSheet} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.threadHeader}>
+          <button onClick={onClose} className="salus-btn" style={styles.threadCloseBtn}><X size={20} /></button>
+          <div style={{ ...styles.threadHeaderTitle, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <UserAvatar user={otherUser} size={26} fontSize={10} />
+            {otherUser.name}
+          </div>
+          <div style={{ width: 36 }} />
+        </div>
+        <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: 14, background: '#f5f1e8' }}>
+          {thread.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 30, color: '#7a8270', fontSize: 13 }}>
+              No messages yet. Start the conversation 👋
+            </div>
+          ) : (
+            thread.map(msg => {
+              const mine = msg.senderId === currentUser.id;
+              return (
+                <div key={msg.id} style={{
+                  display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start',
+                  marginBottom: 8,
+                }}>
+                  <div style={{
+                    maxWidth: '78%',
+                    padding: '8px 12px',
+                    borderRadius: 14,
+                    background: mine ? '#5c4a38' : '#fffdf7',
+                    color: mine ? '#fff' : '#1a2620',
+                    border: mine ? 'none' : '1px solid #efe7d2',
+                    fontSize: 13, lineHeight: 1.4,
+                    boxShadow: '0 1px 2px rgba(60,40,20,0.05)',
+                  }}>
+                    <div>{msg.text}</div>
+                    <div style={{ fontSize: 9, opacity: 0.65, marginTop: 4 }}>
+                      {new Date(msg.createdAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: 6, padding: '10px 12px', borderTop: '1px solid #ebe3cf', background: '#fffdf7' }}>
+          <input
+            type="text"
+            className="salus-input"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+            placeholder={`Message ${otherUser.name.split(' ')[0]}…`}
+            style={{ flex: 1, fontFamily: 'inherit' }}
+          />
+          <button onClick={handleSend} disabled={!text.trim() || sending} className="salus-btn"
+            style={{ ...styles.sendBtn, opacity: (!text.trim() || sending) ? 0.5 : 1 }}>
+            <Send size={16} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// NOTIFICATIONS DRAWER
+// ──────────────────────────────────────────────────────────────────────────────
+
+function NotificationsDrawer({ data, currentUser, isManager, onClose, onGoTo, onOpenDm }) {
+  // Build a list of notification items, newest first
+  const items = [];
+  const todayIso = toIsoDate(new Date());
+
+  // Cover requests still needing cover
+  data.coverRequests
+    .filter(r => r.requestedBy !== currentUser.id && (r.status === 'pending' || r.status === 'open'))
+    .forEach(r => {
+      const cls = data.classes.find(c => c.id === r.classId);
+      if (!cls) return;
+      const coach = data.users.find(u => u.id === r.requestedBy);
+      items.push({
+        kind: 'cover',
+        ts: r.timestamp || r.createdAt || 0,
+        icon: <AlertCircle size={16} color="#c8442a" />,
+        title: 'Cover needed',
+        body: `${coach?.name?.split(' ')[0] || 'Someone'} · ${cls.type} ${cls.time}`,
+        onTap: () => { onGoTo('home'); onClose(); },
+      });
+    });
+
+  // Tasks assigned to me (or audience matches)
+  data.tasks
+    .filter(t => t.status === 'todo' && !t.isTemplate)
+    .filter(t =>
+      (t.audience === 'specific' && t.assigneeId === currentUser.id) ||
+      (t.audience === 'all_foh'  && currentUser.isFoh) ||
+      (t.audience === 'all_coach'&& currentUser.isCoach) ||
+      (t.audience === 'all_staff')
+    )
+    .forEach(t => {
+      items.push({
+        kind: 'task',
+        ts: t.createdAt,
+        icon: <Check size={16} color={t.priority === 'urgent' ? '#c8442a' : '#5c4a38'} />,
+        title: t.priority === 'urgent' ? 'Urgent task' : 'Task',
+        body: t.title,
+        onTap: () => { onGoTo('home'); onClose(); },
+      });
+    });
+
+  // Unread DMs
+  const dmsByOther = {};
+  data.dms.filter(m => m.recipientId === currentUser.id && m.readAt == null).forEach(m => {
+    if (!dmsByOther[m.senderId]) dmsByOther[m.senderId] = { ts: 0, count: 0, last: '' };
+    dmsByOther[m.senderId].count++;
+    if (m.createdAt > dmsByOther[m.senderId].ts) {
+      dmsByOther[m.senderId].ts = m.createdAt;
+      dmsByOther[m.senderId].last = m.text;
+    }
+  });
+  Object.entries(dmsByOther).forEach(([userId, info]) => {
+    const u = data.users.find(x => x.id === userId);
+    if (!u) return;
+    items.push({
+      kind: 'dm',
+      ts: info.ts,
+      icon: <MessageSquare size={16} color="#5c4a38" />,
+      title: `${u.name.split(' ')[0]} messaged you`,
+      body: info.last.length > 60 ? info.last.slice(0, 60) + '…' : info.last,
+      onTap: () => { onClose(); onOpenDm(u.id); },
+    });
+  });
+
+  // Urgent broadcasts (recent)
+  data.messages
+    .filter(m => m.isUrgent && m.userId !== currentUser.id)
+    .slice(-3)
+    .forEach(m => {
+      const u = data.users.find(x => x.id === m.userId);
+      items.push({
+        kind: 'urgent',
+        ts: m.timestamp,
+        icon: <AlertOctagon size={16} color="#c8442a" />,
+        title: `Urgent from ${u?.name?.split(' ')[0] || 'Someone'}`,
+        body: m.text,
+        onTap: () => { onGoTo('chat'); onClose(); },
+      });
+    });
+
+  // Maintenance (managers only)
+  if (isManager) {
+    data.maintenance.filter(m => m.status === 'reported').forEach(m => {
+      items.push({
+        kind: 'maint',
+        ts: m.createdAt,
+        icon: <AlertCircle size={16} color="#c6926a" />,
+        title: 'Maintenance reported',
+        body: m.title,
+        onTap: () => { onGoTo('home'); onClose(); },
+      });
+    });
+    data.feedback.filter(f => f.status === 'new').forEach(f => {
+      items.push({
+        kind: 'fb',
+        ts: f.createdAt,
+        icon: <MessageSquare size={16} color="#7a8c5c" />,
+        title: 'New member feedback',
+        body: f.feedback.length > 60 ? f.feedback.slice(0, 60) + '…' : f.feedback,
+        onTap: () => { onGoTo('home'); onClose(); },
+      });
+    });
+  }
+
+  items.sort((a, b) => b.ts - a.ts);
+
+  const timeAgo = (ts) => {
+    const sec = Math.floor((Date.now() - ts) / 1000);
+    if (sec < 60) return 'just now';
+    if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+    if (sec < 86400) return `${Math.floor(sec / 3600)}h`;
+    return `${Math.floor(sec / 86400)}d`;
+  };
+
+  return (
+    <div style={styles.notifsBackdrop} onClick={onClose}>
+      <div style={styles.notifsDrawer} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.notifsHeader}>
+          <div style={styles.notifsTitle}>Notifications</div>
+          <button onClick={onClose} className="salus-btn" style={styles.threadCloseBtn}>
+            <X size={20} />
+          </button>
+        </div>
+        {items.length === 0 ? (
+          <div style={styles.notifsEmpty}>
+            <div style={{ fontSize: 32 }}>🌿</div>
+            <div style={{ fontSize: 14, color: '#5c4a38', marginTop: 8 }}>All caught up</div>
+            <div style={{ fontSize: 11, color: '#7a8270', marginTop: 4 }}>Nothing needs your attention right now.</div>
+          </div>
+        ) : (
+          <div style={styles.notifsList}>
+            {items.map((item, i) => (
+              <button key={i} onClick={item.onTap} className="salus-btn" style={styles.notifRow}>
+                <div style={styles.notifIcon}>{item.icon}</div>
+                <div style={{ flex: 1, textAlign: 'left' }}>
+                  <div style={styles.notifTitle}>{item.title}</div>
+                  <div style={styles.notifBody}>{item.body}</div>
+                </div>
+                <div style={styles.notifTime}>{timeAgo(item.ts)}</div>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -7846,8 +8549,8 @@ function TeamDirectoryModal({ data, currentUser, isManager, onClose, onMessageIn
           </div>
         </div>
         {!isMe && (
-          <button onClick={() => onMessageInChat()} className="salus-btn" style={styles.teamMessageBtn} title="Message the team chat">
-            <MessageSquare size={14} /> Chat
+          <button onClick={() => onMessageInChat(u.id)} className="salus-btn" style={styles.teamMessageBtn} title={`Private DM ${u.name.split(' ')[0]}`}>
+            <MessageSquare size={14} /> DM
           </button>
         )}
       </div>
@@ -9057,6 +9760,60 @@ const styles = {
   commentAuthor: { fontSize: 12, fontWeight: 600, color: '#1a2620' },
   commentTime: { fontSize: 10, color: '#a59478' },
   commentText: { fontSize: 13, color: '#1a2620', lineHeight: 1.45 },
+
+  // ─── STUDIO BOOKINGS ───
+  bookingsContainer: { paddingBottom: 80, background: '#f5f1e8', minHeight: '100%' },
+  bookingsHero: {
+    display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
+    padding: '22px 18px 12px',
+    background: 'linear-gradient(180deg, #f3f5ed 0%, #f5f1e8 100%)',
+  },
+  bookingsEyebrow: {
+    fontSize: 10, color: '#7a8270', fontWeight: 700,
+    textTransform: 'uppercase', letterSpacing: 1.2,
+  },
+  bookingsTitle: {
+    fontFamily: '"Fraunces", Georgia, serif',
+    fontSize: 28, color: '#5c4a38', lineHeight: 1, marginTop: 4,
+  },
+  bookingsSubtitle: { fontSize: 12, color: '#7a8270', marginTop: 6, fontStyle: 'italic' },
+
+  // ─── NOTIFICATIONS DRAWER ───
+  notifsBackdrop: {
+    position: 'fixed', inset: 0, background: 'rgba(26,20,16,0.5)',
+    zIndex: 200, display: 'flex', justifyContent: 'flex-end',
+  },
+  notifsDrawer: {
+    width: '100%', maxWidth: 420, height: '100%',
+    background: '#fffdf7', display: 'flex', flexDirection: 'column',
+    boxShadow: '-4px 0 24px rgba(60,40,20,0.18)',
+  },
+  notifsHeader: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    padding: '14px 16px', borderBottom: '1px solid #ebe3cf',
+  },
+  notifsTitle: {
+    fontFamily: '"Fraunces", serif', fontSize: 20, color: '#5c4a38',
+  },
+  notifsEmpty: {
+    padding: '60px 30px', textAlign: 'center',
+  },
+  notifsList: { flex: 1, overflowY: 'auto', padding: '8px 0' },
+  notifRow: {
+    display: 'flex', alignItems: 'flex-start', gap: 10,
+    padding: '12px 16px', background: 'transparent',
+    border: 'none', borderBottom: '1px solid #f4ecd8',
+    width: '100%', cursor: 'pointer', fontFamily: 'inherit',
+  },
+  notifIcon: {
+    width: 32, height: 32, borderRadius: 8,
+    background: '#f5f1e8', display: 'flex',
+    alignItems: 'center', justifyContent: 'center',
+    flexShrink: 0,
+  },
+  notifTitle: { fontSize: 13, fontWeight: 600, color: '#1a2620' },
+  notifBody: { fontSize: 12, color: '#7a8270', marginTop: 3, lineHeight: 1.4 },
+  notifTime: { fontSize: 10, color: '#a59478', flexShrink: 0, marginTop: 3 },
 
   // ─── COVER THREAD MODAL ends ───
 
