@@ -9761,7 +9761,8 @@ const styles = {
   },
   scheduleUnassigned: { fontSize: 11, color: '#a59478', fontStyle: 'italic' },
   scheduleFab: {
-    position: 'fixed', right: 16, bottom: 90,
+    position: 'fixed', right: 16,
+    bottom: 'calc(80px + env(safe-area-inset-bottom, 0px))',
     background: '#5c4a38', color: '#fff', border: 'none',
     padding: '12px 18px', borderRadius: 999,
     fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
