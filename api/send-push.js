@@ -52,6 +52,10 @@ export default async function handler(req, res) {
       const sent = await handleCoverMessage(record);
       return res.status(200).json({ sent });
     }
+    if (table === 'tasks') {
+      const sent = await handleTask(record);
+      return res.status(200).json({ sent });
+    }
     return res.status(200).json({ skipped: 'unknown table' });
   } catch (e) {
     console.error('send-push error:', e);
@@ -161,6 +165,55 @@ async function handleCoverMessage(record) {
     data: { url: '/?tab=home' },
   });
   return await sendAll(subs, payload);
+}
+
+async function handleTask(record) {
+  // Skip template task inserts — only spawn notifications for instances
+  if (record.is_template === true) return 0;
+
+  const { data: creator } = await supabase
+    .from('profiles').select('name').eq('id', record.created_by).single();
+  const creatorName = creator?.name?.split(' ')[0] || 'Manager';
+
+  // Figure out who to notify based on audience
+  let recipientIds = [];
+  if (record.audience === 'specific') {
+    if (!record.assignee_id) return 0;
+    recipientIds = [record.assignee_id];
+  } else if (record.audience === 'all_foh') {
+    const { data: rows } = await supabase
+      .from('profiles').select('id').eq('is_foh', true).neq('id', record.created_by);
+    recipientIds = (rows || []).map(r => r.id);
+  } else if (record.audience === 'all_coach') {
+    const { data: rows } = await supabase
+      .from('profiles').select('id').eq('is_coach', true).neq('id', record.created_by);
+    recipientIds = (rows || []).map(r => r.id);
+  } else if (record.audience === 'all_staff') {
+    const { data: rows } = await supabase
+      .from('profiles').select('id').neq('id', record.created_by);
+    recipientIds = (rows || []).map(r => r.id);
+  } else {
+    return 0;
+  }
+  if (!recipientIds.length) return 0;
+
+  const { data: subs } = await supabase
+    .from('push_subscriptions').select('id, subscription')
+    .in('user_id', recipientIds);
+  if (!subs?.length) return 0;
+
+  const urgent = record.priority === 'urgent';
+  const titlePrefix = urgent ? '🚨 Urgent task' : 'New task';
+  const payload = JSON.stringify({
+    title: `${titlePrefix} from ${creatorName}`,
+    body: (record.title || '').slice(0, 120),
+    tag: `task-${record.id}`,
+    requireInteraction: urgent,
+    data: { url: '/?tab=home' },
+  });
+
+  const options = urgent ? { urgency: 'high', TTL: 86400 } : { TTL: 86400 };
+  return await sendAll(subs, payload, options);
 }
 
 async function sendAll(subs, payload, options = {}) {
