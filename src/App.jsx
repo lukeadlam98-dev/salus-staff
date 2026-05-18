@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Calendar, MessageSquare, Users, BarChart3, AlertCircle, Plus,
+  Calendar, MessageSquare, Users, BarChart3, AlertCircle, AlertOctagon, Plus,
   Send, ArrowLeftRight, Check, X, Clock, Bell, RotateCcw, Settings, Mail, LogOut,
   ChevronLeft, ChevronRight, TrendingUp, Award, Activity, Trash2,
+  Sparkles, Play, Heart, Flame, Bookmark, MoreHorizontal, Music, Lightbulb,
   Home as HomeIcon, FileText, User as UserIcon, Settings as SettingsIcon
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
@@ -12,6 +13,13 @@ import {
   coverReqFromDb,
   swapReqFromDb,
   messageFromDb,
+  shiftFromDb,
+  taskFromDb,
+  maintenanceFromDb,
+  feedbackFromDb,
+  coachPostFromDb,
+  postReactionFromDb,
+  postCommentFromDb,
 } from './lib/transformers';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -49,6 +57,13 @@ const EMPTY_DATA = {
   coverRequests: [],
   swapRequests: [],
   messages: [],
+  shifts: [],
+  tasks: [],
+  maintenance: [],
+  feedback: [],
+  posts: [],
+  postReactions: [],
+  postComments: [],
 };
 
 const CLASS_TYPES = {
@@ -162,6 +177,7 @@ export default function SalusStaff() {
   const [tab, setTab] = useState('home');
   const [tabInitialized, setTabInitialized] = useState(false);
   const [modal, setModal] = useState(null);
+  const [scheduleView, setScheduleView] = useState('studio'); // 'studio' | 'foh'
   const [lastViewed, setLastViewed] = useState({ chat: 0, cover: 0 });
   const [urgentCoverDismissed, setUrgentCoverDismissed] = useState(false);
   const [showUrgentCover, setShowUrgentCover] = useState(false);
@@ -234,15 +250,22 @@ export default function SalusStaff() {
     if (!session) return;
     if (!silent) setLoading(true);
     try {
-      const [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes] = await Promise.all([
+      const [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, maintRes, fbRes, postsRes, postRxRes, postCmRes] = await Promise.all([
         supabase.from('profiles').select('*'),
         supabase.from('classes').select('*'),
         supabase.from('cover_requests').select('*'),
         supabase.from('swap_requests').select('*'),
         supabase.from('messages').select('*').order('created_at', { ascending: true }),
+        supabase.from('foh_shifts').select('*'),
+        supabase.from('tasks').select('*').order('created_at', { ascending: false }),
+        supabase.from('maintenance_logs').select('*').order('created_at', { ascending: false }),
+        supabase.from('member_feedback').select('*').order('created_at', { ascending: false }),
+        supabase.from('coach_posts').select('*').order('created_at', { ascending: false }),
+        supabase.from('coach_post_reactions').select('*'),
+        supabase.from('coach_post_comments').select('*').order('created_at', { ascending: true }),
       ]);
 
-      const errors = [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes]
+      const errors = [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, maintRes, fbRes, postsRes, postRxRes, postCmRes]
         .filter(r => r.error)
         .map(r => r.error.message);
       if (errors.length) {
@@ -256,6 +279,13 @@ export default function SalusStaff() {
         coverRequests: (coverReqRes.data || []).map(coverReqFromDb),
         swapRequests: (swapReqRes.data || []).map(swapReqFromDb),
         messages: (messagesRes.data || []).map(messageFromDb),
+        shifts: (shiftsRes.data || []).map(shiftFromDb),
+        tasks: (tasksRes.data || []).map(taskFromDb),
+        maintenance: (maintRes.data || []).map(maintenanceFromDb),
+        feedback: (fbRes.data || []).map(feedbackFromDb),
+        posts: (postsRes.data || []).map(coachPostFromDb),
+        postReactions: (postRxRes.data || []).map(postReactionFromDb),
+        postComments: (postCmRes.data || []).map(postCommentFromDb),
       });
     } catch (e) {
       console.error('Failed to load data:', e);
@@ -286,6 +316,13 @@ export default function SalusStaff() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cover_requests' }, silentReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'swap_requests' }, silentReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'foh_shifts' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'maintenance_logs' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'member_feedback' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'coach_posts' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'coach_post_reactions' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'coach_post_comments' }, silentReload)
       .subscribe();
     return () => { supabase.removeChannel(channel); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -501,11 +538,12 @@ export default function SalusStaff() {
     await reloadData(true);
   };
 
-  const sendMessage = async (text) => {
+  const sendMessage = async (text, isUrgent = false) => {
     if (!text || !text.trim()) return;
     const { error } = await supabase.from('messages').insert({
       user_id: currentUserId,
       text: text.trim(),
+      is_urgent: isUrgent === true,
     });
     if (error) console.error('sendMessage', error);
     await reloadData(true);
@@ -554,7 +592,6 @@ export default function SalusStaff() {
   };
 
   // Transfer a class directly to another coach (private hand-off).
-  // No approval flow — both coaches have agreed off-app.
   const transferClass = async (classId, newCoachId) => {
     if (!classId || !newCoachId) return false;
     const { error } = await supabase
@@ -575,6 +612,280 @@ export default function SalusStaff() {
     return true;
   };
 
+  // Manager-only: assign or clear an FOH shift's staff member.
+  const assignShift = async (shiftId, staffId) => {
+    if (!shiftId) return false;
+    const { error } = await supabase
+      .from('foh_shifts')
+      .update({
+        staff_id: staffId || null,
+        status: staffId ? 'assigned' : 'open',
+        original_staff_id: null,
+      })
+      .eq('id', shiftId);
+    if (error) { console.error('assignShift', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  // Placeholder — full FOH cover system to come.
+  const requestShiftCover = async (shiftId) => {
+    if (!shiftId) return false;
+    const { error } = await supabase
+      .from('foh_shifts')
+      .update({ status: 'needs_cover' })
+      .eq('id', shiftId);
+    if (error) { console.error('requestShiftCover', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  // ─── Task mutations ───
+  const createTask = async ({ title, description, assigneeId, audience, dueDate, priority, recurrence, recurrenceDays }) => {
+    if (!title?.trim()) return false;
+    const isRecurring = recurrence && recurrence !== 'none';
+
+    const basePayload = {
+      title: title.trim(),
+      description: (description || '').trim() || null,
+      assignee_id: audience === 'specific' ? assigneeId : null,
+      audience: audience || 'specific',
+      created_by: currentUserId,
+      priority: priority || 'normal',
+    };
+
+    if (!isRecurring) {
+      // Simple one-off task
+      const { error } = await supabase.from('tasks').insert({
+        ...basePayload,
+        status: 'todo',
+        due_date: dueDate || null,
+      });
+      if (error) { console.error('createTask', error); return false; }
+      await reloadData(true);
+      return true;
+    }
+
+    // Recurring: create the template AND today's instance (if today matches)
+    const { data: tplData, error: tplErr } = await supabase
+      .from('tasks')
+      .insert({
+        ...basePayload,
+        status: 'todo',
+        is_template: true,
+        recurrence,
+        recurrence_days: recurrenceDays && recurrenceDays.length ? recurrenceDays : null,
+      })
+      .select('id')
+      .single();
+    if (tplErr) { console.error('createTask template', tplErr); return false; }
+
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const todayDow = (today.getDay() + 6) % 7; // 0=Mon..6=Sun
+    const todayDom = today.getDate();
+    const fireToday =
+      recurrence === 'daily' ||
+      (recurrence === 'weekly' && (recurrenceDays || []).includes(todayDow)) ||
+      (recurrence === 'monthly' && (recurrenceDays || []).includes(todayDom));
+
+    if (fireToday) {
+      await supabase.from('tasks').insert({
+        ...basePayload,
+        status: 'todo',
+        due_date: toIsoDate(today),
+        recurrence_parent_id: tplData.id,
+      });
+    }
+    await reloadData(true);
+    return true;
+  };
+
+  const markTaskDone = async (taskId, done) => {
+    if (!taskId) return false;
+    const patch = done
+      ? { status: 'done',  completed_at: new Date().toISOString(), completed_by: currentUserId }
+      : { status: 'todo',  completed_at: null, completed_by: null };
+    const { error } = await supabase.from('tasks').update(patch).eq('id', taskId);
+    if (error) { console.error('markTaskDone', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  const deleteTask = async (taskId) => {
+    if (!taskId) return false;
+    const { error } = await supabase.from('tasks').delete().eq('id', taskId);
+    if (error) { console.error('deleteTask', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  // ─── Maintenance ───
+  const createMaintenanceLog = async ({ title, description, location, equipment, urgency }) => {
+    if (!title?.trim()) return false;
+    const { error } = await supabase.from('maintenance_logs').insert({
+      title: title.trim(),
+      description: (description || '').trim() || null,
+      location: location || null,
+      equipment: (equipment || '').trim() || null,
+      urgency: urgency || 'normal',
+      status: 'reported',
+      reported_by: currentUserId,
+    });
+    if (error) { console.error('createMaintenanceLog', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  const updateMaintenanceStatus = async (id, status, notes) => {
+    if (!id) return false;
+    const patch = { status };
+    if (status === 'fixed') {
+      patch.resolved_at = new Date().toISOString();
+      patch.resolved_by = currentUserId;
+      if (notes) patch.resolution_notes = notes;
+    } else {
+      patch.resolved_at = null;
+      patch.resolved_by = null;
+    }
+    const { error } = await supabase.from('maintenance_logs').update(patch).eq('id', id);
+    if (error) { console.error('updateMaintenanceStatus', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  const deleteMaintenanceLog = async (id) => {
+    if (!id) return false;
+    const { error } = await supabase.from('maintenance_logs').delete().eq('id', id);
+    if (error) { console.error('deleteMaintenanceLog', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  // ─── Feedback ───
+  const createFeedback = async ({ memberName, context, feedback, sentiment }) => {
+    if (!feedback?.trim()) return false;
+    const { error } = await supabase.from('member_feedback').insert({
+      member_name: (memberName || '').trim() || null,
+      context: (context || '').trim() || null,
+      feedback: feedback.trim(),
+      sentiment: sentiment || 'neutral',
+      status: 'new',
+      logged_by: currentUserId,
+    });
+    if (error) { console.error('createFeedback', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  const updateFeedbackStatus = async (id, status, notes) => {
+    if (!id) return false;
+    const patch = { status };
+    if (status === 'addressed') {
+      patch.addressed_at = new Date().toISOString();
+      patch.addressed_by = currentUserId;
+      if (notes) patch.addressed_notes = notes;
+    }
+    const { error } = await supabase.from('member_feedback').update(patch).eq('id', id);
+    if (error) { console.error('updateFeedbackStatus', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  const deleteFeedback = async (id) => {
+    if (!id) return false;
+    const { error } = await supabase.from('member_feedback').delete().eq('id', id);
+    if (error) { console.error('deleteFeedback', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  // ─── Coach posts (Flows) ───
+  const createPost = async ({ title, description, postType, videoUrl, tags }) => {
+    if (!title?.trim()) return false;
+    const { error } = await supabase.from('coach_posts').insert({
+      title: title.trim(),
+      description: (description || '').trim() || null,
+      post_type: postType || 'flow',
+      video_url: (videoUrl || '').trim() || null,
+      tags: (tags || []).filter(t => t && t.trim()),
+      posted_by: currentUserId,
+    });
+    if (error) { console.error('createPost', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  const updatePost = async (postId, patch) => {
+    if (!postId) return false;
+    const dbPatch = { edited_at: new Date().toISOString() };
+    if (patch.title !== undefined)       dbPatch.title = patch.title.trim();
+    if (patch.description !== undefined) dbPatch.description = (patch.description || '').trim() || null;
+    if (patch.videoUrl !== undefined)    dbPatch.video_url = (patch.videoUrl || '').trim() || null;
+    if (patch.tags !== undefined)        dbPatch.tags = patch.tags;
+    const { error } = await supabase.from('coach_posts').update(dbPatch).eq('id', postId);
+    if (error) { console.error('updatePost', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  const deletePost = async (postId) => {
+    if (!postId) return false;
+    const { error } = await supabase.from('coach_posts').delete().eq('id', postId);
+    if (error) { console.error('deletePost', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  const togglePostReaction = async (postId, reaction) => {
+    if (!postId || !reaction) return false;
+    // Did I already react with this emoji?
+    const mine = data.postReactions.find(r =>
+      r.postId === postId && r.userId === currentUserId && r.reaction === reaction
+    );
+    if (mine) {
+      const { error } = await supabase
+        .from('coach_post_reactions')
+        .delete()
+        .eq('post_id', postId).eq('user_id', currentUserId).eq('reaction', reaction);
+      if (error) { console.error('removeReaction', error); return false; }
+    } else {
+      const { error } = await supabase
+        .from('coach_post_reactions')
+        .insert({ post_id: postId, user_id: currentUserId, reaction });
+      if (error) { console.error('addReaction', error); return false; }
+    }
+    await reloadData(true);
+    return true;
+  };
+
+  const addPostComment = async (postId, text) => {
+    if (!postId || !text?.trim()) return false;
+    const { error } = await supabase.from('coach_post_comments').insert({
+      post_id: postId,
+      user_id: currentUserId,
+      text: text.trim(),
+    });
+    if (error) { console.error('addPostComment', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  const deletePostComment = async (commentId) => {
+    if (!commentId) return false;
+    const { error } = await supabase.from('coach_post_comments').delete().eq('id', commentId);
+    if (error) { console.error('deletePostComment', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  // ─── Onboarding ───
+  const saveOnboardingAck = async (patch) => {
+    const { error } = await supabase.from('profiles').update(patch).eq('id', currentUserId);
+    if (error) { console.error('saveOnboardingAck', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
   const clearAllMessages = async () => {
     // .neq trick: delete all rows (id is never equal to this fake UUID)
     const { error } = await supabase.from('messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
@@ -590,6 +901,40 @@ export default function SalusStaff() {
 
   const currentUser = data.users.find(u => u.id === currentUserId);
   const isManager = currentUser.role === 'manager';
+
+  // First-time onboarding — if the user hasn't picked any role yet, show the picker.
+  // Manager bypasses this entirely.
+  if (!isManager && !currentUser.isCoach && !currentUser.isFoh) {
+    return (
+      <RolePickerScreen
+        currentUser={currentUser}
+        onPick={async ({ isCoach, isFoh }) => {
+          const { error } = await supabase
+            .from('profiles')
+            .update({ is_coach: isCoach, is_foh: isFoh })
+            .eq('id', currentUserId);
+          if (error) { console.error('RolePicker save', error); return; }
+          await reloadData(true);
+        }}
+        onSignOut={handleLogout}
+      />
+    );
+  }
+
+  // Then onboarding (after role is set, before they see Home).
+  // Manager bypasses. Existing users are bypassed via the SQL migration that
+  // backfilled their flags (or by completing it themselves).
+  if (!isManager && !currentUser.onboardingCompletedAt) {
+    return (
+      <OnboardingFlow
+        currentUser={currentUser}
+        onSaveAck={saveOnboardingAck}
+        onUpdateProfile={(patch) => updateUserSettings(currentUserId, patch)}
+        onSignOut={handleLogout}
+      />
+    );
+  }
+
   const pendingCount = data.coverRequests.filter(r => r.status === 'pending').length;
   const openCount = data.coverRequests.filter(r => r.status === 'open').length;
 
@@ -608,6 +953,7 @@ export default function SalusStaff() {
   // Only runs once per sign-in.
   if (!tabInitialized && currentUser) {
     setTab('home');
+    if (currentUser.isFoh && !currentUser.isCoach) setScheduleView('foh');
     setTabInitialized(true);
   }
 
@@ -766,6 +1112,12 @@ export default function SalusStaff() {
             onExpressInterest={expressInterest}
             onViewAllCover={() => setTab('cover')}
             onViewChat={() => setTab('chat')}
+            onCreateTask={() => setModal({ type: 'createTask' })}
+            onOpenTask={(taskId) => setModal({ type: 'taskDetail', taskId })}
+            onCreateMaintenance={() => setModal({ type: 'createMaintenance' })}
+            onOpenMaintenance={(id) => setModal({ type: 'maintenanceDetail', id })}
+            onCreateFeedback={() => setModal({ type: 'createFeedback' })}
+            onOpenFeedback={(id) => setModal({ type: 'feedbackDetail', id })}
           />
         )}
         {(tab === 'timetable' || tab === 'cover') && (
@@ -778,11 +1130,13 @@ export default function SalusStaff() {
         )}
 
         {tab === 'timetable' && (
-          <Timetable
+          <ScheduleView
             data={data}
             currentUser={currentUser}
             isManager={isManager}
             isMobile={isMobile}
+            scheduleView={scheduleView}
+            setScheduleView={setScheduleView}
             onClassClick={(classId) => {
               const req = data.coverRequests.find(r => r.classId === classId && (r.status === 'open' || r.status === 'pending'));
               if (req) {
@@ -791,6 +1145,7 @@ export default function SalusStaff() {
                 setModal({ type: 'classDetail', classId });
               }
             }}
+            onShiftClick={(shiftId) => setModal({ type: 'shiftDetail', shiftId })}
             onAddClass={() => setModal({ type: 'editClass', classId: null })}
             onDayClick={(isoDate) => setModal({ type: 'dayDetail', isoDate })}
           />
@@ -823,6 +1178,16 @@ export default function SalusStaff() {
             ? <ManagerStats data={data} onShowInvoices={() => setModal({ type: 'invoices' })} />
             : <CoachStats data={data} currentUser={currentUser} />
         )}
+        {tab === 'flows' && (
+          <FlowsFeed
+            data={data}
+            currentUser={currentUser}
+            isManager={isManager}
+            onCreate={() => setModal({ type: 'createPost' })}
+            onOpenPost={(postId) => setModal({ type: 'postDetail', postId })}
+            onToggleReaction={togglePostReaction}
+          />
+        )}
         {tab === 'me' && (
           <MePage
             data={data}
@@ -841,6 +1206,7 @@ export default function SalusStaff() {
       <nav style={styles.bottomNav}>
         <BottomTab icon={HomeIcon} label="Home" active={tab==='home'} onClick={() => setTab('home')} />
         <BottomTab icon={Calendar} label="Schedule" active={tab==='timetable'} onClick={() => setTab('timetable')} />
+        <BottomTab icon={Sparkles} label="Flows" active={tab==='flows'} onClick={() => setTab('flows')} />
         <BottomTab icon={MessageSquare} label="Chat" active={tab==='chat'} onClick={() => setTab('chat')} badge={chatUnread} />
         <BottomTab icon={UserIcon} label="Me" active={tab==='me'} onClick={() => setTab('me')} />
       </nav>
@@ -926,6 +1292,21 @@ export default function SalusStaff() {
           />
         );
       })()}
+      {modal?.type === 'shiftDetail' && (() => {
+        const s = data.shifts.find(s => s.id === modal.shiftId);
+        if (!s) return null;
+        return (
+          <ShiftDetailModal
+            shift={s}
+            data={data}
+            currentUser={currentUser}
+            isManager={isManager}
+            onClose={() => setModal(null)}
+            onAssign={assignShift}
+            onRequestCover={requestShiftCover}
+          />
+        );
+      })()}
       {modal?.type === 'team' && (
         <TeamDirectoryModal
           data={data}
@@ -934,6 +1315,107 @@ export default function SalusStaff() {
           onMessageInChat={() => { setModal(null); setTab('chat'); }}
         />
       )}
+      {modal?.type === 'createTask' && (
+        <CreateTaskModal
+          data={data}
+          currentUser={currentUser}
+          onClose={() => setModal(null)}
+          onCreate={createTask}
+        />
+      )}
+      {modal?.type === 'taskDetail' && (() => {
+        const t = data.tasks.find(t => t.id === modal.taskId);
+        if (!t) return null;
+        return (
+          <TaskDetailModal
+            task={t}
+            data={data}
+            currentUser={currentUser}
+            isManager={isManager}
+            onClose={() => setModal(null)}
+            onMarkDone={markTaskDone}
+            onDelete={deleteTask}
+          />
+        );
+      })()}
+      {modal?.type === 'createMaintenance' && (
+        <CreateMaintenanceModal onClose={() => setModal(null)} onCreate={createMaintenanceLog} />
+      )}
+      {modal?.type === 'maintenanceDetail' && (() => {
+        const log = data.maintenance.find(m => m.id === modal.id);
+        if (!log) return null;
+        return (
+          <MaintenanceDetailModal
+            log={log}
+            data={data}
+            currentUser={currentUser}
+            isManager={isManager}
+            onClose={() => setModal(null)}
+            onUpdateStatus={updateMaintenanceStatus}
+            onDelete={deleteMaintenanceLog}
+          />
+        );
+      })()}
+      {modal?.type === 'createFeedback' && (
+        <CreateFeedbackModal onClose={() => setModal(null)} onCreate={createFeedback} />
+      )}
+      {modal?.type === 'feedbackDetail' && (() => {
+        const item = data.feedback.find(f => f.id === modal.id);
+        if (!item) return null;
+        return (
+          <FeedbackDetailModal
+            item={item}
+            data={data}
+            currentUser={currentUser}
+            isManager={isManager}
+            onClose={() => setModal(null)}
+            onUpdateStatus={updateFeedbackStatus}
+            onDelete={deleteFeedback}
+          />
+        );
+      })()}
+      {modal?.type === 'createPost' && (
+        <CreatePostModal
+          data={data}
+          currentUser={currentUser}
+          existing={null}
+          onClose={() => setModal(null)}
+          onCreate={createPost}
+          onUpdate={updatePost}
+        />
+      )}
+      {modal?.type === 'editPost' && (() => {
+        const p = data.posts.find(x => x.id === modal.postId);
+        if (!p) return null;
+        return (
+          <CreatePostModal
+            data={data}
+            currentUser={currentUser}
+            existing={p}
+            onClose={() => setModal(null)}
+            onCreate={createPost}
+            onUpdate={updatePost}
+          />
+        );
+      })()}
+      {modal?.type === 'postDetail' && (() => {
+        const p = data.posts.find(x => x.id === modal.postId);
+        if (!p) return null;
+        return (
+          <PostDetailModal
+            post={p}
+            data={data}
+            currentUser={currentUser}
+            isManager={isManager}
+            onClose={() => setModal(null)}
+            onEdit={(pid) => setModal({ type: 'editPost', postId: pid })}
+            onDelete={deletePost}
+            onToggleReaction={togglePostReaction}
+            onComment={addPostComment}
+            onDeleteComment={deletePostComment}
+          />
+        );
+      })()}
       {modal?.type === 'transferClass' && (() => {
         const cls = data.classes.find(c => c.id === modal.classId);
         if (!cls) return null;
@@ -1194,6 +1676,1533 @@ function NavTab({ icon: Icon, label, active, onClick, badge, isMobile }) {
 // ──────────────────────────────────────────────────────────────────────────────
 // LOGIN SCREEN
 // ──────────────────────────────────────────────────────────────────────────────
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ROLE PICKER — shown once after first signup so the user tells us what they do
+// ──────────────────────────────────────────────────────────────────────────────
+
+function RolePickerScreen({ currentUser, onPick, onSignOut }) {
+  const [isCoach, setIsCoach] = useState(false);
+  const [isFoh, setIsFoh] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const canContinue = isCoach || isFoh;
+
+  const handleContinue = async () => {
+    if (!canContinue || saving) return;
+    setSaving(true);
+    await onPick({ isCoach, isFoh });
+    // onPick triggers reloadData which re-renders past this screen; no need to clear saving
+  };
+
+  const Option = ({ active, onClick, title, desc, icon }) => (
+    <button
+      onClick={onClick}
+      className="salus-btn"
+      style={{
+        ...styles.rolePickerOption,
+        ...(active ? styles.rolePickerOptionActive : {}),
+      }}
+    >
+      <div style={styles.rolePickerOptionIcon}>{icon}</div>
+      <div style={{ flex: 1, textAlign: 'left' }}>
+        <div style={styles.rolePickerOptionTitle}>{title}</div>
+        <div style={styles.rolePickerOptionDesc}>{desc}</div>
+      </div>
+      <div style={{
+        ...styles.rolePickerCheckbox,
+        ...(active ? styles.rolePickerCheckboxActive : {}),
+      }}>
+        {active && <Check size={14} color="#fff" strokeWidth={3} />}
+      </div>
+    </button>
+  );
+
+  return (
+    <div style={styles.rolePickerWrap}>
+      <div style={styles.rolePickerCard}>
+        <div style={styles.rolePickerHeader}>
+          <div style={styles.rolePickerEyebrow}>Welcome to Salus Staff</div>
+          <h1 style={styles.rolePickerTitle}>What do you do at Salus House{currentUser.name ? `, ${currentUser.name.split(' ')[0]}` : ''}?</h1>
+          <p style={styles.rolePickerSubtitle}>
+            Pick one or both — you can change this later in your profile.
+          </p>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 18 }}>
+          <Option
+            active={isCoach}
+            onClick={() => setIsCoach(v => !v)}
+            title="Coach"
+            desc="I teach classes in the studio (Reformer, Hyrox, etc.)"
+            icon="🧘"
+          />
+          <Option
+            active={isFoh}
+            onClick={() => setIsFoh(v => !v)}
+            title="Front of House"
+            desc="I work at reception, checking members in"
+            icon="🪴"
+          />
+        </div>
+
+        <button
+          onClick={handleContinue}
+          disabled={!canContinue || saving}
+          className="salus-btn"
+          style={{
+            ...styles.rolePickerContinue,
+            ...((!canContinue || saving) ? styles.rolePickerContinueDisabled : {}),
+          }}
+        >
+          {saving ? 'Saving…' : (canContinue ? 'Continue' : 'Pick at least one')}
+        </button>
+
+        <button
+          onClick={onSignOut}
+          className="salus-btn"
+          style={styles.rolePickerSignOut}
+        >
+          Sign out
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ONBOARDING FLOW — shown after sign-up before they reach Home
+// ──────────────────────────────────────────────────────────────────────────────
+
+const ONBOARDING_POLICIES = {
+  during_class: {
+    title: 'What we expect during your class',
+    eyebrow: 'Coach · in the studio',
+    bullets: [
+      'Arrive 15 minutes before the class start time.',
+      'Greet every member by name as they come in.',
+      'Set the music to the right playlist for the class type before members arrive.',
+      'Demo each exercise clearly before counting in.',
+      'Walk the floor — give hands-on corrections where appropriate.',
+      'No phones out except to control music or check the time.',
+      'Finish on time. Members may have another class straight after.',
+    ],
+    ackColumn: 'during_class_acked_at',
+  },
+  after_class: {
+    title: 'What we expect after each class',
+    eyebrow: 'Coach · resetting the studio',
+    bullets: [
+      'Reset all equipment to its default position.',
+      'Wipe down reformers, mats, and any small equipment used.',
+      'Restock the studio (towels, water, sprays).',
+      'Note any equipment issue in the Maintenance log.',
+      'Thank every member as they leave.',
+      'Check the next class is ready — even if it isn\'t yours.',
+    ],
+    ackColumn: 'after_class_acked_at',
+  },
+  during_shift: {
+    title: 'What we expect during your FOH shift',
+    eyebrow: 'FOH · on reception',
+    bullets: [
+      'Be at the desk and visible at all times during your shift.',
+      'Greet every member walking in — eye contact and a hello.',
+      'Phone away unless using it for member queries or the app.',
+      'Answer the phone within 3 rings during opening hours.',
+      'Know what classes are running, who is teaching, and capacity.',
+      'Handle minor queries yourself; escalate complaints to the manager.',
+      'Keep the front area tidy — no clutter, no half-empty cups.',
+    ],
+    ackColumn: 'during_class_acked_at',
+  },
+  after_shift: {
+    title: 'What we expect at the end of your shift',
+    eyebrow: 'FOH · shift handover',
+    bullets: [
+      'Restock anything you used during the shift (towels, kit, drinks).',
+      'Write a quick handover note for the next person: anything unusual, any pending member requests, any deliveries due.',
+      'Wipe down the reception desk and tidy the entrance area.',
+      'Note any maintenance issue in the Maintenance log.',
+      'If you\'re on the last shift: lock-up checklist (lights, doors, music off, alarm on).',
+      'Don\'t leave until the next person has arrived (if applicable).',
+    ],
+    ackColumn: 'after_class_acked_at',
+  },
+  uniform: {
+    title: 'Uniform & appearance',
+    eyebrow: 'Everyone · how we present',
+    bullets: [
+      'Salus House branded top during all working hours.',
+      'Plain black leggings, shorts, or joggers.',
+      'Clean trainers (no outdoor mud).',
+      'Hair tied back if long enough.',
+      'Personal grooming: nails short and clean, no strong perfume/aftershave.',
+      'If you need a new Salus top, message Luke directly.',
+    ],
+    ackColumn: 'uniform_acked_at',
+  },
+};
+
+function OnboardingFlow({ currentUser, onSaveAck, onUpdateProfile, onSignOut }) {
+  const [step, setStep] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [bankAccount, setBankAccount] = useState(currentUser.bankAccount || '');
+  const [bankSortCode, setBankSortCode] = useState(currentUser.bankSortCode || '');
+
+  // Build a role-aware step list.
+  //   welcome → photo → bank → conduct → (coach steps) → (foh steps) → uniform → done
+  const roleSteps = [];
+  if (currentUser.isCoach) {
+    roleSteps.push('during_class', 'after_class');
+  }
+  if (currentUser.isFoh) {
+    roleSteps.push('during_shift', 'after_shift');
+  }
+
+  const steps = [
+    { type: 'welcome' },
+    { type: 'photo' },
+    { type: 'bank' },
+    { type: 'conduct' },
+    ...roleSteps.map(key => ({ type: 'policy', key })),
+    { type: 'policy', key: 'uniform' },
+    { type: 'done' },
+  ];
+
+  const totalDots = steps.length;
+  const policyStepsCount = roleSteps.length + 1; // +1 for uniform
+
+  const firstName = (currentUser.name || 'there').split(' ')[0];
+  const current = steps[step];
+
+  const next = () => setStep(s => Math.min(s + 1, steps.length - 1));
+  const back = () => setStep(s => Math.max(s - 1, 0));
+
+  const ackAndNext = async (column) => {
+    setSaving(true);
+    await onSaveAck({ [column]: new Date().toISOString() });
+    setSaving(false);
+    next();
+  };
+
+  const saveBankAndNext = async () => {
+    setSaving(true);
+    await onUpdateProfile({ bankAccount: bankAccount.trim(), bankSortCode: bankSortCode.trim() });
+    setSaving(false);
+    next();
+  };
+
+  const finish = async () => {
+    setSaving(true);
+    await onSaveAck({ onboarding_completed_at: new Date().toISOString() });
+    setSaving(false);
+  };
+
+  const Header = ({ eyebrow, title }) => (
+    <>
+      <div style={styles.rolePickerEyebrow}>{eyebrow}</div>
+      <h1 style={styles.rolePickerTitle}>{title}</h1>
+    </>
+  );
+
+  const Footer = ({ onPrimary, primaryLabel, primaryDisabled, hideBack }) => (
+    <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <button
+        onClick={onPrimary}
+        disabled={primaryDisabled || saving}
+        className="salus-btn"
+        style={{
+          ...styles.rolePickerContinue,
+          ...((primaryDisabled || saving) ? styles.rolePickerContinueDisabled : {}),
+        }}
+      >
+        {saving ? 'Saving…' : primaryLabel}
+      </button>
+      {!hideBack && step > 0 && (
+        <button onClick={back} className="salus-btn" style={styles.onbBackBtn}>
+          ← Back
+        </button>
+      )}
+    </div>
+  );
+
+  const PolicyList = ({ bullets }) => (
+    <ul style={styles.onbPolicyList}>
+      {bullets.map((b, i) => <li key={i} style={styles.onbPolicyItem}>{b}</li>)}
+    </ul>
+  );
+
+  // Count step indicator for policy steps (e.g. "Step 4 of 6")
+  const policyStepLabel = () => {
+    // We're on the Nth policy step. Find which policy step we are in the list.
+    const policyStepIndex = steps
+      .slice(0, step + 1)
+      .filter(s => s.type === 'policy').length;
+    return `Step ${4 + policyStepIndex - 1} of ${4 + policyStepsCount - 1}`;
+  };
+
+  return (
+    <div style={styles.rolePickerWrap}>
+      <div style={{ ...styles.rolePickerCard, maxWidth: 480 }}>
+        {/* Progress dots */}
+        <div style={styles.onbDots}>
+          {Array.from({ length: totalDots }, (_, i) => (
+            <div key={i} style={{
+              ...styles.onbDot,
+              ...(i <= step ? styles.onbDotActive : {}),
+            }} />
+          ))}
+        </div>
+
+        {current.type === 'welcome' && (
+          <>
+            <Header eyebrow="Welcome aboard" title={`Quick setup, ${firstName}.`} />
+            <p style={styles.rolePickerSubtitle}>
+              A few minutes to set up your profile, then read the gym rules.
+              You'll only do this once.
+            </p>
+            <Footer onPrimary={next} primaryLabel="Let's go" hideBack />
+          </>
+        )}
+
+        {current.type === 'photo' && (
+          <>
+            <Header eyebrow="Step 1" title="Add a profile photo" />
+            <p style={styles.rolePickerSubtitle}>
+              Shows next to every shift you cover and every message you send.
+              You can change it later from the Me tab.
+            </p>
+            <p style={{ ...styles.rolePickerSubtitle, fontSize: 12, marginTop: 10 }}>
+              You can do this after onboarding too.
+            </p>
+            <Footer onPrimary={next} primaryLabel="Continue" />
+          </>
+        )}
+
+        {current.type === 'bank' && (
+          <>
+            <Header eyebrow="Step 2" title="Bank details for invoices" />
+            <p style={styles.rolePickerSubtitle}>
+              Where Luke pays you. Only the manager can see this.
+            </p>
+            <div style={{ marginTop: 16 }}>
+              <label style={styles.label}>Account number</label>
+              <input
+                className="salus-input"
+                type="text"
+                value={bankAccount}
+                onChange={(e) => setBankAccount(e.target.value.replace(/[^0-9]/g, '').slice(0, 8))}
+                placeholder="8 digits"
+                style={{ width: '100%', marginBottom: 12, fontFamily: 'inherit' }}
+              />
+              <label style={styles.label}>Sort code</label>
+              <input
+                className="salus-input"
+                type="text"
+                value={bankSortCode}
+                onChange={(e) => setBankSortCode(e.target.value)}
+                placeholder="00-00-00"
+                style={{ width: '100%', fontFamily: 'inherit' }}
+              />
+            </div>
+            <Footer
+              onPrimary={saveBankAndNext}
+              primaryLabel={bankAccount && bankSortCode ? 'Save & continue' : 'Skip for now'}
+            />
+          </>
+        )}
+
+        {current.type === 'conduct' && (
+          <>
+            <Header eyebrow="Step 3" title="Code of conduct" />
+            <p style={styles.rolePickerSubtitle}>
+              Treat colleagues and members with respect. Be on time. Keep personal life out of the studio.
+              Any concerns go directly to Luke. By continuing you confirm you've read and agree.
+            </p>
+            <Footer
+              onPrimary={() => ackAndNext('code_of_conduct_acked_at')}
+              primaryLabel="I agree · Continue"
+            />
+          </>
+        )}
+
+        {current.type === 'policy' && (() => {
+          const policy = ONBOARDING_POLICIES[current.key];
+          return (
+            <>
+              <Header eyebrow={`${policyStepLabel()} · ${policy.eyebrow}`} title={policy.title} />
+              <PolicyList bullets={policy.bullets} />
+              <Footer
+                onPrimary={() => ackAndNext(policy.ackColumn)}
+                primaryLabel="Got it · Continue"
+              />
+            </>
+          );
+        })()}
+
+        {current.type === 'done' && (
+          <>
+            <Header eyebrow="All set" title="You're ready to go." />
+            <p style={styles.rolePickerSubtitle}>
+              You can revisit any of the policies from your Me tab. Welcome to the team, {firstName}.
+            </p>
+            <Footer onPrimary={finish} primaryLabel="Open Salus Staff" hideBack />
+          </>
+        )}
+
+        {step === 0 && (
+          <button onClick={onSignOut} className="salus-btn" style={styles.rolePickerSignOut}>
+            Sign out
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// MAINTENANCE LOG
+// ──────────────────────────────────────────────────────────────────────────────
+
+const MAINTENANCE_LOCATIONS = [
+  { val: 'reformer', label: 'Reformer studio' },
+  { val: 'hybrid',   label: 'HYBRID' },
+  { val: 'reception', label: 'Reception' },
+  { val: 'changing', label: 'Changing rooms' },
+  { val: 'other',    label: 'Other' },
+];
+
+function MaintenanceTile({ data, currentUser, isManager, onCreate, onOpenLog }) {
+  const [open, setOpen] = useState(false);
+  const active = data.maintenance.filter(m => m.status !== 'fixed');
+  const sorted = [...active].sort((a, b) => {
+    if (a.urgency !== b.urgency) return a.urgency === 'urgent' ? -1 : 1;
+    return b.createdAt - a.createdAt;
+  });
+
+  return (
+    <section style={styles.homeSection}>
+      <div style={styles.homeSectionHead}>
+        <button onClick={() => setOpen(o => !o)} className="salus-btn" style={styles.homeSectionToggle}>
+          <span style={styles.homeSectionTitle}>Maintenance</span>
+          {sorted.length > 0 && (
+            <span style={{ ...styles.tasksCountBadge, background: sorted.some(s => s.urgency === 'urgent') ? '#c8442a' : '#5c4a38' }}>
+              {sorted.length}
+            </span>
+          )}
+          <ChevronRight size={16} color="#a59478"
+            style={{ marginLeft: 'auto', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 150ms' }}
+          />
+        </button>
+      </div>
+      {open && (
+        <div style={{ padding: '0 14px 4px' }}>
+          {sorted.length === 0 ? (
+            <div style={styles.tasksEmpty}>Nothing reported. Equipment is happy.</div>
+          ) : (
+            <div style={styles.tasksList}>
+              {sorted.map(m => (
+                <MaintenanceCard key={m.id} log={m} data={data} onOpen={() => onOpenLog(m.id)} />
+              ))}
+            </div>
+          )}
+          <button onClick={onCreate} className="salus-btn" style={styles.tasksCreateBtn}>
+            <Plus size={16} /> Report an issue
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function MaintenanceCard({ log, data, onOpen }) {
+  const reporter = data.users.find(u => u.id === log.reportedBy);
+  const locLabel = MAINTENANCE_LOCATIONS.find(l => l.val === log.location)?.label || log.location;
+  const statusLabel = log.status === 'in_progress' ? 'In progress' : log.status === 'fixed' ? 'Fixed' : 'Reported';
+  return (
+    <button onClick={onOpen} className="salus-btn" style={{
+      ...styles.taskCard,
+      ...(log.urgency === 'urgent' ? styles.taskCardUrgent : {}),
+    }}>
+      <div style={{ flex: 1, textAlign: 'left' }}>
+        <div style={styles.taskCardTitle}>
+          {log.urgency === 'urgent' && <span style={styles.taskUrgentDot}>●</span>}
+          {log.title}
+        </div>
+        <div style={styles.taskCardMeta}>
+          {locLabel && <span>{locLabel}</span>}
+          {log.equipment && <span>· {log.equipment}</span>}
+          <span style={{
+            background: log.status === 'in_progress' ? '#fef0d8' : '#fef0ea',
+            color: log.status === 'in_progress' ? '#8c6a3a' : '#c8442a',
+            padding: '1px 6px', borderRadius: 4, fontSize: 9, fontWeight: 700,
+            textTransform: 'uppercase', letterSpacing: 0.4, marginLeft: 4,
+          }}>{statusLabel}</span>
+          <span>· by {reporter?.name?.split(' ')[0] || 'someone'}</span>
+        </div>
+      </div>
+      <ChevronRight size={16} color="#a59478" />
+    </button>
+  );
+}
+
+function CreateMaintenanceModal({ onClose, onCreate }) {
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [location, setLocation] = useState('');
+  const [equipment, setEquipment] = useState('');
+  const [urgency, setUrgency] = useState('normal');
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!title.trim() || saving) return;
+    setSaving(true);
+    const ok = await onCreate({ title, description, location, equipment, urgency });
+    setSaving(false);
+    if (ok) onClose();
+  };
+
+  return (
+    <div style={styles.threadBackdrop} onClick={onClose}>
+      <div style={styles.threadSheet} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.threadHeader}>
+          <button onClick={onClose} className="salus-btn" style={styles.threadCloseBtn}><X size={20} /></button>
+          <div style={styles.threadHeaderTitle}>Report an issue</div>
+          <div style={{ width: 36 }} />
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+          <label style={styles.label}>What's wrong?</label>
+          <input className="salus-input" type="text" value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="e.g. Reformer 3 carriage sticky"
+            style={{ width: '100%', marginBottom: 14 }} autoFocus
+          />
+          <label style={styles.label}>Details (optional)</label>
+          <textarea className="salus-input" value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Anything else useful — when it started, what makes it worse, etc."
+            rows={3}
+            style={{ width: '100%', resize: 'vertical', marginBottom: 14, fontFamily: 'inherit' }}
+          />
+          <label style={styles.label}>Where?</label>
+          <div style={styles.audienceRow}>
+            {MAINTENANCE_LOCATIONS.map(l => (
+              <button key={l.val}
+                onClick={() => setLocation(l.val)}
+                className="salus-btn"
+                style={{ ...styles.audiencePill, ...(location === l.val ? styles.audiencePillActive : {}) }}>
+                {l.label}
+              </button>
+            ))}
+          </div>
+          <label style={styles.label}>Specific equipment (optional)</label>
+          <input className="salus-input" type="text" value={equipment}
+            onChange={(e) => setEquipment(e.target.value)}
+            placeholder="e.g. Reformer 3, sound system, hand dryer"
+            style={{ width: '100%', marginBottom: 14 }}
+          />
+          <label style={styles.label}>Urgency</label>
+          <div style={styles.audienceRow}>
+            <button onClick={() => setUrgency('normal')} className="salus-btn"
+              style={{ ...styles.audiencePill, ...(urgency === 'normal' ? styles.audiencePillActive : {}) }}>
+              Normal
+            </button>
+            <button onClick={() => setUrgency('urgent')} className="salus-btn"
+              style={{ ...styles.audiencePill, ...(urgency === 'urgent' ? { background: '#c8442a', color: '#fff', borderColor: '#c8442a' } : {}) }}>
+              Urgent
+            </button>
+          </div>
+        </div>
+        <div style={styles.threadActionBar}>
+          <button onClick={handleSubmit} disabled={!title.trim() || saving}
+            className="salus-btn"
+            style={{ ...styles.threadClaimBtn, ...((!title.trim() || saving) ? styles.threadClaimBtnDisabled : {}) }}>
+            {saving ? 'Reporting…' : 'Report'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MaintenanceDetailModal({ log, data, currentUser, isManager, onClose, onUpdateStatus, onDelete }) {
+  const [notes, setNotes] = useState('');
+  if (!log) return null;
+  const reporter = data.users.find(u => u.id === log.reportedBy);
+  const resolver = data.users.find(u => u.id === log.resolvedBy);
+  const locLabel = MAINTENANCE_LOCATIONS.find(l => l.val === log.location)?.label || log.location;
+
+  return (
+    <div style={styles.threadBackdrop} onClick={onClose}>
+      <div style={styles.threadSheet} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.threadHeader}>
+          <button onClick={onClose} className="salus-btn" style={styles.threadCloseBtn}><X size={20} /></button>
+          <div style={styles.threadHeaderTitle}>Maintenance</div>
+          <div style={{ width: 36 }} />
+        </div>
+        <div style={styles.dayDetailHeader}>
+          {log.urgency === 'urgent' && <div style={{ ...styles.dayDetailRelative, color: '#c8442a', fontWeight: 700 }}>● URGENT</div>}
+          <div style={styles.dayDetailTitle}>{log.title}</div>
+          <div style={styles.dayDetailMeta}>
+            {locLabel && <span>{locLabel}</span>}
+            {log.equipment && <span> · {log.equipment}</span>}
+          </div>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+          {log.description && <div style={styles.taskNotes}>{log.description}</div>}
+          <div style={styles.taskCreatedBy}>
+            Reported by {reporter?.name || 'someone'} · {new Date(log.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+          </div>
+          {log.status === 'fixed' && (
+            <>
+              <div style={styles.taskCompletedBy}>
+                ✓ Fixed by {resolver?.name || 'someone'} · {log.resolvedAt ? new Date(log.resolvedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short' }) : ''}
+              </div>
+              {log.resolutionNotes && <div style={{ ...styles.taskNotes, marginTop: 12 }}>{log.resolutionNotes}</div>}
+            </>
+          )}
+          {isManager && log.status !== 'fixed' && (
+            <div style={{ marginTop: 20 }}>
+              <label style={styles.label}>Resolution notes (optional)</label>
+              <textarea className="salus-input" value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="What did you do to fix it?"
+                rows={2}
+                style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit' }}
+              />
+            </div>
+          )}
+        </div>
+        <div style={styles.threadActionBar}>
+          {isManager && log.status === 'reported' && (
+            <button onClick={() => { onUpdateStatus(log.id, 'in_progress'); onClose(); }}
+              className="salus-btn" style={styles.btnSecondary}>
+              Mark in progress
+            </button>
+          )}
+          {isManager && log.status !== 'fixed' && (
+            <button onClick={() => { onUpdateStatus(log.id, 'fixed', notes); onClose(); }}
+              className="salus-btn" style={styles.threadClaimBtn}>
+              <Check size={14} /> Mark fixed
+            </button>
+          )}
+          {isManager && log.status === 'fixed' && (
+            <button onClick={() => { onUpdateStatus(log.id, 'reported'); onClose(); }}
+              className="salus-btn" style={styles.btnGhost}>
+              Reopen
+            </button>
+          )}
+          {isManager && (
+            <button onClick={() => { if (confirm('Delete this log?')) { onDelete(log.id); onClose(); } }}
+              className="salus-btn" style={{ ...styles.btnGhost, color: '#c8442a' }}>
+              <Trash2 size={14} />
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// MEMBER FEEDBACK
+// ──────────────────────────────────────────────────────────────────────────────
+
+function FeedbackTile({ data, currentUser, isManager, onCreate, onOpen }) {
+  const [open, setOpen] = useState(false);
+  const active = data.feedback.filter(f => f.status === 'new');
+  const sorted = [...active].sort((a, b) => b.createdAt - a.createdAt);
+
+  return (
+    <section style={styles.homeSection}>
+      <div style={styles.homeSectionHead}>
+        <button onClick={() => setOpen(o => !o)} className="salus-btn" style={styles.homeSectionToggle}>
+          <span style={styles.homeSectionTitle}>Member feedback</span>
+          {sorted.length > 0 && <span style={styles.tasksCountBadge}>{sorted.length}</span>}
+          <ChevronRight size={16} color="#a59478"
+            style={{ marginLeft: 'auto', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 150ms' }}
+          />
+        </button>
+      </div>
+      {open && (
+        <div style={{ padding: '0 14px 4px' }}>
+          {sorted.length === 0 ? (
+            <div style={styles.tasksEmpty}>Nothing new to address.</div>
+          ) : (
+            <div style={styles.tasksList}>
+              {sorted.map(f => <FeedbackCard key={f.id} item={f} data={data} onOpen={() => onOpen(f.id)} />)}
+            </div>
+          )}
+          <button onClick={onCreate} className="salus-btn" style={styles.tasksCreateBtn}>
+            <Plus size={16} /> Log feedback
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function FeedbackCard({ item, data, onOpen }) {
+  const logger = data.users.find(u => u.id === item.loggedBy);
+  const sentColor = item.sentiment === 'complaint' ? '#c8442a' : item.sentiment === 'positive' ? '#5c8a5a' : '#7a8270';
+  const sentDot = item.sentiment === 'complaint' ? '⚠' : item.sentiment === 'positive' ? '✓' : '·';
+  return (
+    <button onClick={onOpen} className="salus-btn" style={styles.taskCard}>
+      <div style={{ flex: 1, textAlign: 'left' }}>
+        <div style={styles.taskCardTitle}>
+          <span style={{ color: sentColor, marginRight: 4 }}>{sentDot}</span>
+          {item.feedback.length > 80 ? item.feedback.slice(0, 80) + '…' : item.feedback}
+        </div>
+        <div style={styles.taskCardMeta}>
+          {item.memberName && <span>{item.memberName}</span>}
+          {item.context && <span>· {item.context}</span>}
+          <span>· heard by {logger?.name?.split(' ')[0] || 'someone'}</span>
+        </div>
+      </div>
+      <ChevronRight size={16} color="#a59478" />
+    </button>
+  );
+}
+
+function CreateFeedbackModal({ onClose, onCreate }) {
+  const [memberName, setMemberName] = useState('');
+  const [context, setContext] = useState('');
+  const [feedback, setFeedback] = useState('');
+  const [sentiment, setSentiment] = useState('neutral');
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!feedback.trim() || saving) return;
+    setSaving(true);
+    const ok = await onCreate({ memberName, context, feedback, sentiment });
+    setSaving(false);
+    if (ok) onClose();
+  };
+
+  return (
+    <div style={styles.threadBackdrop} onClick={onClose}>
+      <div style={styles.threadSheet} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.threadHeader}>
+          <button onClick={onClose} className="salus-btn" style={styles.threadCloseBtn}><X size={20} /></button>
+          <div style={styles.threadHeaderTitle}>Log feedback</div>
+          <div style={{ width: 36 }} />
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+          <label style={styles.label}>What did they say?</label>
+          <textarea className="salus-input" value={feedback}
+            onChange={(e) => setFeedback(e.target.value)}
+            placeholder="e.g. The heating in reformer was off again"
+            rows={3} autoFocus
+            style={{ width: '100%', resize: 'vertical', marginBottom: 14, fontFamily: 'inherit' }}
+          />
+          <label style={styles.label}>Type</label>
+          <div style={styles.audienceRow}>
+            <button onClick={() => setSentiment('positive')} className="salus-btn"
+              style={{ ...styles.audiencePill, ...(sentiment === 'positive' ? { background: '#5c8a5a', color: '#fff', borderColor: '#5c8a5a' } : {}) }}>
+              Positive
+            </button>
+            <button onClick={() => setSentiment('neutral')} className="salus-btn"
+              style={{ ...styles.audiencePill, ...(sentiment === 'neutral' ? styles.audiencePillActive : {}) }}>
+              Neutral
+            </button>
+            <button onClick={() => setSentiment('complaint')} className="salus-btn"
+              style={{ ...styles.audiencePill, ...(sentiment === 'complaint' ? { background: '#c8442a', color: '#fff', borderColor: '#c8442a' } : {}) }}>
+              Complaint
+            </button>
+          </div>
+          <label style={styles.label}>Member name (optional)</label>
+          <input className="salus-input" type="text" value={memberName}
+            onChange={(e) => setMemberName(e.target.value)}
+            placeholder="e.g. Sarah K"
+            style={{ width: '100%', marginBottom: 14 }}
+          />
+          <label style={styles.label}>Class / context (optional)</label>
+          <input className="salus-input" type="text" value={context}
+            onChange={(e) => setContext(e.target.value)}
+            placeholder="e.g. Sun 10am Hyrox"
+            style={{ width: '100%', marginBottom: 14 }}
+          />
+        </div>
+        <div style={styles.threadActionBar}>
+          <button onClick={handleSubmit} disabled={!feedback.trim() || saving}
+            className="salus-btn"
+            style={{ ...styles.threadClaimBtn, ...((!feedback.trim() || saving) ? styles.threadClaimBtnDisabled : {}) }}>
+            {saving ? 'Logging…' : 'Log feedback'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FeedbackDetailModal({ item, data, currentUser, isManager, onClose, onUpdateStatus, onDelete }) {
+  const [notes, setNotes] = useState('');
+  if (!item) return null;
+  const logger = data.users.find(u => u.id === item.loggedBy);
+  const resolver = data.users.find(u => u.id === item.addressedBy);
+
+  return (
+    <div style={styles.threadBackdrop} onClick={onClose}>
+      <div style={styles.threadSheet} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.threadHeader}>
+          <button onClick={onClose} className="salus-btn" style={styles.threadCloseBtn}><X size={20} /></button>
+          <div style={styles.threadHeaderTitle}>Member feedback</div>
+          <div style={{ width: 36 }} />
+        </div>
+        <div style={styles.dayDetailHeader}>
+          <div style={styles.dayDetailRelative}>
+            {item.sentiment === 'complaint' ? 'COMPLAINT' :
+             item.sentiment === 'positive' ? 'POSITIVE FEEDBACK' : 'FEEDBACK'}
+          </div>
+          {item.memberName && <div style={styles.dayDetailMeta}>From {item.memberName}</div>}
+          {item.context && <div style={styles.dayDetailMeta}>{item.context}</div>}
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+          <div style={styles.taskNotes}>{item.feedback}</div>
+          <div style={styles.taskCreatedBy}>
+            Heard by {logger?.name || 'someone'} · {new Date(item.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+          </div>
+          {item.status === 'addressed' && (
+            <>
+              <div style={styles.taskCompletedBy}>
+                ✓ Addressed by {resolver?.name || 'someone'} · {item.addressedAt ? new Date(item.addressedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short' }) : ''}
+              </div>
+              {item.addressedNotes && <div style={{ ...styles.taskNotes, marginTop: 12 }}>{item.addressedNotes}</div>}
+            </>
+          )}
+          {isManager && item.status === 'new' && (
+            <div style={{ marginTop: 20 }}>
+              <label style={styles.label}>How was it addressed? (optional)</label>
+              <textarea className="salus-input" value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="What you did, or how you're handling it"
+                rows={2}
+                style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit' }}
+              />
+            </div>
+          )}
+        </div>
+        <div style={styles.threadActionBar}>
+          {isManager && item.status === 'new' && (
+            <button onClick={() => { onUpdateStatus(item.id, 'addressed', notes); onClose(); }}
+              className="salus-btn" style={styles.threadClaimBtn}>
+              <Check size={14} /> Mark addressed
+            </button>
+          )}
+          {isManager && (
+            <button onClick={() => { if (confirm('Delete this entry?')) { onDelete(item.id); onClose(); } }}
+              className="salus-btn" style={{ ...styles.btnGhost, color: '#c8442a' }}>
+              <Trash2 size={14} />
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// MY STATS (gamified) — for coaches & FOH on the Me tab
+// ──────────────────────────────────────────────────────────────────────────────
+
+function MyStatsCard({ data, currentUser }) {
+  // Sessions taught (classes by me, regardless of date — count completed by today)
+  const todayIso = toIsoDate(new Date());
+  const mine = data.classes.filter(c => c.coachId === currentUser.id);
+  const completed = mine.filter(c => c.date < todayIso);
+  const upcoming = mine.filter(c => c.date >= todayIso);
+
+  const myShifts = data.shifts.filter(s => s.staffId === currentUser.id);
+  const completedShifts = myShifts.filter(s => s.date < todayIso);
+
+  // Earnings (coach rate × completed sessions)
+  const RATE = 30;
+  const earningsAll = completed.length * RATE;
+
+  // This month
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+  const inMonth = (date, start, end) => {
+    const d = new Date(date);
+    return d >= start && (!end || d <= end);
+  };
+  const thisMonthSessions = completed.filter(c => inMonth(c.date, monthStart)).length;
+  const lastMonthSessions = completed.filter(c => inMonth(c.date, lastMonthStart, lastMonthEnd)).length;
+  const monthDelta = lastMonthSessions === 0 ? null :
+    Math.round(((thisMonthSessions - lastMonthSessions) / lastMonthSessions) * 100);
+
+  // Covers picked up
+  const coversClaimedByMe = data.coverRequests.filter(r => r.claimedBy === currentUser.id);
+
+  // Streak: consecutive weeks with at least one class taught
+  const weeksWithActivity = new Set();
+  completed.forEach(c => {
+    const d = new Date(c.date);
+    const monday = getMonday(d);
+    weeksWithActivity.add(toIsoDate(monday));
+  });
+  completedShifts.forEach(s => {
+    const d = new Date(s.date);
+    const monday = getMonday(d);
+    weeksWithActivity.add(toIsoDate(monday));
+  });
+  let streak = 0;
+  let cursor = getMonday(new Date());
+  while (weeksWithActivity.has(toIsoDate(cursor))) {
+    streak++;
+    cursor = addDays(cursor, -7);
+  }
+
+  // Achievements (badges)
+  const totalActivity = completed.length + completedShifts.length;
+  const achievements = [
+    { id: 'first',     name: 'First class', desc: 'Taught your first session', threshold: 1,   value: totalActivity, icon: '🎯' },
+    { id: 'ten',       name: '10 in',       desc: '10 sessions taught',       threshold: 10,  value: totalActivity, icon: '⭐' },
+    { id: 'fifty',     name: 'Fifty club',  desc: '50 sessions taught',       threshold: 50,  value: totalActivity, icon: '🏅' },
+    { id: 'century',   name: 'Centurion',   desc: '100 sessions taught',      threshold: 100, value: totalActivity, icon: '💯' },
+    { id: 'cover5',    name: 'Cover hero',  desc: '5 cover shifts claimed',   threshold: 5,   value: coversClaimedByMe.length, icon: '🦸' },
+    { id: 'streak4',   name: '1-month streak',  desc: '4 weeks in a row',     threshold: 4,   value: streak, icon: '🔥' },
+    { id: 'streak12',  name: '3-month streak',  desc: '12 weeks in a row',    threshold: 12,  value: streak, icon: '🔥' },
+    { id: 'streak26',  name: 'Half-year streak', desc: '26 weeks in a row',   threshold: 26,  value: streak, icon: '🔥' },
+  ];
+
+  // Find next milestone
+  const locked = achievements.filter(a => a.value < a.threshold);
+  const next = locked[0];
+
+  return (
+    <div style={styles.statsCard}>
+      <div style={styles.statsHeaderRow}>
+        <div>
+          <div style={styles.statsEyebrow}>This month</div>
+          <div style={styles.statsBigNumber}>£{(thisMonthSessions * RATE).toLocaleString()}</div>
+          <div style={styles.statsSubLine}>
+            {thisMonthSessions} session{thisMonthSessions === 1 ? '' : 's'} taught
+            {monthDelta != null && (
+              <span style={{ color: monthDelta >= 0 ? '#5c8a5a' : '#c8442a', marginLeft: 6 }}>
+                {monthDelta >= 0 ? '↑' : '↓'} {Math.abs(monthDelta)}%
+              </span>
+            )}
+          </div>
+        </div>
+        <div style={styles.statsStreak}>
+          <div style={styles.statsStreakNum}>{streak}</div>
+          <div style={styles.statsStreakLabel}>week<br />streak 🔥</div>
+        </div>
+      </div>
+
+      <div style={styles.statsTilesRow}>
+        <div style={styles.statsMiniTile}>
+          <div style={styles.statsMiniNum}>{completed.length}</div>
+          <div style={styles.statsMiniLabel}>All-time sessions</div>
+        </div>
+        <div style={styles.statsMiniTile}>
+          <div style={styles.statsMiniNum}>£{earningsAll.toLocaleString()}</div>
+          <div style={styles.statsMiniLabel}>All-time earnings</div>
+        </div>
+        <div style={styles.statsMiniTile}>
+          <div style={styles.statsMiniNum}>{coversClaimedByMe.length}</div>
+          <div style={styles.statsMiniLabel}>Covers claimed</div>
+        </div>
+      </div>
+
+      {/* Next milestone */}
+      {next && (
+        <div style={styles.statsNext}>
+          <div style={styles.statsNextHeader}>
+            <span style={{ fontSize: 18, marginRight: 6 }}>{next.icon}</span>
+            <span style={styles.statsNextName}>Next: {next.name}</span>
+            <span style={styles.statsNextPct}>{Math.round((next.value / next.threshold) * 100)}%</span>
+          </div>
+          <div style={styles.statsNextBar}>
+            <div style={{
+              ...styles.statsNextBarFill,
+              width: `${Math.min(100, (next.value / next.threshold) * 100)}%`,
+            }} />
+          </div>
+          <div style={styles.statsNextHint}>
+            {next.threshold - next.value} more to unlock
+          </div>
+        </div>
+      )}
+
+      {/* Achievement badges */}
+      <div style={styles.statsBadgesLabel}>Achievements</div>
+      <div style={styles.statsBadgesGrid}>
+        {achievements.map(a => {
+          const unlocked = a.value >= a.threshold;
+          return (
+            <div key={a.id}
+              title={`${a.name} · ${a.desc}${unlocked ? '' : ` (${a.value}/${a.threshold})`}`}
+              style={{
+                ...styles.statsBadge,
+                ...(unlocked ? styles.statsBadgeUnlocked : styles.statsBadgeLocked),
+              }}
+            >
+              <div style={{ fontSize: 22, opacity: unlocked ? 1 : 0.3, filter: unlocked ? 'none' : 'grayscale(1)' }}>{a.icon}</div>
+              <div style={styles.statsBadgeName}>{a.name}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// FLOWS — coach-driven creative feed
+// ──────────────────────────────────────────────────────────────────────────────
+
+const POST_TYPES = {
+  flow:     { label: 'Flow',     icon: Sparkles,  color: '#5c4a38' },
+  video:    { label: 'Video',    icon: Play,      color: '#c8442a' },
+  playlist: { label: 'Playlist', icon: Music,     color: '#5c8a5a' },
+  tip:      { label: 'Tip',      icon: Lightbulb, color: '#c6926a' },
+};
+
+const REACTIONS = [
+  { key: 'love',     emoji: '❤️',  label: 'Love' },
+  { key: 'fire',     emoji: '🔥',  label: 'Fire' },
+  { key: 'tried',    emoji: '✅',  label: 'Tried it' },
+  { key: 'bookmark', emoji: '🔖',  label: 'Save' },
+];
+
+const POPULAR_TAGS = ['Reformer', 'Hyrox', 'Mobility', 'Beginner', 'Advanced', 'Music', 'Technique', 'Cooldown'];
+
+function FlowsFeed({ data, currentUser, isManager, onCreate, onOpenPost, onToggleReaction }) {
+  const [filterType, setFilterType] = useState('all');
+  const posts = filterType === 'all'
+    ? data.posts
+    : data.posts.filter(p => p.postType === filterType);
+
+  return (
+    <div style={styles.flowsContainer}>
+      <div style={styles.flowsHero}>
+        <div>
+          <div style={styles.flowsEyebrow}>Salus Studio</div>
+          <div style={styles.flowsTitle}>Flows</div>
+          <div style={styles.flowsSubtitle}>Share what works. Try what others love.</div>
+        </div>
+        <button onClick={onCreate} className="salus-btn" style={styles.flowsCreateBtn}>
+          <Plus size={18} />
+        </button>
+      </div>
+
+      <div style={styles.flowsFilterRow}>
+        {[
+          { key: 'all',      label: 'All' },
+          { key: 'flow',     label: '✨ Flows' },
+          { key: 'video',    label: '▶ Videos' },
+          { key: 'playlist', label: '♪ Playlists' },
+          { key: 'tip',      label: '💡 Tips' },
+        ].map(f => (
+          <button
+            key={f.key}
+            onClick={() => setFilterType(f.key)}
+            className="salus-btn"
+            style={{
+              ...styles.flowsFilterPill,
+              ...(filterType === f.key ? styles.flowsFilterPillActive : {}),
+            }}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {posts.length === 0 ? (
+        <div style={styles.flowsEmpty}>
+          <div style={styles.flowsEmptyIcon}>✨</div>
+          <div style={styles.flowsEmptyTitle}>Nothing here yet</div>
+          <div style={styles.flowsEmptySub}>
+            Be the first to share a flow, a video, or a quick tip with the team.
+          </div>
+          <button onClick={onCreate} className="salus-btn" style={styles.flowsEmptyBtn}>
+            <Plus size={14} /> Post something
+          </button>
+        </div>
+      ) : (
+        <div style={styles.flowsList}>
+          {posts.map(p => (
+            <PostCard
+              key={p.id}
+              post={p}
+              data={data}
+              currentUser={currentUser}
+              onOpen={() => onOpenPost(p.id)}
+              onToggleReaction={(rx) => onToggleReaction(p.id, rx)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PostCard({ post, data, currentUser, onOpen, onToggleReaction }) {
+  const author = data.users.find(u => u.id === post.postedBy);
+  const typeMeta = POST_TYPES[post.postType] || POST_TYPES.flow;
+  const TypeIcon = typeMeta.icon;
+  const commentCount = data.postComments.filter(c => c.postId === post.id).length;
+  const myReactions = data.postReactions.filter(r => r.postId === post.id && r.userId === currentUser.id).map(r => r.reaction);
+
+  // Reaction counts
+  const reactionCounts = {};
+  data.postReactions.forEach(r => {
+    if (r.postId !== post.id) return;
+    reactionCounts[r.reaction] = (reactionCounts[r.reaction] || 0) + 1;
+  });
+
+  const timeAgo = (ts) => {
+    const sec = Math.floor((Date.now() - ts) / 1000);
+    if (sec < 60) return 'just now';
+    if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+    if (sec < 86400) return `${Math.floor(sec / 3600)}h`;
+    if (sec < 604800) return `${Math.floor(sec / 86400)}d`;
+    return new Date(ts).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  };
+
+  return (
+    <div style={styles.postCard}>
+      <div style={styles.postHeader} onClick={onOpen}>
+        <UserAvatar user={author} size={36} fontSize={13} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={styles.postAuthor}>{author?.name || 'Someone'}</div>
+          <div style={styles.postTime}>
+            {timeAgo(post.createdAt)}{post.editedAt ? ' · edited' : ''}
+          </div>
+        </div>
+        <div style={{
+          ...styles.postTypeBadge,
+          background: typeMeta.color + '15',
+          color: typeMeta.color,
+        }}>
+          <TypeIcon size={11} />
+          {typeMeta.label}
+        </div>
+      </div>
+
+      <div onClick={onOpen} style={{ cursor: 'pointer' }}>
+        <div style={styles.postTitle}>{post.title}</div>
+        {post.description && (
+          <div style={styles.postDesc}>
+            {post.description.length > 180 ? post.description.slice(0, 180) + '…' : post.description}
+          </div>
+        )}
+
+        {post.videoUrl && (
+          <a
+            href={post.videoUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            style={styles.postVideoLink}
+          >
+            <Play size={14} /> Watch / open
+          </a>
+        )}
+
+        {post.tags && post.tags.length > 0 && (
+          <div style={styles.postTags}>
+            {post.tags.map((t, i) => (
+              <span key={i} style={styles.postTag}>#{t}</span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Reactions */}
+      <div style={styles.postReactionsRow}>
+        {REACTIONS.map(r => {
+          const count = reactionCounts[r.key] || 0;
+          const mine = myReactions.includes(r.key);
+          return (
+            <button
+              key={r.key}
+              onClick={() => onToggleReaction(r.key)}
+              className="salus-btn"
+              style={{
+                ...styles.postReactionPill,
+                ...(mine ? styles.postReactionPillActive : {}),
+                ...(count === 0 && !mine ? styles.postReactionPillDim : {}),
+              }}
+            >
+              <span>{r.emoji}</span>
+              {count > 0 && <span style={styles.postReactionCount}>{count}</span>}
+            </button>
+          );
+        })}
+        <button
+          onClick={onOpen}
+          className="salus-btn"
+          style={styles.postCommentBtn}
+        >
+          <MessageSquare size={13} />
+          {commentCount > 0 && <span style={{ marginLeft: 4 }}>{commentCount}</span>}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CreatePostModal({ data, currentUser, existing, onClose, onCreate, onUpdate }) {
+  const [title, setTitle] = useState(existing?.title || '');
+  const [description, setDescription] = useState(existing?.description || '');
+  const [postType, setPostType] = useState(existing?.postType || 'flow');
+  const [videoUrl, setVideoUrl] = useState(existing?.videoUrl || '');
+  const [tagInput, setTagInput] = useState('');
+  const [tags, setTags] = useState(existing?.tags || []);
+  const [saving, setSaving] = useState(false);
+
+  const isEdit = !!existing;
+
+  const handleSubmit = async () => {
+    if (!title.trim() || saving) return;
+    setSaving(true);
+    const payload = { title, description, postType, videoUrl, tags };
+    const ok = isEdit ? await onUpdate(existing.id, payload) : await onCreate(payload);
+    setSaving(false);
+    if (ok) onClose();
+  };
+
+  const addTag = (t) => {
+    const clean = t.trim().replace(/^#/, '');
+    if (clean && !tags.includes(clean)) setTags([...tags, clean]);
+    setTagInput('');
+  };
+
+  const removeTag = (t) => setTags(tags.filter(x => x !== t));
+
+  return (
+    <div style={styles.threadBackdrop} onClick={onClose}>
+      <div style={styles.threadSheet} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.threadHeader}>
+          <button onClick={onClose} className="salus-btn" style={styles.threadCloseBtn}><X size={20} /></button>
+          <div style={styles.threadHeaderTitle}>{isEdit ? 'Edit post' : 'New post'}</div>
+          <div style={{ width: 36 }} />
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+          <label style={styles.label}>Type</label>
+          <div style={styles.audienceRow}>
+            {Object.entries(POST_TYPES).map(([key, meta]) => {
+              const Icon = meta.icon;
+              const active = postType === key;
+              return (
+                <button
+                  key={key}
+                  onClick={() => setPostType(key)}
+                  className="salus-btn"
+                  style={{
+                    ...styles.audiencePill,
+                    display: 'inline-flex', alignItems: 'center', gap: 5,
+                    ...(active ? { background: meta.color, color: '#fff', borderColor: meta.color } : {}),
+                  }}
+                >
+                  <Icon size={12} /> {meta.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <label style={styles.label}>Title</label>
+          <input
+            className="salus-input"
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder={
+              postType === 'flow'     ? 'e.g. 20-min Reformer Power Flow' :
+              postType === 'video'    ? 'e.g. Demo: footwork progressions' :
+              postType === 'playlist' ? 'e.g. Sunday slow flow vibes' :
+                                         'e.g. Cue I use for hip hinge'
+            }
+            style={{ width: '100%', marginBottom: 14 }}
+            autoFocus
+          />
+
+          <label style={styles.label}>
+            {postType === 'flow' ? 'The flow' :
+             postType === 'tip'  ? 'The tip' :
+                                   'Notes (optional)'}
+          </label>
+          <textarea
+            className="salus-input"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder={
+              postType === 'flow' ?
+                'Write the structure — warmup, main work, cooldown. Anything that helps another coach pick it up and run it.' :
+              postType === 'tip' ?
+                'What works, what to watch for, the magic detail.' :
+                'Anything you want to add about this.'
+            }
+            rows={6}
+            style={{ width: '100%', resize: 'vertical', marginBottom: 14, fontFamily: 'inherit' }}
+          />
+
+          {(postType === 'video' || postType === 'playlist' || postType === 'flow') && (
+            <>
+              <label style={styles.label}>
+                {postType === 'video'    ? 'Video link' :
+                 postType === 'playlist' ? 'Playlist link (Spotify, Apple Music)' :
+                                            'Video link (optional)'}
+              </label>
+              <input
+                className="salus-input"
+                type="url"
+                value={videoUrl}
+                onChange={(e) => setVideoUrl(e.target.value)}
+                placeholder="https://..."
+                style={{ width: '100%', marginBottom: 14, fontFamily: 'inherit' }}
+              />
+            </>
+          )}
+
+          <label style={styles.label}>Tags</label>
+          {tags.length > 0 && (
+            <div style={{ ...styles.audienceRow, marginBottom: 8 }}>
+              {tags.map(t => (
+                <button
+                  key={t}
+                  onClick={() => removeTag(t)}
+                  className="salus-btn"
+                  style={{ ...styles.audiencePill, ...styles.audiencePillActive, paddingRight: 8 }}
+                >
+                  #{t} <X size={10} style={{ marginLeft: 4 }} />
+                </button>
+              ))}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+            <input
+              className="salus-input"
+              type="text"
+              value={tagInput}
+              onChange={(e) => setTagInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ',') {
+                  e.preventDefault();
+                  addTag(tagInput);
+                }
+              }}
+              placeholder="Type a tag and hit enter"
+              style={{ flex: 1, fontFamily: 'inherit' }}
+            />
+            <button
+              onClick={() => addTag(tagInput)}
+              className="salus-btn"
+              disabled={!tagInput.trim()}
+              style={{ ...styles.btnSecondary, padding: '8px 14px' }}
+            >
+              Add
+            </button>
+          </div>
+          <div style={{ ...styles.audienceRow, marginBottom: 14 }}>
+            {POPULAR_TAGS.filter(t => !tags.includes(t)).slice(0, 6).map(t => (
+              <button
+                key={t}
+                onClick={() => addTag(t)}
+                className="salus-btn"
+                style={{ ...styles.audiencePill, fontSize: 11, opacity: 0.85 }}
+              >
+                + {t}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={styles.threadActionBar}>
+          <button
+            onClick={handleSubmit}
+            disabled={!title.trim() || saving}
+            className="salus-btn"
+            style={{
+              ...styles.threadClaimBtn,
+              ...((!title.trim() || saving) ? styles.threadClaimBtnDisabled : {}),
+            }}
+          >
+            {saving ? 'Posting…' : (isEdit ? 'Save changes' : 'Post')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PostDetailModal({ post, data, currentUser, isManager, onClose, onEdit, onDelete, onToggleReaction, onComment, onDeleteComment }) {
+  const [commentText, setCommentText] = useState('');
+  const [saving, setSaving] = useState(false);
+  if (!post) return null;
+
+  const author = data.users.find(u => u.id === post.postedBy);
+  const typeMeta = POST_TYPES[post.postType] || POST_TYPES.flow;
+  const TypeIcon = typeMeta.icon;
+  const isMine = post.postedBy === currentUser.id;
+  const comments = data.postComments.filter(c => c.postId === post.id);
+  const myReactions = data.postReactions.filter(r => r.postId === post.id && r.userId === currentUser.id).map(r => r.reaction);
+
+  const reactionCounts = {};
+  const reactionUsers = {};
+  data.postReactions.forEach(r => {
+    if (r.postId !== post.id) return;
+    reactionCounts[r.reaction] = (reactionCounts[r.reaction] || 0) + 1;
+    if (!reactionUsers[r.reaction]) reactionUsers[r.reaction] = [];
+    reactionUsers[r.reaction].push(r.userId);
+  });
+
+  const handleSendComment = async () => {
+    if (!commentText.trim() || saving) return;
+    setSaving(true);
+    await onComment(post.id, commentText);
+    setSaving(false);
+    setCommentText('');
+  };
+
+  return (
+    <div style={styles.threadBackdrop} onClick={onClose}>
+      <div style={styles.threadSheet} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.threadHeader}>
+          <button onClick={onClose} className="salus-btn" style={styles.threadCloseBtn}><X size={20} /></button>
+          <div style={styles.threadHeaderTitle}>
+            <TypeIcon size={13} style={{ marginRight: 4, verticalAlign: '-2px', color: typeMeta.color }} />
+            {typeMeta.label}
+          </div>
+          <div style={{ width: 36, textAlign: 'right' }}>
+            {(isMine || isManager) && (
+              <button
+                onClick={() => {
+                  if (isMine) {
+                    onEdit(post.id);
+                  } else if (isManager) {
+                    if (confirm('Delete this post?')) { onDelete(post.id); onClose(); }
+                  }
+                }}
+                className="salus-btn"
+                style={{ background: 'transparent', border: 'none', padding: 4, color: '#7a8270' }}
+              >
+                <MoreHorizontal size={18} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <UserAvatar user={author} size={36} fontSize={13} />
+            <div style={{ flex: 1 }}>
+              <div style={styles.postAuthor}>{author?.name || 'Someone'}</div>
+              <div style={styles.postTime}>
+                {new Date(post.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                {post.editedAt && ' · edited'}
+              </div>
+            </div>
+          </div>
+
+          <h2 style={styles.postDetailTitle}>{post.title}</h2>
+
+          {post.description && (
+            <div style={styles.postDetailDesc}>{post.description}</div>
+          )}
+
+          {post.videoUrl && (
+            <a
+              href={post.videoUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ ...styles.postVideoLink, fontSize: 13, padding: '10px 14px', marginTop: 12 }}
+            >
+              <Play size={15} /> Open link
+            </a>
+          )}
+
+          {post.tags && post.tags.length > 0 && (
+            <div style={{ ...styles.postTags, marginTop: 14 }}>
+              {post.tags.map((t, i) => (
+                <span key={i} style={styles.postTag}>#{t}</span>
+              ))}
+            </div>
+          )}
+
+          {/* Reactions */}
+          <div style={{ ...styles.postReactionsRow, marginTop: 18, paddingTop: 14, borderTop: '1px solid #efe7d2' }}>
+            {REACTIONS.map(r => {
+              const count = reactionCounts[r.key] || 0;
+              const mine = myReactions.includes(r.key);
+              return (
+                <button
+                  key={r.key}
+                  onClick={() => onToggleReaction(post.id, r.key)}
+                  className="salus-btn"
+                  style={{
+                    ...styles.postReactionPill,
+                    ...(mine ? styles.postReactionPillActive : {}),
+                  }}
+                >
+                  <span>{r.emoji}</span>
+                  {count > 0 && <span style={styles.postReactionCount}>{count}</span>}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Comments */}
+          <div style={{ marginTop: 18 }}>
+            <div style={styles.commentsLabel}>{comments.length === 0 ? 'No comments yet' : `${comments.length} comment${comments.length === 1 ? '' : 's'}`}</div>
+            {comments.map(c => {
+              const cu = data.users.find(u => u.id === c.userId);
+              return (
+                <div key={c.id} style={styles.commentRow}>
+                  <UserAvatar user={cu} size={28} fontSize={11} />
+                  <div style={{ flex: 1 }}>
+                    <div style={styles.commentHeader}>
+                      <span style={styles.commentAuthor}>{cu?.name?.split(' ')[0] || 'Someone'}</span>
+                      <span style={styles.commentTime}>
+                        {new Date(c.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                    <div style={styles.commentText}>{c.text}</div>
+                  </div>
+                  {(c.userId === currentUser.id || isManager) && (
+                    <button
+                      onClick={() => { if (confirm('Delete comment?')) onDeleteComment(c.id); }}
+                      className="salus-btn"
+                      style={{ background: 'transparent', border: 'none', padding: 4, color: '#a59478' }}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div style={styles.threadActionBar}>
+          <input
+            type="text"
+            className="salus-input"
+            value={commentText}
+            onChange={(e) => setCommentText(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSendComment()}
+            placeholder="Add a comment…"
+            style={{ flex: 1, fontFamily: 'inherit' }}
+          />
+          <button
+            onClick={handleSendComment}
+            disabled={!commentText.trim() || saving}
+            className="salus-btn"
+            style={{ ...styles.sendBtn, opacity: (!commentText.trim() || saving) ? 0.5 : 1 }}
+          >
+            <Send size={16} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function LoginScreen({ error, onLogin, onSignup, onClearError }) {
   const [mode, setMode] = useState('signin'); // 'signin' or 'signup'
@@ -1493,7 +3502,7 @@ function MonthView({ classes, coverRequests, currentUser, onDayClick }) {
 // HOME — cover-first dashboard, the new app landing screen
 // ──────────────────────────────────────────────────────────────────────────────
 
-function Home({ data, currentUser, isManager, onClassClick, onRequestCover, onHireStudio, onClaim, onExpressInterest, onViewAllCover, onViewChat }) {
+function Home({ data, currentUser, isManager, onClassClick, onRequestCover, onHireStudio, onClaim, onExpressInterest, onViewAllCover, onViewChat, onCreateTask, onOpenTask, onCreateMaintenance, onOpenMaintenance, onCreateFeedback, onOpenFeedback }) {
   const now = new Date();
   const hour = now.getHours();
   const greeting = hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening';
@@ -1647,6 +3656,33 @@ function Home({ data, currentUser, isManager, onClassClick, onRequestCover, onHi
         )}
       </HomeTile>
 
+      {/* Tasks / reminders */}
+      <TasksTile
+        data={data}
+        currentUser={currentUser}
+        isManager={isManager}
+        onCreate={onCreateTask}
+        onOpenTask={onOpenTask}
+      />
+
+      {/* Maintenance / equipment */}
+      <MaintenanceTile
+        data={data}
+        currentUser={currentUser}
+        isManager={isManager}
+        onCreate={onCreateMaintenance}
+        onOpenLog={onOpenMaintenance}
+      />
+
+      {/* Member feedback */}
+      <FeedbackTile
+        data={data}
+        currentUser={currentUser}
+        isManager={isManager}
+        onCreate={onCreateFeedback}
+        onOpen={onOpenFeedback}
+      />
+
       {/* Request cover CTA */}
       <button onClick={onRequestCover} style={styles.homeRequestCard} className="salus-btn">
         <div style={styles.homeRequestIcon}><Plus size={18} /></div>
@@ -1772,6 +3808,331 @@ function CoverHomeCard({ req, users, interested, urgent, pending, onClick, onCla
         )}
         {pending && (
           <span style={styles.coverHomePendingPill}>Pending</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SCHEDULE VIEW — wraps Timetable (Studio) and FOHSchedule with a manager toggle
+// ──────────────────────────────────────────────────────────────────────────────
+
+function ScheduleView({
+  data, currentUser, isManager, isMobile, scheduleView, setScheduleView,
+  onClassClick, onShiftClick, onAddClass, onDayClick,
+}) {
+  const fohOnly = currentUser.isFoh && !currentUser.isCoach;
+  const studioOnly = currentUser.isCoach && !currentUser.isFoh;
+  const canSeeBoth = isManager || (currentUser.isCoach && currentUser.isFoh);
+
+  // Decide which view to render
+  const view = fohOnly ? 'foh' :
+               studioOnly ? 'studio' :
+               scheduleView;
+
+  return (
+    <>
+      {canSeeBoth && (
+        <div style={styles.viewToggleRow}>
+          <button
+            onClick={() => setScheduleView('studio')}
+            className="salus-btn"
+            style={{
+              ...styles.viewToggleBtn,
+              ...(view === 'studio' ? styles.viewToggleBtnActive : {}),
+            }}
+          >
+            Studio
+          </button>
+          <button
+            onClick={() => setScheduleView('foh')}
+            className="salus-btn"
+            style={{
+              ...styles.viewToggleBtn,
+              ...(view === 'foh' ? styles.viewToggleBtnActive : {}),
+            }}
+          >
+            Front of House
+          </button>
+        </div>
+      )}
+
+      {view === 'studio' ? (
+        <Timetable
+          data={data}
+          currentUser={currentUser}
+          isManager={isManager}
+          isMobile={isMobile}
+          onClassClick={onClassClick}
+          onAddClass={onAddClass}
+          onDayClick={onDayClick}
+        />
+      ) : (
+        <FOHSchedule
+          data={data}
+          currentUser={currentUser}
+          isManager={isManager}
+          isMobile={isMobile}
+          onShiftClick={onShiftClick}
+        />
+      )}
+    </>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// FOH SCHEDULE — week-by-week view of reception shifts
+// ──────────────────────────────────────────────────────────────────────────────
+
+function FOHSchedule({ data, currentUser, isManager, isMobile, onShiftClick }) {
+  const [weekOffset, setWeekOffset] = useState(0);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const currentMonday = getMonday(today);
+  const weekStart = addDays(currentMonday, weekOffset * 7);
+  const weekDates = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+  const weekIso = weekDates.map(toIsoDate);
+
+  const shiftsByDay = weekIso.map(iso =>
+    data.shifts
+      .filter(s => s.date === iso)
+      .sort((a, b) => a.startTime.localeCompare(b.startTime))
+  );
+
+  const totalAssigned = shiftsByDay.flat().filter(s => s.staffId).length;
+  const totalOpen = shiftsByDay.flat().filter(s => !s.staffId).length;
+
+  const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const userById = Object.fromEntries(data.users.map(u => [u.id, u]));
+
+  return (
+    <div style={styles.timetable}>
+      <div style={styles.weekNav}>
+        <button
+          onClick={() => setWeekOffset(w => Math.max(w - 1, -2))}
+          className="salus-btn"
+          style={styles.weekNavBtn}
+          disabled={weekOffset <= -2}
+        >
+          <ChevronLeft size={18} />
+        </button>
+        <div style={styles.weekNavLabel}>
+          {weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} – {
+            addDays(weekStart, 6).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+          }
+        </div>
+        <button
+          onClick={() => setWeekOffset(w => Math.min(w + 1, 12))}
+          className="salus-btn"
+          style={styles.weekNavBtn}
+          disabled={weekOffset >= 12}
+        >
+          <ChevronRight size={18} />
+        </button>
+      </div>
+
+      <div style={styles.fohStatsRow}>
+        <div style={styles.fohStat}>
+          <div style={styles.fohStatNumber}>{totalAssigned}</div>
+          <div style={styles.fohStatLabel}>Filled</div>
+        </div>
+        <div style={styles.fohStat}>
+          <div style={{ ...styles.fohStatNumber, color: '#c8442a' }}>{totalOpen}</div>
+          <div style={styles.fohStatLabel}>Needs cover</div>
+        </div>
+        <div style={styles.fohStat}>
+          <div style={styles.fohStatNumber}>{shiftsByDay.flat().length}</div>
+          <div style={styles.fohStatLabel}>Shifts this week</div>
+        </div>
+      </div>
+
+      {weekDates.map((d, dayIdx) => {
+        const dayShifts = shiftsByDay[dayIdx];
+        const isToday = toIsoDate(d) === toIsoDate(today);
+        if (dayShifts.length === 0) return null;
+        return (
+          <div key={dayIdx} style={styles.fohDayBlock}>
+            <div style={{ ...styles.fohDayHeader, ...(isToday ? styles.fohDayHeaderToday : {}) }}>
+              <span style={styles.fohDayName}>{dayLabels[dayIdx]}</span>
+              <span style={styles.fohDayDate}>
+                {d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+              </span>
+              {isToday && <span style={styles.fohTodayBadge}>Today</span>}
+            </div>
+            <div style={styles.fohShiftList}>
+              {dayShifts.map(s => {
+                const staff = s.staffId ? userById[s.staffId] : null;
+                const open = !staff;
+                const isMine = s.staffId === currentUser.id;
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => onShiftClick(s.id)}
+                    className="salus-btn"
+                    style={{
+                      ...styles.fohShiftCard,
+                      ...(open ? styles.fohShiftCardOpen : {}),
+                      ...(isMine ? styles.fohShiftCardMine : {}),
+                    }}
+                  >
+                    <div style={styles.fohShiftTimes}>
+                      <span style={styles.fohShiftLabel}>{s.shiftLabel}</span>
+                      <span style={styles.fohShiftHours}>{s.startTime} – {s.endTime}</span>
+                    </div>
+                    <div style={styles.fohShiftStaff}>
+                      {staff ? (
+                        <>
+                          <UserAvatar user={staff} size={28} fontSize={11} />
+                          <span style={styles.fohShiftStaffName}>{staff.name}</span>
+                        </>
+                      ) : (
+                        <span style={styles.fohShiftOpen}>
+                          {isManager ? 'Tap to assign' : 'Unassigned'}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+
+      {shiftsByDay.every(d => d.length === 0) && (
+        <div style={{ padding: 40, textAlign: 'center', color: '#7a8270' }}>
+          No shifts scheduled this week.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SHIFT DETAIL MODAL — view/assign a single FOH shift
+// ──────────────────────────────────────────────────────────────────────────────
+
+function ShiftDetailModal({ shift, data, currentUser, isManager, onClose, onAssign, onRequestCover }) {
+  const [pickedStaffId, setPickedStaffId] = useState(shift?.staffId || null);
+  const [saving, setSaving] = useState(false);
+  if (!shift) return null;
+
+  const fohStaff = data.users
+    .filter(u => u.isFoh)
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  const assignedStaff = shift.staffId ? data.users.find(u => u.id === shift.staffId) : null;
+  const isMine = shift.staffId === currentUser.id;
+  const dateLabel = new Date(shift.date).toLocaleDateString('en-GB', {
+    weekday: 'long', day: 'numeric', month: 'long',
+  });
+
+  const handleAssign = async () => {
+    setSaving(true);
+    await onAssign(shift.id, pickedStaffId || null);
+    setSaving(false);
+    onClose();
+  };
+
+  return (
+    <div style={styles.threadBackdrop} onClick={onClose}>
+      <div style={styles.threadSheet} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.threadHeader}>
+          <button onClick={onClose} className="salus-btn" style={styles.threadCloseBtn}>
+            <X size={20} />
+          </button>
+          <div style={styles.threadHeaderTitle}>{shift.shiftLabel} shift</div>
+          <div style={{ width: 36 }} />
+        </div>
+
+        <div style={styles.dayDetailHeader}>
+          <div style={styles.dayDetailRelative}>FOH · {dateLabel}</div>
+          <div style={styles.dayDetailTitle}>{shift.startTime} – {shift.endTime}</div>
+          <div style={styles.dayDetailMeta}>
+            {assignedStaff ? `Assigned to ${assignedStaff.name}` : 'Currently unassigned'}
+          </div>
+        </div>
+
+        {isManager ? (
+          <>
+            <div style={{ padding: '14px 16px 4px', flexShrink: 0 }}>
+              <p style={{ fontSize: 13, color: '#7a8270', margin: 0 }}>
+                Pick an FOH staff member to assign, or leave blank to clear.
+              </p>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px' }}>
+              {fohStaff.length === 0 && (
+                <div style={{ padding: 20, textAlign: 'center', color: '#7a8270', fontSize: 13 }}>
+                  No FOH staff have signed up yet.
+                </div>
+              )}
+              <button
+                onClick={() => setPickedStaffId(null)}
+                className="salus-btn"
+                style={{
+                  ...styles.transferCoachRow,
+                  ...(!pickedStaffId ? styles.transferCoachRowActive : {}),
+                }}
+              >
+                <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#ebe3cf', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#7a8270', flexShrink: 0 }}>
+                  <X size={16} />
+                </div>
+                <div style={{ flex: 1, textAlign: 'left' }}>
+                  <div style={{ fontSize: 14, fontWeight: 500, color: '#1a2620' }}>No one (clear assignment)</div>
+                </div>
+                {!pickedStaffId && <Check size={20} color="#5c4a38" strokeWidth={2.5} />}
+              </button>
+              {fohStaff.map(s => {
+                const picked = pickedStaffId === s.id;
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => setPickedStaffId(s.id)}
+                    className="salus-btn"
+                    style={{
+                      ...styles.transferCoachRow,
+                      ...(picked ? styles.transferCoachRowActive : {}),
+                    }}
+                  >
+                    <UserAvatar user={s} size={36} fontSize={13} />
+                    <div style={{ flex: 1, textAlign: 'left' }}>
+                      <div style={{ fontSize: 14, fontWeight: 500, color: '#1a2620' }}>{s.name}</div>
+                      <div style={{ fontSize: 11, color: '#7a8270', marginTop: 2 }}>FOH</div>
+                    </div>
+                    {picked && <Check size={20} color="#5c4a38" strokeWidth={2.5} />}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={styles.threadActionBar}>
+              <button
+                onClick={handleAssign}
+                disabled={saving}
+                className="salus-btn"
+                style={{
+                  ...styles.threadClaimBtn,
+                  ...(saving ? styles.threadClaimBtnDisabled : {}),
+                }}
+              >
+                {saving ? 'Saving…' : (pickedStaffId ? 'Save assignment' : 'Clear assignment')}
+              </button>
+            </div>
+          </>
+        ) : (
+          <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px' }}>
+            <p style={{ fontSize: 14, color: '#5c4a38' }}>
+              {isMine ? "This is your shift." : (assignedStaff ? `Assigned to ${assignedStaff.name}.` : 'No one is on this shift yet.')}
+            </p>
+            {isMine && (
+              <button
+                onClick={() => { onRequestCover(shift.id); onClose(); }}
+                className="salus-btn"
+                style={{ ...styles.btnPrimary, marginTop: 16, width: '100%' }}
+              >
+                <AlertCircle size={14} /> Request cover for this shift
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -2545,6 +4906,13 @@ function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onEditMes
     setText('');
   };
 
+  const handleSendUrgent = () => {
+    if (!text.trim()) return;
+    if (!confirm(`Send "${text.trim()}" as an URGENT broadcast to everyone?\n\nThis will fire a high-priority push notification to every staff member.`)) return;
+    onSend(text, true);
+    setText('');
+  };
+
   const startEdit = (msg) => {
     setEditingId(msg.id);
     setEditText(msg.text);
@@ -2604,7 +4972,12 @@ function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onEditMes
                   </span>
                 </div>
               )}
-              <div style={{ ...styles.messageBubble, marginLeft: 36, position: 'relative' }}>
+              <div style={{ ...styles.messageBubble, marginLeft: 36, position: 'relative', ...(msg.isUrgent ? styles.messageBubbleUrgent : {}) }}>
+                {msg.isUrgent && (
+                  <div style={styles.urgentBanner}>
+                    <AlertOctagon size={12} /> URGENT
+                  </div>
+                )}
                 {isEditing ? (
                   <div style={styles.messageEditWrap}>
                     <input
@@ -2668,6 +5041,15 @@ function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onEditMes
       </div>
 
       <div style={styles.chatInputRow}>
+        <button
+          onClick={handleSendUrgent}
+          className="salus-btn"
+          style={styles.urgentBroadcastBtn}
+          title="Send as urgent broadcast"
+          disabled={!text.trim()}
+        >
+          <AlertOctagon size={16} />
+        </button>
         <input
           type="text"
           value={text}
@@ -2724,26 +5106,32 @@ function MePage({ data, currentUser, isManager, onOpenSettings, onSignOut, onSho
         </button>
       </div>
 
-      {/* Stats */}
-      <section style={styles.homeSection}>
-        <div style={styles.homeSectionHead}>
-          <div style={styles.homeSectionTitle}>This week</div>
-        </div>
-        <div style={styles.meStatsGrid}>
-          <div style={styles.meStatCell}>
-            <div style={styles.meStatNum}>{sessionCount}</div>
-            <div style={styles.meStatLabel}>Sessions</div>
+      {/* Stats — gamified for coaches/FOH, simple for manager */}
+      {isManager ? (
+        <section style={styles.homeSection}>
+          <div style={styles.homeSectionHead}>
+            <div style={styles.homeSectionTitle}>This week</div>
           </div>
-          <div style={styles.meStatCell}>
-            <div style={styles.meStatNum}>{Math.round(totalMinutes / 60 * 10) / 10}</div>
-            <div style={styles.meStatLabel}>Hours</div>
+          <div style={styles.meStatsGrid}>
+            <div style={styles.meStatCell}>
+              <div style={styles.meStatNum}>{sessionCount}</div>
+              <div style={styles.meStatLabel}>Sessions</div>
+            </div>
+            <div style={styles.meStatCell}>
+              <div style={styles.meStatNum}>{Math.round(totalMinutes / 60 * 10) / 10}</div>
+              <div style={styles.meStatLabel}>Hours</div>
+            </div>
+            <div style={styles.meStatCell}>
+              <div style={styles.meStatNum}>£{owed}</div>
+              <div style={styles.meStatLabel}>Owed</div>
+            </div>
           </div>
-          <div style={styles.meStatCell}>
-            <div style={styles.meStatNum}>£{owed}</div>
-            <div style={styles.meStatLabel}>Owed</div>
-          </div>
-        </div>
-      </section>
+        </section>
+      ) : (
+        <section style={styles.homeSection}>
+          <MyStatsCard data={data} currentUser={currentUser} />
+        </section>
+      )}
 
       {/* Push notifications — inline, not in a modal */}
       <section style={styles.homeSection}>
@@ -4087,16 +6475,23 @@ function PrefToggle({ label, hint, checked, onChange }) {
 // INVOICES — generate printable HTML invoices for each coach
 // ──────────────────────────────────────────────────────────────────────────────
 
-function generateInvoiceHtml({ coach, sessions, rate }) {
+function generateInvoiceHtml({ coach, sessions, rate, fromDate, toDate }) {
   const subtotal = sessions.length * rate;
   const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
   const invoiceNumber = `SAL-${Date.now().toString().slice(-6)}-${coach.initials}`;
-  const dateRange = sessions.length > 0
-    ? (() => {
-        const dates = sessions.map(s => s.date).filter(Boolean).sort();
-        return dates.length ? `${dates[0]} to ${dates[dates.length - 1]}` : 'this week';
-      })()
-    : 'this week';
+  const formatDate = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  };
+  const dateRange = fromDate && toDate
+    ? `${formatDate(fromDate)} – ${formatDate(toDate)}`
+    : sessions.length > 0
+      ? (() => {
+          const dates = sessions.map(s => s.date).filter(Boolean).sort();
+          return dates.length ? `${dates[0]} to ${dates[dates.length - 1]}` : 'this week';
+        })()
+      : 'this week';
   const rowsHtml = sessions.map(s => `
     <tr>
       <td>${s.date || '—'}</td>
@@ -4202,8 +6597,8 @@ ${(!coach.bankAccount || !coach.bankSortCode) ? `<div class="bank-details-warn">
 </html>`;
 }
 
-function downloadInvoice({ coach, sessions, rate }) {
-  const html = generateInvoiceHtml({ coach, sessions, rate });
+function downloadInvoice({ coach, sessions, rate, fromDate, toDate }) {
+  const html = generateInvoiceHtml({ coach, sessions, rate, fromDate, toDate });
   const blob = new Blob([html], { type: 'text/html' });
   const url = URL.createObjectURL(blob);
   const win = window.open(url, '_blank');
@@ -4214,27 +6609,133 @@ function downloadInvoice({ coach, sessions, rate }) {
     a.download = `Invoice-${coach.name.replace(/\s+/g, '-')}-${Date.now()}.html`;
     a.click();
   }
-  // URL will be revoked when the window closes; if not, GC eventually
 }
 
 function InvoicesModal({ data, onClose }) {
   const coaches = data.users.filter(u => u.role === 'coach');
   const rate = RATE_PER_SESSION;
 
+  // Default range: this week (Monday to Sunday)
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const todayIso = toIsoDate(today);
+  const thisMon = getMonday(today);
+  const thisSun = addDays(thisMon, 6);
+
+  const [fromDate, setFromDate] = useState(toIsoDate(thisMon));
+  const [toDate, setToDate] = useState(toIsoDate(thisSun));
+
+  // Quick-range presets
+  const setRange = (preset) => {
+    const t = new Date(); t.setHours(0, 0, 0, 0);
+    if (preset === 'thisWeek') {
+      const m = getMonday(t);
+      setFromDate(toIsoDate(m));
+      setToDate(toIsoDate(addDays(m, 6)));
+    } else if (preset === 'lastWeek') {
+      const m = addDays(getMonday(t), -7);
+      setFromDate(toIsoDate(m));
+      setToDate(toIsoDate(addDays(m, 6)));
+    } else if (preset === 'thisMonth') {
+      const first = new Date(t.getFullYear(), t.getMonth(), 1);
+      const last = new Date(t.getFullYear(), t.getMonth() + 1, 0);
+      setFromDate(toIsoDate(first));
+      setToDate(toIsoDate(last));
+    } else if (preset === 'lastMonth') {
+      const first = new Date(t.getFullYear(), t.getMonth() - 1, 1);
+      const last = new Date(t.getFullYear(), t.getMonth(), 0);
+      setFromDate(toIsoDate(first));
+      setToDate(toIsoDate(last));
+    }
+  };
+
   const buildSessions = (coach) => data.classes
-    .filter(c => c.coachId === coach.id)
+    .filter(c => c.coachId === coach.id && c.date >= fromDate && c.date <= toDate)
     .sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.time.localeCompare(b.time));
 
   const total = coaches.reduce((s, c) => s + buildSessions(c).length * rate, 0);
+
+  const formatDate = (iso) => {
+    const d = new Date(iso);
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  };
+
+  // Is preset active?
+  const isPreset = (preset) => {
+    const t = new Date(); t.setHours(0, 0, 0, 0);
+    if (preset === 'thisWeek') {
+      const m = getMonday(t);
+      return fromDate === toIsoDate(m) && toDate === toIsoDate(addDays(m, 6));
+    } else if (preset === 'lastWeek') {
+      const m = addDays(getMonday(t), -7);
+      return fromDate === toIsoDate(m) && toDate === toIsoDate(addDays(m, 6));
+    } else if (preset === 'thisMonth') {
+      const first = new Date(t.getFullYear(), t.getMonth(), 1);
+      const last = new Date(t.getFullYear(), t.getMonth() + 1, 0);
+      return fromDate === toIsoDate(first) && toDate === toIsoDate(last);
+    } else if (preset === 'lastMonth') {
+      const first = new Date(t.getFullYear(), t.getMonth() - 1, 1);
+      const last = new Date(t.getFullYear(), t.getMonth(), 0);
+      return fromDate === toIsoDate(first) && toDate === toIsoDate(last);
+    }
+    return false;
+  };
 
   return (
     <Modal onClose={onClose}>
       <div style={{ padding: 24 }}>
         <div style={styles.modalDayBadge}>Invoices · £{rate}/session</div>
-        <h2 style={{ ...styles.h2, marginTop: 8, marginBottom: 4 }}>Coach payments this week</h2>
-        <p style={{ ...styles.subtitle, marginBottom: 20 }}>
-          Download a printable invoice for each coach. Open the file, then use your browser's <strong>Print → Save as PDF</strong> option.
+        <h2 style={{ ...styles.h2, marginTop: 8, marginBottom: 4 }}>
+          Coach payments · {formatDate(fromDate)} – {formatDate(toDate)}
+        </h2>
+        <p style={{ ...styles.subtitle, marginBottom: 16 }}>
+          Pick the period you want to invoice for, then download a printable PDF for each coach.
         </p>
+
+        {/* Quick-range presets */}
+        <div style={styles.invoicePresetRow}>
+          {[
+            { key: 'thisWeek',  label: 'This week' },
+            { key: 'lastWeek',  label: 'Last week' },
+            { key: 'thisMonth', label: 'This month' },
+            { key: 'lastMonth', label: 'Last month' },
+          ].map(p => (
+            <button
+              key={p.key}
+              onClick={() => setRange(p.key)}
+              className="salus-btn"
+              style={{
+                ...styles.invoicePresetPill,
+                ...(isPreset(p.key) ? styles.invoicePresetPillActive : {}),
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Custom date range */}
+        <div style={styles.invoiceDateRow}>
+          <div style={{ flex: 1 }}>
+            <label style={styles.label}>From</label>
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="salus-input"
+              style={styles.invoiceDateInput}
+            />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={styles.label}>To</label>
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className="salus-input"
+              style={styles.invoiceDateInput}
+            />
+          </div>
+        </div>
 
         <div style={styles.invoiceList}>
           {coaches.map(coach => {
@@ -4254,7 +6755,7 @@ function InvoicesModal({ data, onClose }) {
                   </div>
                 </div>
                 <button
-                  onClick={() => downloadInvoice({ coach, sessions, rate })}
+                  onClick={() => downloadInvoice({ coach, sessions, rate, fromDate, toDate })}
                   className="salus-btn"
                   style={sessions.length === 0 ? styles.btnGhost : styles.btnPrimary}
                   disabled={sessions.length === 0}
@@ -4267,7 +6768,7 @@ function InvoicesModal({ data, onClose }) {
         </div>
 
         <div style={styles.invoiceTotal}>
-          <span>Total payroll this week</span>
+          <span>Total for {formatDate(fromDate)} – {formatDate(toDate)}</span>
           <span style={{ fontSize: 22, fontWeight: 700, color: '#5c4a38' }}>£{total.toLocaleString()}</span>
         </div>
 
@@ -4815,6 +7316,459 @@ function DayDetailModal({ isoDate, data, currentUser, isManager, onClose, onClas
 // TEAM DIRECTORY MODAL — see everyone on the team, contact via chat
 // ──────────────────────────────────────────────────────────────────────────────
 
+// ──────────────────────────────────────────────────────────────────────────────
+// TASKS — manager-assigned jobs / reminders, Monday.com-style
+// ──────────────────────────────────────────────────────────────────────────────
+
+// Helper: which tasks are relevant to this user?
+function tasksForUser(allTasks, user) {
+  if (!user) return [];
+  return allTasks.filter(t => {
+    if (t.audience === 'specific') return t.assigneeId === user.id;
+    if (t.audience === 'all_foh')   return user.isFoh;
+    if (t.audience === 'all_coach') return user.isCoach;
+    if (t.audience === 'all_staff') return true;
+    return false;
+  });
+}
+
+function TasksTile({ data, currentUser, isManager, onCreate, onOpenTask }) {
+  const [open, setOpen] = useState(false);
+
+  // Manager sees all open tasks; everyone else sees only theirs.
+  // Templates are hidden — they only spawn instances via the cron.
+  const allOpen = data.tasks.filter(t => t.status === 'todo' && !t.isTemplate);
+  const relevant = isManager
+    ? allOpen
+    : tasksForUser(allOpen, currentUser);
+
+  const sorted = [...relevant].sort((a, b) => {
+    // Urgent first, then by due date, then by created
+    if (a.priority !== b.priority) return a.priority === 'urgent' ? -1 : 1;
+    if (a.dueDate && b.dueDate) return a.dueDate.localeCompare(b.dueDate);
+    if (a.dueDate) return -1;
+    if (b.dueDate) return 1;
+    return b.createdAt - a.createdAt;
+  });
+
+  return (
+    <section style={styles.homeSection}>
+      <div style={styles.homeSectionHead}>
+        <button
+          onClick={() => setOpen(o => !o)}
+          className="salus-btn"
+          style={styles.homeSectionToggle}
+        >
+          <span style={styles.homeSectionTitle}>Tasks</span>
+          {sorted.length > 0 && (
+            <span style={styles.tasksCountBadge}>{sorted.length}</span>
+          )}
+          <ChevronRight
+            size={16}
+            color="#a59478"
+            style={{ marginLeft: 'auto', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 150ms' }}
+          />
+        </button>
+      </div>
+
+      {open && (
+        <div style={{ padding: '0 14px 4px' }}>
+          {sorted.length === 0 ? (
+            <div style={styles.tasksEmpty}>
+              {isManager ? 'No open tasks. Create one below.' : 'No tasks assigned to you.'}
+            </div>
+          ) : (
+            <div style={styles.tasksList}>
+              {sorted.map(t => (
+                <TaskCard
+                  key={t.id}
+                  task={t}
+                  data={data}
+                  currentUser={currentUser}
+                  onOpen={() => onOpenTask(t.id)}
+                />
+              ))}
+            </div>
+          )}
+          {isManager && (
+            <button
+              onClick={onCreate}
+              className="salus-btn"
+              style={styles.tasksCreateBtn}
+            >
+              <Plus size={16} /> New task or reminder
+            </button>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TaskCard({ task, data, currentUser, onOpen }) {
+  const assignee = task.assigneeId ? data.users.find(u => u.id === task.assigneeId) : null;
+  const audienceLabel = {
+    specific:  assignee ? assignee.name : 'Unassigned',
+    all_foh:   'Everyone in FOH',
+    all_coach: 'Every coach',
+    all_staff: 'Everyone at Salus',
+  }[task.audience];
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const isOverdue = task.dueDate && task.dueDate < toIsoDate(today);
+  const isToday = task.dueDate === toIsoDate(today);
+  const dueLabel = task.dueDate
+    ? (isToday ? 'Today' : new Date(task.dueDate).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }))
+    : null;
+
+  return (
+    <button
+      onClick={onOpen}
+      className="salus-btn"
+      style={{
+        ...styles.taskCard,
+        ...(task.priority === 'urgent' ? styles.taskCardUrgent : {}),
+      }}
+    >
+      <div style={{ flex: 1, textAlign: 'left' }}>
+        <div style={styles.taskCardTitle}>
+          {task.priority === 'urgent' && <span style={styles.taskUrgentDot}>●</span>}
+          {task.title}
+        </div>
+        <div style={styles.taskCardMeta}>
+          <span>{audienceLabel}</span>
+          {dueLabel && (
+            <span style={{ color: isOverdue ? '#c8442a' : (isToday ? '#5c8a5a' : '#7a8270') }}>
+              · {dueLabel}{isOverdue ? ' (overdue)' : ''}
+            </span>
+          )}
+        </div>
+      </div>
+      <ChevronRight size={16} color="#a59478" />
+    </button>
+  );
+}
+
+function CreateTaskModal({ data, currentUser, onClose, onCreate }) {
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [audience, setAudience] = useState('specific');
+  const [assigneeId, setAssigneeId] = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const [priority, setPriority] = useState('normal');
+  const [recurrence, setRecurrence] = useState('none');
+  const [recurrenceDays, setRecurrenceDays] = useState([]);
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!title.trim() || saving) return;
+    if (audience === 'specific' && !assigneeId) return;
+    if ((recurrence === 'weekly' || recurrence === 'monthly') && recurrenceDays.length === 0) return;
+    setSaving(true);
+    const ok = await onCreate({
+      title, description, assigneeId, audience, dueDate, priority,
+      recurrence, recurrenceDays,
+    });
+    setSaving(false);
+    if (ok) onClose();
+  };
+
+  const toggleDay = (d) => {
+    setRecurrenceDays(days => days.includes(d) ? days.filter(x => x !== d) : [...days, d]);
+  };
+
+  // Sort: FOH first, then coaches, alphabetical within
+  const pickableStaff = data.users
+    .filter(u => u.id !== currentUser.id && (u.isFoh || u.isCoach))
+    .sort((a, b) => {
+      if (a.isFoh !== b.isFoh) return a.isFoh ? -1 : 1;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+
+  const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+  return (
+    <div style={styles.threadBackdrop} onClick={onClose}>
+      <div style={styles.threadSheet} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.threadHeader}>
+          <button onClick={onClose} className="salus-btn" style={styles.threadCloseBtn}>
+            <X size={20} />
+          </button>
+          <div style={styles.threadHeaderTitle}>New task</div>
+          <div style={{ width: 36 }} />
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+          <label style={styles.label}>What needs doing?</label>
+          <input
+            className="salus-input"
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="e.g. Restock towels in reformer studio"
+            style={{ width: '100%', marginBottom: 14 }}
+            autoFocus
+          />
+
+          <label style={styles.label}>Notes (optional)</label>
+          <textarea
+            className="salus-input"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Any extra detail or context"
+            rows={3}
+            style={{ width: '100%', resize: 'vertical', marginBottom: 14, fontFamily: 'inherit' }}
+          />
+
+          <label style={styles.label}>Who's it for?</label>
+          <div style={styles.audienceRow}>
+            {[
+              { val: 'specific',  label: 'One person' },
+              { val: 'all_foh',   label: 'All FOH' },
+              { val: 'all_coach', label: 'All coaches' },
+              { val: 'all_staff', label: 'Everyone' },
+            ].map(a => (
+              <button
+                key={a.val}
+                onClick={() => setAudience(a.val)}
+                className="salus-btn"
+                style={{
+                  ...styles.audiencePill,
+                  ...(audience === a.val ? styles.audiencePillActive : {}),
+                }}
+              >
+                {a.label}
+              </button>
+            ))}
+          </div>
+
+          {audience === 'specific' && (
+            <>
+              <label style={styles.label}>Pick a person</label>
+              <select
+                className="salus-input"
+                value={assigneeId}
+                onChange={(e) => setAssigneeId(e.target.value)}
+                style={{ width: '100%', marginBottom: 14, fontFamily: 'inherit' }}
+              >
+                <option value="">— Select —</option>
+                <optgroup label="FOH">
+                  {pickableStaff.filter(u => u.isFoh).map(u => (
+                    <option key={u.id} value={u.id}>{u.name}</option>
+                  ))}
+                </optgroup>
+                <optgroup label="Coaches">
+                  {pickableStaff.filter(u => u.isCoach && !u.isFoh).map(u => (
+                    <option key={u.id} value={u.id}>{u.name}</option>
+                  ))}
+                </optgroup>
+              </select>
+            </>
+          )}
+
+          <label style={styles.label}>Due date (optional)</label>
+          <input
+            className="salus-input"
+            type="date"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            style={{ width: '100%', marginBottom: 14, fontFamily: 'inherit' }}
+          />
+
+          <label style={styles.label}>Repeat</label>
+          <div style={styles.audienceRow}>
+            {[
+              { val: 'none',    label: 'Never' },
+              { val: 'daily',   label: 'Every day' },
+              { val: 'weekly',  label: 'Weekly' },
+              { val: 'monthly', label: 'Monthly' },
+            ].map(r => (
+              <button
+                key={r.val}
+                onClick={() => { setRecurrence(r.val); setRecurrenceDays([]); }}
+                className="salus-btn"
+                style={{
+                  ...styles.audiencePill,
+                  ...(recurrence === r.val ? styles.audiencePillActive : {}),
+                }}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+
+          {recurrence === 'weekly' && (
+            <div style={{ ...styles.audienceRow, marginTop: -4 }}>
+              {dayLabels.map((d, i) => {
+                const picked = recurrenceDays.includes(i);
+                return (
+                  <button
+                    key={i}
+                    onClick={() => toggleDay(i)}
+                    className="salus-btn"
+                    style={{
+                      ...styles.audiencePill,
+                      minWidth: 38, padding: '8px 0', textAlign: 'center',
+                      ...(picked ? styles.audiencePillActive : {}),
+                    }}
+                  >
+                    {d.slice(0, 1)}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {recurrence === 'monthly' && (
+            <div style={{ marginTop: -4, marginBottom: 14 }}>
+              <input
+                className="salus-input"
+                type="number"
+                min="1" max="31"
+                value={recurrenceDays[0] || ''}
+                onChange={(e) => {
+                  const n = parseInt(e.target.value, 10);
+                  setRecurrenceDays(n >= 1 && n <= 31 ? [n] : []);
+                }}
+                placeholder="Day of month (1-31)"
+                style={{ width: '100%', fontFamily: 'inherit' }}
+              />
+            </div>
+          )}
+
+          <label style={styles.label}>Priority</label>
+          <div style={styles.audienceRow}>
+            <button
+              onClick={() => setPriority('normal')}
+              className="salus-btn"
+              style={{
+                ...styles.audiencePill,
+                ...(priority === 'normal' ? styles.audiencePillActive : {}),
+              }}
+            >
+              Normal
+            </button>
+            <button
+              onClick={() => setPriority('urgent')}
+              className="salus-btn"
+              style={{
+                ...styles.audiencePill,
+                ...(priority === 'urgent' ? { background: '#c8442a', color: '#fff', borderColor: '#c8442a' } : {}),
+              }}
+            >
+              Urgent
+            </button>
+          </div>
+        </div>
+
+        <div style={styles.threadActionBar}>
+          <button
+            onClick={handleSubmit}
+            disabled={!title.trim() || (audience === 'specific' && !assigneeId) || saving}
+            className="salus-btn"
+            style={{
+              ...styles.threadClaimBtn,
+              ...((!title.trim() || (audience === 'specific' && !assigneeId) || saving) ? styles.threadClaimBtnDisabled : {}),
+            }}
+          >
+            {saving ? 'Creating…' : 'Create task'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TaskDetailModal({ task, data, currentUser, isManager, onClose, onMarkDone, onDelete }) {
+  if (!task) return null;
+  const assignee = task.assigneeId ? data.users.find(u => u.id === task.assigneeId) : null;
+  const creator = task.createdBy ? data.users.find(u => u.id === task.createdBy) : null;
+  const completer = task.completedBy ? data.users.find(u => u.id === task.completedBy) : null;
+  const isDone = task.status === 'done';
+  const audienceLabel = {
+    specific:  assignee ? `Assigned to ${assignee.name}` : 'Unassigned',
+    all_foh:   'Everyone in FOH',
+    all_coach: 'Every coach',
+    all_staff: 'Everyone at Salus',
+  }[task.audience];
+
+  // Can this user mark it done?
+  const canMarkDone = isManager
+    || task.assigneeId === currentUser.id
+    || (task.audience === 'all_foh'   && currentUser.isFoh)
+    || (task.audience === 'all_coach' && currentUser.isCoach)
+    || task.audience === 'all_staff';
+
+  return (
+    <div style={styles.threadBackdrop} onClick={onClose}>
+      <div style={styles.threadSheet} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.threadHeader}>
+          <button onClick={onClose} className="salus-btn" style={styles.threadCloseBtn}>
+            <X size={20} />
+          </button>
+          <div style={styles.threadHeaderTitle}>Task</div>
+          <div style={{ width: 36 }} />
+        </div>
+
+        <div style={styles.dayDetailHeader}>
+          {task.priority === 'urgent' && (
+            <div style={{ ...styles.dayDetailRelative, color: '#c8442a', fontWeight: 700 }}>
+              ● URGENT
+            </div>
+          )}
+          <div style={styles.dayDetailTitle}>{task.title}</div>
+          <div style={styles.dayDetailMeta}>{audienceLabel}</div>
+          {task.dueDate && (
+            <div style={{ ...styles.dayDetailMeta, marginTop: 4 }}>
+              Due {new Date(task.dueDate).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
+            </div>
+          )}
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+          {task.description && (
+            <div style={styles.taskNotes}>{task.description}</div>
+          )}
+          <div style={styles.taskCreatedBy}>
+            Created by {creator ? creator.name : 'someone'} · {new Date(task.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+          </div>
+          {isDone && (
+            <div style={styles.taskCompletedBy}>
+              ✓ Marked done by {completer ? completer.name : 'someone'} · {task.completedAt ? new Date(task.completedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}
+            </div>
+          )}
+        </div>
+
+        <div style={styles.threadActionBar}>
+          {canMarkDone && (
+            <button
+              onClick={() => { onMarkDone(task.id, !isDone); onClose(); }}
+              className="salus-btn"
+              style={isDone ? styles.btnGhost : styles.threadClaimBtn}
+            >
+              {isDone ? 'Mark not done' : 'Mark done'}
+            </button>
+          )}
+          {isManager && (
+            <button
+              onClick={() => {
+                if (confirm('Delete this task? It can\'t be undone.')) {
+                  onDelete(task.id);
+                  onClose();
+                }
+              }}
+              className="salus-btn"
+              style={{ ...styles.btnGhost, color: '#c8442a' }}
+            >
+              <Trash2 size={14} /> Delete
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TeamDirectoryModal({ data, currentUser, onClose, onMessageInChat }) {
   // Group: manager first, then permanent coaches, then cover coaches
   const sorted = [...data.users].sort((a, b) => {
@@ -5193,6 +8147,24 @@ const styles = {
   holidayEmpty: {
     padding: 20, textAlign: 'center', color: '#a8a895',
     fontSize: 13, fontStyle: 'italic',
+  },
+  invoicePresetRow: {
+    display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14,
+  },
+  invoicePresetPill: {
+    background: '#fff', border: '1px solid #ebe3cf', color: '#5c4a38',
+    padding: '7px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600,
+    fontFamily: 'inherit', cursor: 'pointer',
+  },
+  invoicePresetPillActive: {
+    background: '#5c4a38', color: '#fff', borderColor: '#5c4a38',
+  },
+  invoiceDateRow: {
+    display: 'flex', gap: 12, marginBottom: 20,
+  },
+  invoiceDateInput: {
+    width: '100%', fontFamily: 'inherit', fontSize: 14,
+    padding: '10px 12px',
   },
   invoiceList: {
     display: 'flex', flexDirection: 'column', gap: 8,
@@ -5630,6 +8602,398 @@ const styles = {
   transferCoachRowActive: {
     background: '#fef0ea', borderColor: '#5c4a38', borderWidth: 2,
   },
+
+  // ─── FOH SCHEDULE ───
+  viewToggleRow: {
+    display: 'flex', gap: 6, padding: '12px 14px 0',
+    background: '#fff', borderBottom: '1px solid #ebe3cf',
+  },
+  viewToggleBtn: {
+    flex: 1, padding: '10px 12px', borderRadius: 999,
+    background: 'transparent', border: '1px solid #ebe3cf',
+    fontSize: 13, fontWeight: 600, color: '#7a8270',
+    fontFamily: 'inherit', cursor: 'pointer',
+  },
+  viewToggleBtnActive: {
+    background: '#5c4a38', color: '#fff', borderColor: '#5c4a38',
+  },
+  fohStatsRow: {
+    display: 'flex', gap: 8, padding: '12px 14px',
+    background: '#fff', borderBottom: '1px solid #ebe3cf',
+  },
+  fohStat: {
+    flex: 1, background: '#fffdf7', borderRadius: 10,
+    padding: '10px 8px', textAlign: 'center', border: '1px solid #efe7d2',
+  },
+  fohStatNumber: { fontSize: 22, fontWeight: 700, color: '#5c4a38', lineHeight: 1 },
+  fohStatLabel: { fontSize: 10, color: '#7a8270', fontWeight: 600, marginTop: 4, textTransform: 'uppercase', letterSpacing: 0.4 },
+  fohDayBlock: { padding: '14px 14px 0' },
+  fohDayHeader: {
+    display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8,
+    padding: '6px 10px', borderRadius: 8, background: '#fffdf7',
+  },
+  fohDayHeaderToday: { background: '#fef0ea' },
+  fohDayName: { fontSize: 13, fontWeight: 700, color: '#5c4a38' },
+  fohDayDate: { fontSize: 12, color: '#7a8270' },
+  fohTodayBadge: {
+    background: '#c8442a', color: '#fff', fontSize: 9, fontWeight: 700,
+    padding: '2px 6px', borderRadius: 4, textTransform: 'uppercase', letterSpacing: 0.4,
+    marginLeft: 'auto',
+  },
+  fohShiftList: { display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 6 },
+  fohShiftCard: {
+    display: 'flex', alignItems: 'center', gap: 12,
+    padding: '10px 12px', borderRadius: 10,
+    background: '#fffdf7', border: '1px solid #efe7d2',
+    fontFamily: 'inherit', cursor: 'pointer', width: '100%',
+  },
+  fohShiftCardOpen: {
+    background: '#fef0ea', borderColor: '#e8b8a8', borderStyle: 'dashed',
+  },
+  fohShiftCardMine: {
+    background: '#f3f5ed', borderColor: '#7a8c5c', borderWidth: 2,
+  },
+  fohShiftTimes: { display: 'flex', flexDirection: 'column', minWidth: 88, gap: 2 },
+  fohShiftLabel: { fontSize: 12, fontWeight: 700, color: '#5c4a38', textTransform: 'uppercase', letterSpacing: 0.4 },
+  fohShiftHours: { fontSize: 11, color: '#7a8270' },
+  fohShiftStaff: { display: 'flex', alignItems: 'center', gap: 8, flex: 1 },
+  fohShiftStaffName: { fontSize: 13, color: '#1a2620', fontWeight: 500 },
+  fohShiftOpen: { fontSize: 12, color: '#c8442a', fontStyle: 'italic' },
+
+  // ─── ROLE PICKER ───
+  rolePickerWrap: {
+    minHeight: '100vh', background: '#f5f1e8',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    padding: 20, fontFamily: 'Geist, sans-serif',
+  },
+  rolePickerCard: {
+    width: '100%', maxWidth: 440,
+    background: '#fffdf7', borderRadius: 16,
+    padding: 28, border: '1px solid #efe7d2',
+    boxShadow: '0 8px 32px rgba(92, 74, 56, 0.08)',
+  },
+  rolePickerHeader: { textAlign: 'left' },
+  rolePickerEyebrow: {
+    fontSize: 11, fontWeight: 700, color: '#7a8270',
+    textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 8,
+  },
+  rolePickerTitle: {
+    fontFamily: '"Fraunces", Georgia, serif', fontSize: 24, lineHeight: 1.25,
+    color: '#5c4a38', margin: 0,
+  },
+  rolePickerSubtitle: {
+    fontSize: 13, color: '#7a8270', marginTop: 8, marginBottom: 0, lineHeight: 1.5,
+  },
+  rolePickerOption: {
+    display: 'flex', alignItems: 'center', gap: 14,
+    padding: 14, borderRadius: 12,
+    background: '#fffdf7', border: '1px solid #efe7d2',
+    fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left',
+  },
+  rolePickerOptionActive: {
+    background: '#fef7e8', borderColor: '#5c4a38', borderWidth: 2,
+  },
+  rolePickerOptionIcon: {
+    width: 44, height: 44, borderRadius: '50%', background: '#f5f1e8',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: 22, flexShrink: 0,
+  },
+  rolePickerOptionTitle: { fontSize: 15, fontWeight: 700, color: '#1a2620' },
+  rolePickerOptionDesc: { fontSize: 12, color: '#7a8270', marginTop: 3, lineHeight: 1.4 },
+  rolePickerCheckbox: {
+    width: 24, height: 24, borderRadius: 6,
+    border: '1.5px solid #ebe3cf', flexShrink: 0,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  },
+  rolePickerCheckboxActive: { background: '#5c4a38', borderColor: '#5c4a38' },
+  rolePickerContinue: {
+    width: '100%', padding: '14px 16px', marginTop: 20,
+    background: '#5c4a38', color: '#fff', border: 'none', borderRadius: 10,
+    fontFamily: 'inherit', fontSize: 15, fontWeight: 600, cursor: 'pointer',
+  },
+  rolePickerContinueDisabled: { background: '#c4b8a0', cursor: 'default' },
+  rolePickerSignOut: {
+    width: '100%', padding: '10px 16px', marginTop: 8,
+    background: 'transparent', color: '#7a8270', border: 'none',
+    fontFamily: 'inherit', fontSize: 12, cursor: 'pointer',
+  },
+
+  // ─── TASKS ───
+  tasksCountBadge: {
+    background: '#5c4a38', color: '#fff', fontSize: 11, fontWeight: 700,
+    padding: '2px 8px', borderRadius: 999, marginLeft: 8,
+  },
+  tasksEmpty: {
+    padding: '14px', textAlign: 'center', fontSize: 12, color: '#7a8270',
+    background: '#fffdf7', borderRadius: 10, border: '1px dashed #ebe3cf',
+  },
+  tasksList: { display: 'flex', flexDirection: 'column', gap: 6 },
+  taskCard: {
+    display: 'flex', alignItems: 'center', gap: 10,
+    padding: '10px 12px', borderRadius: 10,
+    background: '#fffdf7', border: '1px solid #efe7d2',
+    fontFamily: 'inherit', cursor: 'pointer', width: '100%',
+  },
+  taskCardUrgent: { borderColor: '#e8b8a8', borderLeftWidth: 4, borderLeftColor: '#c8442a' },
+  taskCardTitle: { fontSize: 13, fontWeight: 600, color: '#1a2620', lineHeight: 1.35 },
+  taskCardMeta: { fontSize: 11, color: '#7a8270', marginTop: 3, display: 'flex', gap: 4, flexWrap: 'wrap' },
+  taskUrgentDot: { color: '#c8442a', marginRight: 5, fontSize: 10 },
+  tasksCreateBtn: {
+    width: '100%', padding: '10px 14px', marginTop: 10,
+    background: 'transparent', border: '1px dashed #c4b8a0', borderRadius: 10,
+    color: '#5c4a38', fontSize: 13, fontWeight: 600, fontFamily: 'inherit',
+    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+  },
+  audienceRow: { display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 },
+  audiencePill: {
+    background: '#fff', border: '1px solid #ebe3cf', color: '#5c4a38',
+    padding: '8px 13px', borderRadius: 999, fontSize: 12, fontWeight: 600,
+    fontFamily: 'inherit', cursor: 'pointer',
+  },
+  audiencePillActive: { background: '#5c4a38', color: '#fff', borderColor: '#5c4a38' },
+  taskNotes: {
+    background: '#fffdf7', padding: 14, borderRadius: 10,
+    border: '1px solid #efe7d2', fontSize: 13, color: '#1a2620',
+    whiteSpace: 'pre-wrap', lineHeight: 1.5, marginBottom: 14,
+  },
+  taskCreatedBy: { fontSize: 11, color: '#7a8270', marginTop: 8 },
+  taskCompletedBy: { fontSize: 12, color: '#5c8a5a', marginTop: 8, fontWeight: 600 },
+
+  // ─── URGENT BROADCAST ───
+  urgentBroadcastBtn: {
+    width: 40, height: 40, borderRadius: 8,
+    background: '#fef0ea', border: '1px solid #e8b8a8',
+    color: '#c8442a', cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    flexShrink: 0,
+  },
+  messageBubbleUrgent: {
+    background: '#fef0ea',
+    border: '2px solid #c8442a',
+    borderRadius: 12,
+    padding: '10px 12px 10px 12px',
+  },
+  urgentBanner: {
+    display: 'inline-flex', alignItems: 'center', gap: 4,
+    background: '#c8442a', color: '#fff',
+    fontSize: 10, fontWeight: 700, padding: '3px 8px',
+    borderRadius: 4, marginBottom: 6,
+    textTransform: 'uppercase', letterSpacing: 0.6,
+  },
+
+  // ─── ONBOARDING ───
+  onbDots: {
+    display: 'flex', gap: 5, justifyContent: 'center', marginBottom: 20,
+  },
+  onbDot: {
+    width: 6, height: 6, borderRadius: '50%', background: '#e8e0cc',
+  },
+  onbDotActive: { background: '#5c4a38' },
+  onbPolicyList: {
+    margin: '14px 0', paddingLeft: 18, fontSize: 13, lineHeight: 1.6, color: '#2a3028',
+  },
+  onbPolicyItem: { marginBottom: 5 },
+  onbSkipBtn: {
+    width: '100%', padding: '10px', background: 'transparent',
+    border: '1px solid #ebe3cf', borderRadius: 10,
+    color: '#7a8270', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
+  },
+  onbBackBtn: {
+    width: '100%', padding: '8px', background: 'transparent', border: 'none',
+    color: '#7a8270', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
+  },
+
+  // ─── GAMIFIED STATS ───
+  statsCard: { padding: '4px 0' },
+  statsHeaderRow: {
+    display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+    padding: '14px 16px', background: '#fffdf7',
+    border: '1px solid #efe7d2', borderRadius: 12,
+  },
+  statsEyebrow: { fontSize: 10, color: '#7a8270', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' },
+  statsBigNumber: {
+    fontFamily: '"Fraunces", Georgia, serif', fontSize: 32, color: '#5c4a38',
+    marginTop: 4, lineHeight: 1,
+  },
+  statsSubLine: { fontSize: 12, color: '#7a8270', marginTop: 6 },
+  statsStreak: {
+    background: '#fef0ea', border: '1px solid #f3c8b5',
+    borderRadius: 12, padding: '10px 12px', textAlign: 'center', minWidth: 78,
+  },
+  statsStreakNum: { fontFamily: '"Fraunces", serif', fontSize: 26, color: '#c8442a', lineHeight: 1 },
+  statsStreakLabel: { fontSize: 9, color: '#7a8270', marginTop: 6, lineHeight: 1.3, fontWeight: 600 },
+  statsTilesRow: { display: 'flex', gap: 6, marginTop: 8 },
+  statsMiniTile: {
+    flex: 1, background: '#fffdf7', border: '1px solid #efe7d2', borderRadius: 10,
+    padding: '10px 6px', textAlign: 'center',
+  },
+  statsMiniNum: { fontSize: 17, fontWeight: 700, color: '#5c4a38' },
+  statsMiniLabel: { fontSize: 9, color: '#7a8270', marginTop: 3, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4 },
+  statsNext: {
+    background: '#fffdf7', border: '1px solid #efe7d2', borderRadius: 12,
+    padding: 12, marginTop: 8,
+  },
+  statsNextHeader: { display: 'flex', alignItems: 'center', marginBottom: 8 },
+  statsNextName: { fontSize: 13, fontWeight: 600, color: '#5c4a38', flex: 1 },
+  statsNextPct: { fontSize: 12, fontWeight: 700, color: '#7a8270' },
+  statsNextBar: {
+    height: 8, background: '#f0eee4', borderRadius: 999, overflow: 'hidden',
+  },
+  statsNextBarFill: {
+    height: '100%', background: 'linear-gradient(90deg, #7a8c5c, #5c4a38)',
+    borderRadius: 999, transition: 'width 300ms',
+  },
+  statsNextHint: { fontSize: 10, color: '#7a8270', marginTop: 6, fontStyle: 'italic' },
+  statsBadgesLabel: {
+    fontSize: 11, fontWeight: 700, color: '#7a8270',
+    letterSpacing: 0.8, textTransform: 'uppercase', marginTop: 14, marginBottom: 6,
+  },
+  statsBadgesGrid: {
+    display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6,
+  },
+  statsBadge: {
+    background: '#fffdf7', borderRadius: 10, padding: '10px 4px',
+    textAlign: 'center', border: '1px solid #efe7d2',
+  },
+  statsBadgeUnlocked: {
+    background: '#fef7e8', borderColor: '#d4b87a',
+  },
+  statsBadgeLocked: { background: '#f6f1e3', opacity: 0.85 },
+  statsBadgeName: { fontSize: 9, color: '#5c4a38', marginTop: 4, fontWeight: 600, lineHeight: 1.2 },
+
+  // ─── FLOWS ───
+  flowsContainer: {
+    paddingBottom: 80, background: '#f5f1e8', minHeight: '100%',
+  },
+  flowsHero: {
+    display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
+    padding: '24px 18px 14px',
+    background: 'linear-gradient(180deg, #fef7e8 0%, #f5f1e8 100%)',
+  },
+  flowsEyebrow: {
+    fontSize: 10, color: '#7a8270', fontWeight: 700,
+    textTransform: 'uppercase', letterSpacing: 1.2,
+  },
+  flowsTitle: {
+    fontFamily: '"Fraunces", Georgia, serif',
+    fontSize: 32, color: '#5c4a38', lineHeight: 1, marginTop: 4,
+  },
+  flowsSubtitle: { fontSize: 12, color: '#7a8270', marginTop: 6, fontStyle: 'italic' },
+  flowsCreateBtn: {
+    width: 44, height: 44, borderRadius: '50%',
+    background: '#5c4a38', color: '#fff', border: 'none',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    boxShadow: '0 4px 12px rgba(92,74,56,0.25)', cursor: 'pointer',
+    fontFamily: 'inherit', flexShrink: 0,
+  },
+  flowsFilterRow: {
+    display: 'flex', gap: 6, padding: '0 14px 12px', overflowX: 'auto',
+    WebkitOverflowScrolling: 'touch',
+  },
+  flowsFilterPill: {
+    flexShrink: 0, padding: '7px 13px', borderRadius: 999,
+    background: '#fffdf7', border: '1px solid #ebe3cf',
+    color: '#5c4a38', fontSize: 12, fontWeight: 600,
+    fontFamily: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap',
+  },
+  flowsFilterPillActive: {
+    background: '#5c4a38', color: '#fff', borderColor: '#5c4a38',
+  },
+  flowsList: { padding: '0 14px', display: 'flex', flexDirection: 'column', gap: 12 },
+  flowsEmpty: {
+    margin: '24px 16px', padding: '40px 24px',
+    background: '#fffdf7', border: '1px dashed #ebe3cf', borderRadius: 16,
+    textAlign: 'center',
+  },
+  flowsEmptyIcon: { fontSize: 38, marginBottom: 8 },
+  flowsEmptyTitle: { fontFamily: '"Fraunces", serif', fontSize: 18, color: '#5c4a38' },
+  flowsEmptySub: { fontSize: 12, color: '#7a8270', marginTop: 6, lineHeight: 1.4 },
+  flowsEmptyBtn: {
+    marginTop: 14, padding: '10px 16px', borderRadius: 999,
+    background: '#5c4a38', color: '#fff', border: 'none',
+    fontSize: 12, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
+    display: 'inline-flex', alignItems: 'center', gap: 6,
+  },
+  postCard: {
+    background: '#fffdf7', borderRadius: 14, padding: 14,
+    border: '1px solid #efe7d2',
+  },
+  postHeader: {
+    display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, cursor: 'pointer',
+  },
+  postAuthor: { fontSize: 13, fontWeight: 600, color: '#1a2620' },
+  postTime: { fontSize: 11, color: '#7a8270', marginTop: 1 },
+  postTypeBadge: {
+    display: 'inline-flex', alignItems: 'center', gap: 4,
+    fontSize: 10, fontWeight: 700, padding: '4px 8px',
+    borderRadius: 999, textTransform: 'uppercase', letterSpacing: 0.6,
+  },
+  postTitle: {
+    fontFamily: '"Fraunces", Georgia, serif', fontSize: 17,
+    color: '#1a2620', lineHeight: 1.25,
+  },
+  postDesc: {
+    fontSize: 13, color: '#2a3028', lineHeight: 1.55, marginTop: 6,
+    whiteSpace: 'pre-wrap',
+  },
+  postVideoLink: {
+    display: 'inline-flex', alignItems: 'center', gap: 6,
+    marginTop: 10, padding: '7px 12px',
+    background: '#fef0ea', border: '1px solid #f3c8b5',
+    borderRadius: 999, fontSize: 12, fontWeight: 600,
+    color: '#c8442a', textDecoration: 'none',
+  },
+  postTags: {
+    display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 10,
+  },
+  postTag: {
+    fontSize: 11, color: '#7a8c5c', fontWeight: 600,
+    background: '#f3f5ed', padding: '2px 8px', borderRadius: 4,
+  },
+  postReactionsRow: {
+    display: 'flex', gap: 5, marginTop: 12,
+    flexWrap: 'wrap', alignItems: 'center',
+  },
+  postReactionPill: {
+    display: 'inline-flex', alignItems: 'center', gap: 4,
+    padding: '5px 10px', borderRadius: 999,
+    background: '#f5f1e8', border: '1px solid transparent',
+    fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
+    transition: 'all 120ms',
+  },
+  postReactionPillActive: {
+    background: '#fef7e8', border: '1px solid #d4b87a',
+  },
+  postReactionPillDim: { opacity: 0.6 },
+  postReactionCount: { fontSize: 11, fontWeight: 700, color: '#5c4a38' },
+  postCommentBtn: {
+    display: 'inline-flex', alignItems: 'center',
+    padding: '5px 10px', borderRadius: 999,
+    background: 'transparent', border: 'none',
+    color: '#7a8270', fontSize: 12, cursor: 'pointer',
+    fontFamily: 'inherit', marginLeft: 'auto',
+  },
+  postDetailTitle: {
+    fontFamily: '"Fraunces", Georgia, serif', fontSize: 22,
+    color: '#1a2620', lineHeight: 1.25, margin: '4px 0 10px',
+  },
+  postDetailDesc: {
+    fontSize: 14, color: '#2a3028', lineHeight: 1.65,
+    whiteSpace: 'pre-wrap',
+  },
+  commentsLabel: {
+    fontSize: 11, fontWeight: 700, color: '#7a8270',
+    textTransform: 'uppercase', letterSpacing: 0.8,
+    marginBottom: 10, paddingTop: 14, borderTop: '1px solid #efe7d2',
+  },
+  commentRow: {
+    display: 'flex', gap: 10, padding: '10px 0',
+    borderBottom: '1px solid #f4ecd8',
+  },
+  commentHeader: { display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 2 },
+  commentAuthor: { fontSize: 12, fontWeight: 600, color: '#1a2620' },
+  commentTime: { fontSize: 10, color: '#a59478' },
+  commentText: { fontSize: 13, color: '#1a2620', lineHeight: 1.45 },
 
   // ─── COVER THREAD MODAL ends ───
 
