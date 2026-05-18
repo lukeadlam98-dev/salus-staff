@@ -1199,7 +1199,7 @@ export default function SalusStaff() {
               }
             }}
             onRequestCover={() => setModal({ type: 'pickClassToRequestCover' })}
-            onHireStudio={() => setModal({ type: 'hireStudio' })}
+            onHireStudio={() => { setTab('bookings'); setModal({ type: 'createBooking' }); }}
             onClaim={(req) => setModal({ type: 'coverThread', coverRequestId: req.id })}
             onExpressInterest={expressInterest}
             onViewAllCover={() => setTab('cover')}
@@ -8336,7 +8336,6 @@ function TasksTile({ data, currentUser, isManager, onCreate, onOpenTask }) {
     : tasksForUser(allOpen, currentUser);
 
   const sorted = [...relevant].sort((a, b) => {
-    // Urgent first, then by due date, then by created
     if (a.priority !== b.priority) return a.priority === 'urgent' ? -1 : 1;
     if (a.dueDate && b.dueDate) return a.dueDate.localeCompare(b.dueDate);
     if (a.dueDate) return -1;
@@ -8344,57 +8343,47 @@ function TasksTile({ data, currentUser, isManager, onCreate, onOpenTask }) {
     return b.createdAt - a.createdAt;
   });
 
-  return (
-    <section style={styles.homeSection}>
-      <div style={styles.homeSectionHead}>
-        <button
-          onClick={() => setOpen(o => !o)}
-          className="salus-btn"
-          style={styles.homeSectionToggle}
-        >
-          <span style={styles.homeSectionTitle}>Tasks</span>
-          {sorted.length > 0 && (
-            <span style={styles.tasksCountBadge}>{sorted.length}</span>
-          )}
-          <ChevronRight
-            size={16}
-            color="#a59478"
-            style={{ marginLeft: 'auto', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 150ms' }}
-          />
-        </button>
-      </div>
+  const hasUrgent = sorted.some(t => t.priority === 'urgent');
+  const summary = sorted.length === 0
+    ? (isManager ? 'No open tasks' : 'Nothing to do')
+    : sorted.length === 1
+      ? sorted[0].title
+      : `${sorted.length} open · ${sorted[0].title}`;
 
-      {open && (
-        <div style={{ padding: '0 14px 4px' }}>
-          {sorted.length === 0 ? (
-            <div style={styles.tasksEmpty}>
-              {isManager ? 'No open tasks. Create one below.' : 'No tasks assigned to you.'}
-            </div>
-          ) : (
-            <div style={styles.tasksList}>
-              {sorted.map(t => (
-                <TaskCard
-                  key={t.id}
-                  task={t}
-                  data={data}
-                  currentUser={currentUser}
-                  onOpen={() => onOpenTask(t.id)}
-                />
-              ))}
-            </div>
-          )}
-          {isManager && (
-            <button
-              onClick={onCreate}
-              className="salus-btn"
-              style={styles.tasksCreateBtn}
-            >
-              <Plus size={16} /> New task or reminder
-            </button>
-          )}
+  return (
+    <HomeTile
+      title="Tasks"
+      count={sorted.length}
+      summary={summary}
+      open={open}
+      onToggle={() => setOpen(o => !o)}
+      urgent={hasUrgent}
+    >
+      {sorted.length === 0 ? (
+        <div style={{ ...styles.homeEmptyCover, padding: '18px 14px' }}>
+          <div style={{ fontSize: 12, color: '#7a8270' }}>
+            {isManager ? 'No open tasks. Create one below.' : 'No tasks assigned to you.'}
+          </div>
+        </div>
+      ) : (
+        <div style={styles.tasksList}>
+          {sorted.map(t => (
+            <TaskCard
+              key={t.id}
+              task={t}
+              data={data}
+              currentUser={currentUser}
+              onOpen={() => onOpenTask(t.id)}
+            />
+          ))}
         </div>
       )}
-    </section>
+      {isManager && (
+        <button onClick={onCreate} className="salus-btn" style={styles.tasksCreateBtn}>
+          <Plus size={16} /> New task or reminder
+        </button>
+      )}
+    </HomeTile>
   );
 }
 
