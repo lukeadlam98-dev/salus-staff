@@ -379,6 +379,24 @@ export default function SalusStaff() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user?.id]);
 
+  // Tour sync: pull from Google Calendar via /api/sync-tours.
+  // Triggers on app load + every 5 min while open. Realtime channel above
+  // automatically refreshes the UI once new tours land in Supabase.
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    const trigger = async () => {
+      try {
+        await fetch('/api/sync-tours', { method: 'GET' });
+      } catch (err) {
+        // Silent — sync is best-effort; if it fails we just show whatever's already in DB
+      }
+    };
+    trigger();
+    const id = setInterval(() => { if (!cancelled) trigger(); }, 5 * 60 * 1000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [session?.user?.id]);
+
   // Lock body scrolling when chat is active — chat has its own contained scroll.
   // Prevents the iOS rubber-band effect on the background.
   // MUST be before any early returns (React rules of hooks).
@@ -8885,9 +8903,19 @@ function tasksForUser(allTasks, user) {
 
 function ToursTile({ data, currentUser, onOpenTour }) {
   const [open, setOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const now = Date.now();
   const todayStart = (() => { const d = new Date(); d.setHours(0,0,0,0); return d.getTime(); })();
   const tomorrowEnd = todayStart + 2 * 86400 * 1000;
+
+  const manualSync = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      await fetch('/api/sync-tours', { method: 'GET' });
+    } catch {}
+    setTimeout(() => setSyncing(false), 1500);
+  };
 
   // Show today + tomorrow's tours, scheduled only
   const upcoming = data.tours
@@ -8914,7 +8942,12 @@ function ToursTile({ data, currentUser, onOpenTour }) {
       {upcoming.length === 0 ? (
         <div style={{ ...styles.homeEmptyCover, padding: '18px 14px' }}>
           <div style={{ fontSize: 12, color: '#7a8270' }}>No tours scheduled in the next 48 hours.</div>
-          <div style={{ fontSize: 11, color: '#a59478', marginTop: 4 }}>Tours sync from your Google Calendar every 15 min.</div>
+          <button onClick={manualSync} disabled={syncing} className="salus-btn" style={{
+            ...styles.btnGhost, marginTop: 8, fontSize: 11,
+            opacity: syncing ? 0.5 : 1,
+          }}>
+            {syncing ? 'Refreshing…' : 'Refresh from Google Calendar'}
+          </button>
         </div>
       ) : (
         <div style={styles.tasksList}>
@@ -8930,6 +8963,12 @@ function ToursTile({ data, currentUser, onOpenTour }) {
               {tomorrows.map(t => <TourCard key={t.id} tour={t} onOpen={() => onOpenTour(t.id)} />)}
             </>
           )}
+          <button onClick={manualSync} disabled={syncing} className="salus-btn" style={{
+            ...styles.btnGhost, margin: '8px auto 0', display: 'block',
+            fontSize: 11, opacity: syncing ? 0.5 : 1,
+          }}>
+            {syncing ? 'Refreshing…' : '↻ Refresh from Google'}
+          </button>
         </div>
       )}
     </HomeTile>
