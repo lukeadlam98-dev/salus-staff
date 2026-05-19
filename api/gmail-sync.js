@@ -2,22 +2,18 @@
 // Fetches recent emails from Gmail, classifies any new ones via Claude Haiku 4.5,
 // stores everything in email_classifications, and returns the full sorted list.
 //
-// Usage: GET /api/gmail-sync?token=<supabase_jwt>
-// Returns: { messages: [{ id, gmail_id, email_*, category, summary, urgency, suggested_action, handled_at }], newly_classified: N }
+// Usage:
+//   GET /api/gmail-sync?token=<supabase_jwt>           — last 30 messages
+//   GET /api/gmail-sync?token=...&after=YYYY-MM-DD&before=YYYY-MM-DD  — date range backfill
 
 import { createClient } from '@supabase/supabase-js';
 
-// ─── Categories the model is allowed to use ───
-const CATEGORIES = [
-  'cancellation', 'refund', 'inquiry', 'tour', 'complaint',
-  'newsletter', 'internal', 'other',
-];
+const CATEGORIES = ['cancellation', 'refund', 'inquiry', 'tour', 'complaint', 'newsletter', 'internal', 'other'];
 const URGENCIES = ['high', 'normal', 'low'];
 
 export default async function handler(req, res) {
   const { token } = req.query;
   if (!token) return res.status(401).json({ error: 'Missing token' });
-
   if (!process.env.ANTHROPIC_API_KEY) {
     return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
   }
@@ -28,11 +24,9 @@ export default async function handler(req, res) {
     { auth: { persistSession: false } }
   );
 
-  // ─── Validate Supabase JWT ───
   const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
   if (authErr || !user) return res.status(401).json({ error: 'Invalid token' });
 
-  // ─── Get the user's Gmail integration ───
   const { data: integration, error: intErr } = await supabase
     .from('email_integrations')
     .select('*')
@@ -43,37 +37,33 @@ export default async function handler(req, res) {
   if (intErr) return res.status(500).json({ error: intErr.message });
   if (!integration) return res.status(404).json({ error: 'No Gmail integration found' });
 
-  // ─── Refresh access token if expired ───
+  // Refresh access token if expired
   let accessToken = integration.access_token;
   const expiryMs = integration.token_expiry ? new Date(integration.token_expiry).getTime() : 0;
   if (Date.now() >= expiryMs - 60_000) {
     if (!integration.refresh_token) {
       return res.status(401).json({ error: 'Token expired. Reconnect Gmail.' });
     }
-    try {
-      const refreshRes = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          refresh_token: integration.refresh_token,
-          client_id: process.env.GOOGLE_CLIENT_ID,
-          client_secret: process.env.GOOGLE_CLIENT_SECRET,
-          grant_type: 'refresh_token',
-        }).toString(),
-      });
-      if (!refreshRes.ok) return res.status(500).json({ error: 'Token refresh failed' });
-      const newTokens = await refreshRes.json();
-      accessToken = newTokens.access_token;
-      await supabase.from('email_integrations').update({
-        access_token: accessToken,
-        token_expiry: new Date(Date.now() + (newTokens.expires_in || 3600) * 1000).toISOString(),
-      }).eq('id', integration.id);
-    } catch (err) {
-      return res.status(500).json({ error: 'Refresh threw: ' + String(err?.message || err) });
-    }
+    const refreshRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        refresh_token: integration.refresh_token,
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        grant_type: 'refresh_token',
+      }).toString(),
+    });
+    if (!refreshRes.ok) return res.status(500).json({ error: 'Token refresh failed' });
+    const newTokens = await refreshRes.json();
+    accessToken = newTokens.access_token;
+    await supabase.from('email_integrations').update({
+      access_token: accessToken,
+      token_expiry: new Date(Date.now() + (newTokens.expires_in || 3600) * 1000).toISOString(),
+    }).eq('id', integration.id);
   }
 
-  // ─── List recent message IDs (or by date range if provided) ───
+  // List recent message IDs (optionally by date range)
   let gmailIds = [];
   const { after, before } = req.query;
   try {
@@ -95,22 +85,22 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Gmail list threw: ' + String(err?.message || err) });
   }
 
-  // ─── Find which IDs are already classified ───
+  // Find which IDs are already classified
   const { data: existing } = await supabase
     .from('email_classifications')
     .select('gmail_id')
     .eq('user_id', user.id)
     .in('gmail_id', gmailIds);
-
   const existingIds = new Set((existing || []).map(c => c.gmail_id));
   const newIds = gmailIds.filter(id => !existingIds.has(id));
 
-  // ─── For each new email: fetch metadata + classify ───
+  // Fetch FULL message (with body) + classify
   const toInsert = [];
   for (const id of newIds) {
     try {
+      // format=full gives us the full body, not just snippet
       const msgRes = await fetch(
-        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`,
         { headers: { Authorization: `Bearer ${accessToken}` } }
       );
       if (!msgRes.ok) continue;
@@ -123,12 +113,14 @@ export default async function handler(req, res) {
       const emailSubject = headers['Subject'] || '';
       const emailSnippet = msg.snippet || '';
       const emailDate = headers['Date'] || '';
+      const emailBody = extractBodyText(msg.payload).slice(0, 2000); // first 2000 chars
 
-      // Classify via Claude — fall back to 'other' if it fails
       let classification;
       try {
         classification = await classifyEmail({
-          from: emailFrom, subject: emailSubject, snippet: emailSnippet,
+          from: emailFrom,
+          subject: emailSubject,
+          body: emailBody || emailSnippet, // fallback if body extraction fails
         });
       } catch (e) {
         console.error('Classify failed:', e?.message || e);
@@ -159,7 +151,6 @@ export default async function handler(req, res) {
     }
   }
 
-  // ─── Bulk insert new classifications ───
   if (toInsert.length > 0) {
     const { error: insErr } = await supabase
       .from('email_classifications')
@@ -167,13 +158,11 @@ export default async function handler(req, res) {
     if (insErr) console.error('Insert error:', insErr);
   }
 
-  // ─── Update last_synced_at ───
   await supabase
     .from('email_integrations')
     .update({ last_synced_at: new Date().toISOString() })
     .eq('id', integration.id);
 
-  // ─── Return ALL classifications for this user, newest first ───
   const { data: allMessages, error: selErr } = await supabase
     .from('email_classifications')
     .select('*')
@@ -189,37 +178,96 @@ export default async function handler(req, res) {
   });
 }
 
-// ─── Claude Haiku 4.5 classifier ───
-async function classifyEmail({ from, subject, snippet }) {
-  const prompt = `You are classifying emails for the staff of Salus House, a small Pilates / reformer studio in Sidcup, UK.
-
-Categorise this email into ONE of these categories:
-- cancellation: member wants to cancel their membership or a class booking
-- refund: member asking about a refund, payment issue, or billing dispute
-- inquiry: member or prospective member asking questions (classes, prices, schedules, info)
-- tour: someone wants to book a tour or visit the studio
-- complaint: member unhappy about a class, instructor, facility, or service
-- newsletter: marketing, promotional, or automated email
-- internal: from staff, system notifications, or admin
-- other: anything else not above
-
-Reply with ONLY a JSON object (no other text, no markdown fences):
-{
-  "category": "<one of the categories above>",
-  "summary": "one short plain-English sentence about what they want",
-  "urgency": "high" | "normal" | "low",
-  "suggested_action": "concise next step for staff, ideally under 10 words"
+// ─── Extract plain-text body from a Gmail message payload ───
+function extractBodyText(payload) {
+  if (!payload) return '';
+  if (payload.body?.data) return decodeB64Url(payload.body.data);
+  const plain = findPartByMime(payload, 'text/plain');
+  if (plain) return decodeB64Url(plain);
+  const html = findPartByMime(payload, 'text/html');
+  if (html) return stripHtml(decodeB64Url(html));
+  return '';
 }
 
-Urgency rules:
-- "high" if they're frustrated, threatening to leave, time-sensitive, or money-related
-- "low" for newsletters, general info requests
-- "normal" otherwise
+function findPartByMime(part, mimeType) {
+  if (!part) return null;
+  if (part.mimeType === mimeType && part.body?.data) return part.body.data;
+  if (part.parts) {
+    for (const p of part.parts) {
+      const found = findPartByMime(p, mimeType);
+      if (found) return found;
+    }
+  }
+  return null;
+}
 
-EMAIL TO CLASSIFY:
+function decodeB64Url(data) {
+  try {
+    const normalized = data.replace(/-/g, '+').replace(/_/g, '/');
+    return Buffer.from(normalized, 'base64').toString('utf-8');
+  } catch { return ''; }
+}
+
+function stripHtml(html) {
+  return String(html)
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// ─── Claude Haiku 4.5 classifier — improved prompt with synonyms ───
+async function classifyEmail({ from, subject, body }) {
+  const prompt = `You're classifying emails for staff at Salus House — a small Pilates and reformer studio in Sidcup, UK. Owner is Luke Adlam.
+
+Categorise the email below into EXACTLY ONE category. Pay close attention to the SYNONYMS — members rarely use the textbook word for what they want.
+
+CATEGORIES:
+
+• cancellation — member wants to STOP, PAUSE, FREEZE, HOLD, or LEAVE their membership
+  Phrases: "cancel", "leave", "quit", "no longer", "stop", "freeze", "pause", "hold", "discontinue", "end my membership", "won't be renewing", "moving away", "won't be coming anymore"
+
+• refund — money question: refund, payment dispute, double-charge, accidental billing, overcharge
+  Phrases: "refund", "money back", "charged twice", "shouldn't have been billed", "dispute", "wrongly charged", "didn't authorise"
+
+• tour — PROSPECTIVE member wanting to VISIT the studio before joining
+  Phrases: "tour", "visit", "see the studio", "come and have a look", "look around", "show me around", "view the gym", "pop in", "drop by", "stop by", "have a look at the space", "see what you're like", "swing by", "come for a viewing"
+
+• inquiry — questions from current or prospective members (NOT cancel/refund/visit)
+  Examples: "what classes do you offer", "how much is membership", "do you do reformer for beginners", "are there parking spaces", "what time is the Saturday class"
+
+• complaint — unhappy customer expressing dissatisfaction
+  Examples: "disappointed", "the class was overcrowded", "instructor was rude", "wasn't happy with"
+
+• newsletter — marketing, promotional, or automated bulk emails (often from retailers, software vendors)
+
+• internal — staff, admin, system notifications, no-reply addresses, automated alerts
+
+• other — none of the above
+
+URGENCY:
+• high — money-related, member threatening to leave, complaints, frustrated/escalating tone
+• low — newsletters, general info, routine inquiries
+• normal — everything else
+
+REPLY FORMAT — ONLY valid JSON, no other text, no markdown fences:
+{
+  "category": "<one of: ${CATEGORIES.join(', ')}>",
+  "summary": "one short plain-English sentence about what they want",
+  "urgency": "high" | "normal" | "low",
+  "suggested_action": "concise next step for staff, under 12 words"
+}
+
+────── EMAIL ──────
 FROM: ${from}
 SUBJECT: ${subject}
-SNIPPET: ${snippet}`;
+BODY:
+${body}
+─────────────────`;
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -242,16 +290,12 @@ SNIPPET: ${snippet}`;
 
   const data = await response.json();
   const text = data.content?.[0]?.text || '';
-
-  // Pull out the JSON object even if the model wraps it in stray text
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) throw new Error('No JSON in classification response');
   const parsed = JSON.parse(match[0]);
 
-  // Validate + sanitize
   const category = CATEGORIES.includes(parsed.category) ? parsed.category : 'other';
   const urgency = URGENCIES.includes(parsed.urgency) ? parsed.urgency : 'normal';
-
   return {
     category,
     urgency,
