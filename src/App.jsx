@@ -3945,66 +3945,78 @@ function AdminInboxSection({ emailIntegration, onConnectGmail, data, currentUser
 
   return (
     <>
-      <div style={styles.adminSectionHead}>
-        <div>
-          <div style={styles.adminSectionTitle}>Inbox</div>
-          <div style={styles.adminSectionSubtitle}>
-            {emailIntegration.emailAddress}
-            {lastFetched && ` · checked ${new Date(lastFetched).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
-            {newlyClassified > 0 && ` · ${newlyClassified} newly classified`}
-          </div>
+      <div style={{ padding: '8px 0 20px' }}>
+        <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 6 }}>
+          Inbox
         </div>
-        <button onClick={syncEmails} disabled={loading} className="salus-btn" style={styles.btnGhost}>
-          <RefreshCw size={14} style={loading ? { animation: 'spin 1s linear infinite' } : {}} />
-          {loading ? 'Syncing…' : 'Sync'}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 }}>
+          <div style={{
+            fontFamily: '"Playfair Display", serif',
+            fontSize: 26, fontWeight: 400, color: '#1a2620', lineHeight: 1.15, letterSpacing: '-0.01em',
+          }}>
+            {urgentCount > 0
+              ? `${urgentCount} to action`
+              : openCount > 0
+                ? `${openCount} to review`
+                : 'Nothing pending'}
+          </div>
+          <button onClick={syncEmails} disabled={loading} className="salus-btn" style={{
+            background: 'transparent', border: 'none', padding: 4,
+            color: '#a59478', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
+            display: 'flex', alignItems: 'center', gap: 5,
+          }}>
+            <RefreshCw size={11} style={loading ? { animation: 'spin 1s linear infinite' } : {}} />
+            {loading ? 'Syncing' : 'Refresh'}
+          </button>
+        </div>
+        <div style={{ fontSize: 12, color: '#7a8270', marginTop: 6 }}>
+          {emailIntegration.emailAddress}
+          {lastFetched && ` · last checked ${new Date(lastFetched).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+        </div>
       </div>
 
-      {/* Urgent banner (only when there are urgent items) */}
-      {urgentCount > 0 && filter !== 'urgent' && (
-        <button onClick={() => setFilter('urgent')} className="salus-btn" style={{
-          width: '100%', padding: 12, marginBottom: 12,
-          background: '#fef0ec', border: '1px solid #f5dcd6', borderRadius: 12,
-          color: '#c8442a', fontSize: 13, fontWeight: 600,
-          display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
-        }}>
-          <AlertOctagon size={16} />
-          {urgentCount} urgent email{urgentCount === 1 ? '' : 's'} need{urgentCount === 1 ? 's' : ''} a reply
-          <ChevronRight size={14} style={{ marginLeft: 'auto' }} />
-        </button>
-      )}
-
-      {/* Filter chips */}
-      <div style={styles.adminTabRow}>
+      {/* Filter bar — editorial underline */}
+      <div style={{
+        display: 'flex', overflowX: 'auto', WebkitOverflowScrolling: 'touch',
+        scrollbarWidth: 'none',
+        borderBottom: '1px solid #efe7d2',
+        marginBottom: 4,
+      }}>
         <FilterChip
-          label={`Urgent · ${urgentCount}`}
+          label={`Urgent${urgentCount > 0 ? ` ${urgentCount}` : ''}`}
           active={filter === 'urgent'}
           onClick={() => setFilter('urgent')}
           accent={urgentCount > 0 ? '#c8442a' : null}
         />
-        <FilterChip label={`Open · ${openCount}`} active={filter === 'open'} onClick={() => setFilter('open')} />
-        {cancelCount > 0 && <FilterChip label={`Cancel · ${cancelCount}`} active={filter === 'cancellation'} onClick={() => setFilter('cancellation')} />}
-        {refundCount > 0 && <FilterChip label={`Refund · ${refundCount}`} active={filter === 'refund'} onClick={() => setFilter('refund')} />}
+        <FilterChip label={`Open ${openCount}`} active={filter === 'open'} onClick={() => setFilter('open')} />
+        {cancelCount > 0 && <FilterChip label={`Cancel ${cancelCount}`} active={filter === 'cancellation'} onClick={() => setFilter('cancellation')} />}
+        {refundCount > 0 && <FilterChip label={`Refund ${refundCount}`} active={filter === 'refund'} onClick={() => setFilter('refund')} />}
         <FilterChip label="Inquiry" active={filter === 'inquiry'} onClick={() => setFilter('inquiry')} />
         <FilterChip label="Tour" active={filter === 'tour'} onClick={() => setFilter('tour')} />
         <FilterChip label="Complaint" active={filter === 'complaint'} onClick={() => setFilter('complaint')} />
-        <FilterChip label={`Handled · ${handledCount}`} active={filter === 'handled'} onClick={() => setFilter('handled')} />
+        <FilterChip label={`Done ${handledCount}`} active={filter === 'handled'} onClick={() => setFilter('handled')} />
       </div>
 
       {error && (
-        <div style={{ padding: 12, background: '#f5dcd6', color: '#5c4a38', borderRadius: 12, fontSize: 13, marginBottom: 12 }}>
+        <div style={{ padding: 14, background: '#fef0ec', color: '#5c4a38', borderRadius: 4, fontSize: 13, marginTop: 16 }}>
           {error}
         </div>
       )}
 
       {!loading && visible.length === 0 && !error && (
-        <div style={styles.emptyCard}>
-          <Inbox size={24} color="#a59478" />
-          <div style={styles.emptyBody}>
-            {filter === 'urgent' ? 'No urgent items right now.' :
-             filter === 'open' ? 'Inbox zero. All caught up.' :
-             `No emails in this category.`}
+        <div style={{ padding: '60px 20px 40px', textAlign: 'center' }}>
+          <div style={{
+            fontFamily: '"Playfair Display", serif', fontSize: 18, color: '#5c4a38', fontStyle: 'italic',
+            letterSpacing: '-0.005em',
+          }}>
+            {filter === 'urgent' ? 'Nothing urgent.' :
+             filter === 'open' ? 'Nothing to action.' :
+             filter === 'handled' ? 'No replies marked yet.' :
+             'Nothing in this category.'}
           </div>
+          {filter === 'urgent' && (
+            <div style={{ fontSize: 12, color: '#a59478', marginTop: 8 }}>A calm inbox.</div>
+          )}
         </div>
       )}
 
@@ -4034,14 +4046,22 @@ function AdminInboxSection({ emailIntegration, onConnectGmail, data, currentUser
 }
 
 function FilterChip({ label, active, onClick, accent }) {
-  const accentStyle = accent && active
-    ? { background: accent, borderColor: accent, color: '#fffdf7' }
-    : accent && !active
-      ? { color: accent, borderColor: '#f5dcd6', background: '#fef0ec' }
-      : {};
+  const activeColor = accent || '#1a2620';
   return (
-    <button onClick={onClick} className="salus-btn"
-      style={{ ...styles.adminTab, ...(active ? styles.adminTabActive : {}), ...accentStyle }}>
+    <button onClick={onClick} className="salus-btn" style={{
+      padding: '6px 0',
+      background: 'transparent',
+      border: 'none',
+      color: active ? activeColor : '#a59478',
+      fontSize: 11,
+      fontWeight: active ? 600 : 500,
+      letterSpacing: '0.08em',
+      textTransform: 'uppercase',
+      whiteSpace: 'nowrap',
+      borderBottom: active ? `1.5px solid ${activeColor}` : '1.5px solid transparent',
+      marginRight: 20,
+      transition: 'all 0.15s ease',
+    }}>
       {label}
     </button>
   );
@@ -4062,7 +4082,6 @@ function EmailCard({ msg, busy, onMarkHandled, onUnmarkHandled, onNudge }) {
         .update({ category: newCategory })
         .eq('id', msg.id);
       if (err) throw err;
-      // realtime will trigger reload — but bump the local state quickly too
       msg.category = newCategory;
     } catch (e) {
       alert('Failed to reclassify: ' + (e.message || e));
@@ -4071,25 +4090,33 @@ function EmailCard({ msg, busy, onMarkHandled, onUnmarkHandled, onNudge }) {
 
   return (
     <div style={{
-      ...styles.emailCard,
-      opacity: isHandled ? 0.55 : 1,
-      borderLeft: isUrgent && !isHandled ? '3px solid #c8442a' : `1px solid #efe7d2`,
+      padding: '20px 4px 18px',
+      borderBottom: '1px solid #efe7d2',
+      opacity: isHandled ? 0.45 : 1,
       position: 'relative',
     }}>
-      {/* Top row: category badge + urgency + date */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+      {/* Top row — category + date */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
         <button onClick={() => setShowCatMenu(!showCatMenu)} className="salus-btn" style={{
-          fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 999,
-          background: meta.bg, color: meta.fg, textTransform: 'uppercase', letterSpacing: 0.4,
-          display: 'flex', alignItems: 'center', gap: 3,
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          background: 'transparent', padding: 0, border: 'none',
         }}>
-          {meta.label} <ChevronRight size={9} style={{ transform: 'rotate(90deg)', opacity: 0.7 }} />
+          <span style={{
+            width: 6, height: 6, borderRadius: '50%', background: meta.fg, display: 'inline-block',
+          }} />
+          <span style={{
+            fontSize: 10, fontWeight: 600, color: '#7a8270',
+            textTransform: 'uppercase', letterSpacing: 2,
+          }}>{meta.label}</span>
         </button>
         {isUrgent && !isHandled && (
-          <span style={{ fontSize: 10, color: '#c8442a', fontWeight: 700 }}>● URGENT</span>
+          <span style={{
+            fontSize: 10, color: '#c8442a', fontWeight: 600,
+            textTransform: 'uppercase', letterSpacing: 2,
+          }}>Urgent</span>
         )}
         <div style={{ flex: 1 }} />
-        <div style={styles.emailDate}>{formatEmailDate(msg.email_date)}</div>
+        <div style={{ fontSize: 11, color: '#a59478' }}>{formatEmailDate(msg.email_date)}</div>
       </div>
 
       {/* Category change menu */}
@@ -4101,34 +4128,57 @@ function EmailCard({ msg, busy, onMarkHandled, onUnmarkHandled, onNudge }) {
         />
       )}
 
-      <div style={styles.emailFrom}>{cleanEmailFrom(msg.email_from)}</div>
-      <div style={styles.emailSubject}>{msg.email_subject}</div>
+      {/* From — small caps */}
+      <div style={{ fontSize: 11, fontWeight: 600, color: '#5c4a38', marginBottom: 4, letterSpacing: '0.02em' }}>
+        {cleanEmailFrom(msg.email_from)}
+      </div>
 
+      {/* Subject — Playfair, bigger */}
+      <div style={{
+        fontFamily: '"Playfair Display", serif',
+        fontSize: 17, fontWeight: 400, color: '#1a2620',
+        lineHeight: 1.3, marginBottom: 8, letterSpacing: '-0.005em',
+      }}>
+        {msg.email_subject}
+      </div>
+
+      {/* AI summary */}
       {msg.summary && (
-        <div style={{ ...styles.emailSnippet, color: '#5c4a38', marginTop: 4 }}>{msg.summary}</div>
-      )}
-
-      {msg.suggested_action && !isHandled && (
-        <div style={{ fontSize: 11, color: '#7a8270', marginTop: 6, fontStyle: 'italic' }}>
-          → {msg.suggested_action}
+        <div style={{
+          fontSize: 13, color: '#5c4a38', lineHeight: 1.5,
+          marginBottom: msg.suggested_action && !isHandled ? 10 : 0,
+        }}>
+          {msg.summary}
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+      {/* Suggested action — italic editor's note */}
+      {msg.suggested_action && !isHandled && (
+        <div style={{
+          fontSize: 12, color: '#7a8270', fontStyle: 'italic', lineHeight: 1.4,
+          paddingLeft: 12, borderLeft: '2px solid #efe7d2',
+        }}>
+          {msg.suggested_action}
+        </div>
+      )}
+
+      {/* Quiet action row */}
+      <div style={{ display: 'flex', gap: 18, marginTop: 14, alignItems: 'center' }}>
         {isHandled ? (
-          <button onClick={onUnmarkHandled} disabled={busy} className="salus-btn" style={styles.btnGhost}>
-            ↩ Unmark
+          <button onClick={onUnmarkHandled} disabled={busy} className="salus-btn"
+            style={{ background: 'transparent', padding: 0, color: '#a59478', fontSize: 12, letterSpacing: '0.02em' }}>
+            Unmark as done
           </button>
         ) : (
           <>
             <button onClick={onMarkHandled} disabled={busy} className="salus-btn"
-              style={{ ...styles.btnGhost, color: '#5b7245', borderColor: '#cdd9bc' }}>
-              <Check size={12} /> Mark handled
+              style={{ background: 'transparent', padding: 0, color: '#5b7245', fontSize: 12, fontWeight: 500, letterSpacing: '0.02em' }}>
+              Mark as replied
             </button>
             {onNudge && (
               <button onClick={onNudge} className="salus-btn"
-                style={{ ...styles.btnGhost, color: '#5c4a38' }}>
-                <Users size={12} /> Nudge…
+                style={{ background: 'transparent', padding: 0, color: '#7a8270', fontSize: 12, letterSpacing: '0.02em' }}>
+                Pass to teammate
               </button>
             )}
           </>
@@ -4546,14 +4596,27 @@ function StatTile({ label, items, color, onClick }) {
   const unhandled = items.filter(i => !i.handled_at).length;
   return (
     <button onClick={onClick} className="salus-btn" style={{
-      background: '#fffdf7', border: '1px solid #efe7d2',
-      borderRadius: 12, padding: 12, textAlign: 'left',
+      background: '#fffdf7',
+      border: 'none',
+      borderRadius: 18,
+      padding: '20px 18px',
+      textAlign: 'left',
+      boxShadow: '0 1px 0 rgba(92, 74, 56, 0.06)',
     }}>
-      <div style={{ fontSize: 11, color: '#7a8270', marginBottom: 4 }}>{label}</div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-        <div style={{ fontSize: 24, fontWeight: 700, color }}>{total}</div>
+      <div style={{ fontSize: 10, color: '#a59478', marginBottom: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500 }}>
+        {label}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+        <div style={{
+          fontFamily: '"Playfair Display", serif',
+          fontSize: 32, fontWeight: 400, color: '#1a2620', lineHeight: 1, letterSpacing: '-0.02em',
+        }}>
+          {total}
+        </div>
         {unhandled > 0 && (
-          <div style={{ fontSize: 11, color: '#c8442a', fontWeight: 600 }}>{unhandled} open</div>
+          <div style={{ fontSize: 11, color: color, fontWeight: 500, letterSpacing: '0.02em' }}>
+            {unhandled} open
+          </div>
         )}
       </div>
     </button>
@@ -5489,8 +5552,28 @@ function LoginScreen({ error, onLogin, onSignup, onClearError }) {
     <div style={styles.loginWrap}>
       <style>{`
         /* Fonts loaded via index.html */
-        body { margin: 0; background: #f5f1e8; }
+        body { margin: 0; background: #1a2620; }
       `}</style>
+
+      {/* Hero backdrop */}
+      <div style={styles.loginHero} />
+      <div style={styles.loginHeroOverlay} />
+
+      {/* Brand wordmark, floating */}
+      <div style={{
+        position: 'absolute', top: 'calc(40px + env(safe-area-inset-top))', left: 0, right: 0,
+        zIndex: 2, textAlign: 'center', pointerEvents: 'none',
+      }}>
+        <div style={{
+          fontSize: 10, fontWeight: 500, color: 'rgba(255, 253, 247, 0.7)',
+          letterSpacing: 4, textTransform: 'uppercase', marginBottom: 8,
+        }}>Salus House</div>
+        <div style={{
+          fontFamily: '"Playfair Display", serif',
+          fontSize: 22, color: '#fffdf7', fontStyle: 'italic',
+          letterSpacing: '-0.005em', fontWeight: 400,
+        }}>For the team.</div>
+      </div>
 
       <form onSubmit={handleSubmit} style={styles.loginCard}>
         <div style={styles.loginLogo}>
@@ -5499,11 +5582,11 @@ function LoginScreen({ error, onLogin, onSignup, onClearError }) {
           </div>
         </div>
 
-        <h1 style={styles.loginTitle}>Salus Staff</h1>
+        <h1 style={styles.loginTitle}>{mode === 'signin' ? 'Welcome back.' : 'Join the team.'}</h1>
         <p style={styles.loginSub}>
           {mode === 'signin'
-            ? "Sign in to access your team's timetable, cover board, and chat."
-            : "Create your account — your manager will assign your role once you're in."}
+            ? "Sign in to your timetable, cover board, and team chat."
+            : "Create your account. Your manager will assign your role once you're in."}
         </p>
 
         {/* Mode toggle */}
@@ -5809,17 +5892,43 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
       <div style={styles.homeGreeting}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
           <div>
+            <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 6 }}>
+              {todayStr}
+            </div>
             <h1 style={styles.homeH1}>{greeting}, {firstName}</h1>
-            <p style={styles.homeGreetSub}>{todayStr} · {classesToday.length} {classesToday.length === 1 ? 'class' : 'classes'} today</p>
+            <p style={styles.homeGreetSub}>{classesToday.length} {classesToday.length === 1 ? 'class' : 'classes'} today</p>
           </div>
           <button onClick={() => setShowCustomize(true)} className="salus-btn" style={{
-            padding: '6px 10px', borderRadius: 999,
-            background: '#fffdf7', border: '1px solid #efe7d2',
-            color: '#7a8270', fontSize: 11, fontWeight: 600,
-            display: 'flex', alignItems: 'center', gap: 4,
-          }}>
-            <SettingsIcon size={11} /> Customize
+            padding: 8, borderRadius: '50%',
+            background: 'transparent', border: 'none',
+            color: '#a59478',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }} aria-label="Customize home">
+            <SettingsIcon size={16} />
           </button>
+        </div>
+      </div>
+
+      {/* Brand photo strip — quiet visual anchor */}
+      <div style={{
+        height: 140, borderRadius: 20, overflow: 'hidden', marginBottom: 4, position: 'relative',
+        backgroundImage: `url(/brand/${hour < 12 ? 'reformer' : hour < 18 ? 'cardio' : 'ice'}.jpg)`,
+        backgroundSize: 'cover', backgroundPosition: 'center',
+        boxShadow: '0 1px 0 rgba(92, 74, 56, 0.06)',
+      }}>
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: 'linear-gradient(180deg, rgba(26, 38, 32, 0.08) 0%, rgba(26, 38, 32, 0.45) 100%)',
+        }} />
+        <div style={{
+          position: 'absolute', left: 18, bottom: 14, right: 18,
+          color: '#fffdf7',
+          fontFamily: '"Playfair Display", serif', fontSize: 14, fontStyle: 'italic',
+          letterSpacing: '-0.005em', textShadow: '0 1px 2px rgba(0, 0, 0, 0.25)',
+        }}>
+          {hour < 12 ? 'A slow start. Move with intent.' :
+           hour < 18 ? 'The middle of the day.' :
+           'Wind down. Reset.'}
         </div>
       </div>
 
@@ -12082,32 +12191,34 @@ const styles = {
   },
 
   // ─── HOME (cover-first dashboard) ───
-  homeContainer: { padding: '0 14px 80px' },
-  homeGreeting: { padding: '12px 4px 8px' },
-  homeH1: { fontFamily: '"Playfair Display", serif', fontSize: 26, fontWeight: 500, color: '#1a2620', margin: 0 },
-  homeGreetSub: { fontSize: 13, color: '#7a8270', marginTop: 2, margin: 0 },
-  homeSection: { marginTop: 16 },
-  homeSectionHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10, padding: '0 4px' },
-  homeSectionTitle: { fontSize: 11, fontWeight: 700, color: '#5c4a38', letterSpacing: 1.2, textTransform: 'uppercase', display: 'flex', alignItems: 'center' },
-  homeSectionCount: { background: '#c8442a', color: '#fff', padding: '2px 7px', borderRadius: 8, fontSize: 10, marginLeft: 6, fontWeight: 700, letterSpacing: 0 },
-  homeSectionLink: { fontSize: 11, color: '#7a8270', background: 'none', border: 'none', fontFamily: 'inherit', cursor: 'pointer', padding: 4 },
-  homeEmptyCover: { padding: '24px 14px', background: '#fffdf7', borderRadius: 14, border: '1px solid #efe7d2', textAlign: 'center' },
+  homeContainer: { padding: '0 20px 100px' },
+  homeGreeting: { padding: '24px 0 24px' },
+  homeH1: { fontFamily: '"Playfair Display", serif', fontSize: 32, fontWeight: 400, color: '#1a2620', margin: 0, letterSpacing: '-0.01em', lineHeight: 1.1 },
+  homeGreetSub: { fontSize: 13, color: '#7a8270', marginTop: 6, margin: 0, letterSpacing: '0.01em' },
+  homeSection: { marginTop: 28 },
+  homeSectionHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14, padding: '0 2px' },
+  homeSectionTitle: { fontSize: 10, fontWeight: 600, color: '#7a8270', letterSpacing: 2, textTransform: 'uppercase', display: 'flex', alignItems: 'center' },
+  homeSectionCount: { background: 'transparent', color: '#c8442a', padding: '0 0 0 8px', fontSize: 11, fontWeight: 600, letterSpacing: 0 },
+  homeSectionLink: { fontSize: 11, color: '#a59478', background: 'none', border: 'none', fontFamily: 'inherit', cursor: 'pointer', padding: 4, letterSpacing: '0.05em' },
+  homeEmptyCover: { padding: '32px 20px', background: 'transparent', textAlign: 'center' },
 
-  // ─── Collapsible tile (Home) ───
+  // ─── Collapsible tile (Home) — quieter, more editorial ───
   tile: {
-    background: '#fffdf7', borderRadius: 14, border: '1px solid #efe7d2',
-    marginTop: 10, overflow: 'hidden',
+    background: '#fffdf7', borderRadius: 18, border: 'none',
+    marginTop: 12, overflow: 'hidden',
+    boxShadow: '0 1px 0 rgba(92, 74, 56, 0.06)',
   },
   tileHeader: {
     display: 'flex', alignItems: 'center', gap: 12, width: '100%',
-    padding: '14px 16px', background: 'transparent', border: 'none',
+    padding: '18px 20px', background: 'transparent', border: 'none',
     cursor: 'pointer', fontFamily: 'inherit',
   },
-  tileHeaderTitleRow: { display: 'flex', alignItems: 'center', gap: 8 },
-  tileTitle: { fontSize: 14, fontWeight: 600, color: '#1a2620' },
+  tileHeaderTitleRow: { display: 'flex', alignItems: 'center', gap: 10 },
+  tileTitle: { fontFamily: '"Playfair Display", serif', fontSize: 17, fontWeight: 500, color: '#1a2620', letterSpacing: '-0.005em' },
   tileCount: {
-    color: '#fff', fontSize: 10, fontWeight: 700,
-    padding: '2px 7px', borderRadius: 8, minWidth: 18, textAlign: 'center',
+    color: '#a59478', fontSize: 11, fontWeight: 500,
+    padding: 0, minWidth: 'auto', textAlign: 'left',
+    background: 'transparent', letterSpacing: '0.02em',
   },
   tileSummary: { fontSize: 12, color: '#7a8270', marginTop: 3 },
   tileBody: { padding: '0 12px 12px' },
@@ -12164,29 +12275,40 @@ const styles = {
   coverHomePendingPill: { background: '#fef3e2', color: '#b85c38', padding: '4px 10px', borderRadius: 999, fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 },
 
   // Request cover CTA
-  homeRequestCard: { background: '#fffdf7', border: '1px dashed #c4b8a0', borderRadius: 14, padding: 16, marginTop: 16, display: 'flex', alignItems: 'center', gap: 12, width: '100%', fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' },
-  homeRequestIcon: { width: 36, height: 36, borderRadius: '50%', background: '#5c4a38', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  homeRequestTitle: { fontSize: 14, fontWeight: 600, color: '#1a2620' },
-  homeRequestSub: { fontSize: 11, color: '#7a8270', marginTop: 1 },
-
-  // Hire studio CTA (sibling to homeRequestCard)
-  homeHireCard: {
-    background: '#fffdf7', border: '1px solid #efe7d2', borderRadius: 14,
-    padding: 16, marginTop: 10, display: 'flex', alignItems: 'center', gap: 12,
+  homeRequestCard: {
+    background: '#fffdf7', border: 'none', borderRadius: 18,
+    padding: '22px 22px', marginTop: 12, display: 'flex', alignItems: 'center', gap: 16,
     width: '100%', fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left',
+    boxShadow: '0 1px 0 rgba(92, 74, 56, 0.06)',
+  },
+  homeRequestIcon: {
+    width: 40, height: 40, borderRadius: '50%',
+    background: 'transparent', color: '#5c4a38',
+    border: '1px solid #efe7d2',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
+  homeRequestTitle: { fontFamily: '"Playfair Display", serif', fontSize: 16, fontWeight: 500, color: '#1a2620', letterSpacing: '-0.005em' },
+  homeRequestSub: { fontSize: 12, color: '#a59478', marginTop: 3 },
+
+  homeHireCard: {
+    background: '#fffdf7', border: 'none', borderRadius: 18,
+    padding: '22px 22px', marginTop: 12, display: 'flex', alignItems: 'center', gap: 16,
+    width: '100%', fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left',
+    boxShadow: '0 1px 0 rgba(92, 74, 56, 0.06)',
   },
   homeHireIcon: {
-    width: 36, height: 36, borderRadius: '50%',
-    background: '#7a8c5c', color: '#fff',
+    width: 40, height: 40, borderRadius: '50%',
+    background: 'transparent', color: '#5c4a38',
+    border: '1px solid #efe7d2',
     display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
   },
 
   // Your day
-  homeDayCard: { background: '#fffdf7', borderRadius: 14, border: '1px solid #efe7d2', padding: '4px 14px' },
-  homeDayRow: { display: 'flex', alignItems: 'center', gap: 14, padding: '12px 0', width: '100%', background: 'none', border: 'none', fontFamily: 'inherit', cursor: 'pointer' },
-  homeDayRowBorder: { borderTop: '1px solid #f5f0e0' },
-  homeDayTime: { fontSize: 14, fontWeight: 600, color: '#5c4a38', minWidth: 50, textAlign: 'left' },
-  homeDayTitle: { fontSize: 14, fontWeight: 500, color: '#1a2620' },
+  homeDayCard: { background: '#fffdf7', borderRadius: 18, border: 'none', padding: '6px 22px', boxShadow: '0 1px 0 rgba(92, 74, 56, 0.06)' },
+  homeDayRow: { display: 'flex', alignItems: 'center', gap: 16, padding: '14px 0', width: '100%', background: 'none', border: 'none', fontFamily: 'inherit', cursor: 'pointer' },
+  homeDayRowBorder: { borderTop: '1px solid #efe7d2' },
+  homeDayTime: { fontFamily: '"Playfair Display", serif', fontSize: 15, fontWeight: 500, color: '#5c4a38', minWidth: 54, textAlign: 'left', letterSpacing: '-0.005em' },
+  homeDayTitle: { fontSize: 14, fontWeight: 500, color: '#1a2620', letterSpacing: '-0.005em' },
   homeDayMeta: { fontSize: 11, color: '#7a8270', marginTop: 2 },
   homeDayTagNow: { fontSize: 10, padding: '2px 8px', borderRadius: 4, background: '#5c4a38', color: '#fff', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 },
 
@@ -13319,22 +13441,24 @@ const styles = {
   // ─── BOTTOM NAV ───
   bottomNav: {
     position: 'fixed', bottom: 0, left: 0, right: 0,
-    background: '#fffdf7', borderTop: '1px solid #ebe3cf',
-    display: 'flex', padding: '8px 12px',
-    paddingBottom: 'calc(8px + env(safe-area-inset-bottom))',
+    background: 'rgba(255, 253, 247, 0.95)', backdropFilter: 'blur(12px)',
+    borderTop: '1px solid #efe7d2',
+    display: 'flex', padding: '10px 12px 8px',
+    paddingBottom: 'calc(10px + env(safe-area-inset-bottom))',
     zIndex: 100,
   },
   bottomTab: {
-    flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-    padding: 6, color: '#7a8270', background: 'none', border: 'none',
+    flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+    padding: 4, color: '#a59478', background: 'none', border: 'none',
     fontFamily: 'inherit', cursor: 'pointer', position: 'relative',
+    transition: 'color 0.15s ease',
   },
-  bottomTabActive: { color: '#5c4a38' },
-  bottomTabLabel: { fontSize: 10, fontWeight: 600 },
-  bottomTabLabelActive: { fontWeight: 700 },
+  bottomTabActive: { color: '#1a2620' },
+  bottomTabLabel: { fontSize: 10, fontWeight: 500, letterSpacing: '0.05em' },
+  bottomTabLabelActive: { fontWeight: 600 },
   bottomTabBadge: {
-    position: 'absolute', top: 2, right: '28%',
-    background: '#c8442a', color: '#fff', fontSize: 9, fontWeight: 700,
+    position: 'absolute', top: 0, right: '28%',
+    background: '#c8442a', color: '#fffdf7', fontSize: 9, fontWeight: 600,
     minWidth: 16, height: 16, borderRadius: 8,
     display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px',
   },
@@ -13805,28 +13929,28 @@ const styles = {
 
   // Buttons
   btnPrimary: {
-    display: 'flex', alignItems: 'center', gap: 6,
-    padding: '10px 18px', borderRadius: 8, border: 'none',
-    background: '#5c4a38', color: '#fff', fontFamily: 'inherit',
-    fontSize: 13, fontWeight: 600, letterSpacing: 0.2,
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+    padding: '12px 22px', borderRadius: 999, border: 'none',
+    background: '#1a2620', color: '#fffdf7', fontFamily: 'inherit',
+    fontSize: 13, fontWeight: 500, letterSpacing: '0.04em',
   },
   btnSecondary: {
-    display: 'flex', alignItems: 'center', gap: 6,
-    padding: '10px 18px', borderRadius: 8,
-    border: '1px solid #5c4a38', background: 'transparent',
-    color: '#5c4a38', fontFamily: 'inherit', fontSize: 13, fontWeight: 500,
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+    padding: '12px 22px', borderRadius: 999,
+    border: '1px solid #1a2620', background: 'transparent',
+    color: '#1a2620', fontFamily: 'inherit', fontSize: 13, fontWeight: 500, letterSpacing: '0.04em',
   },
   btnGhost: {
-    display: 'flex', alignItems: 'center', gap: 6,
-    padding: '10px 18px', borderRadius: 8,
-    border: '1px solid #d4cdb8', background: 'transparent',
-    color: '#5a6258', fontFamily: 'inherit', fontSize: 13, fontWeight: 500,
+    display: 'inline-flex', alignItems: 'center', gap: 6,
+    padding: '8px 14px', borderRadius: 999,
+    border: '1px solid #efe7d2', background: 'transparent',
+    color: '#7a8270', fontFamily: 'inherit', fontSize: 12, fontWeight: 500, letterSpacing: '0.02em',
   },
   btnDanger: {
-    display: 'flex', alignItems: 'center', gap: 6,
-    padding: '10px 18px', borderRadius: 8,
-    border: '1px solid #e8c4bd', background: 'transparent',
-    color: '#c8442a', fontFamily: 'inherit', fontSize: 13, fontWeight: 500,
+    display: 'inline-flex', alignItems: 'center', gap: 8,
+    padding: '12px 22px', borderRadius: 999,
+    border: '1px solid #f5dcd6', background: 'transparent',
+    color: '#c8442a', fontFamily: 'inherit', fontSize: 13, fontWeight: 500, letterSpacing: '0.02em',
   },
   formGrid: {
     display: 'grid', gridTemplateColumns: '1fr 1fr',
@@ -13877,45 +14001,61 @@ const styles = {
 
   // Login screen
   loginWrap: {
-    minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-    background: '#f5f1e8', padding: 24, fontFamily: "'Inter', -apple-system, sans-serif",
+    minHeight: '100vh', display: 'flex',
+    background: '#1a2620', padding: 0, fontFamily: "'Inter', -apple-system, sans-serif",
+    position: 'relative', overflow: 'hidden',
+  },
+  loginHero: {
+    position: 'absolute', inset: 0,
+    backgroundImage: 'url(/brand/reformer.jpg)',
+    backgroundSize: 'cover', backgroundPosition: 'center',
+    zIndex: 0,
+  },
+  loginHeroOverlay: {
+    position: 'absolute', inset: 0, zIndex: 1,
+    background: 'linear-gradient(180deg, rgba(26, 38, 32, 0.35) 0%, rgba(26, 38, 32, 0.55) 50%, rgba(26, 38, 32, 0.92) 100%)',
   },
   loginCard: {
-    background: '#fffdf7', borderRadius: 16, padding: '40px 36px',
-    maxWidth: 420, width: '100%', border: '1px solid #e8e0cc',
-    boxShadow: '0 8px 32px rgba(26, 38, 32, 0.06)',
+    position: 'relative', zIndex: 2,
+    background: 'rgba(255, 253, 247, 0.98)', backdropFilter: 'blur(20px)',
+    borderRadius: 24, padding: '44px 36px 36px',
+    maxWidth: 420, width: 'calc(100% - 40px)',
+    margin: 'auto', marginBottom: 'max(40px, env(safe-area-inset-bottom))',
+    boxShadow: '0 20px 60px rgba(26, 38, 32, 0.4)',
+    border: 'none',
   },
   loginLogo: {
     display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'center',
-    marginBottom: 28,
+    marginBottom: 24,
   },
   loginLogoMark: {
-    width: 44, height: 44, borderRadius: 12,
-    background: '#f5f1e8', border: '1px solid #ebe3cf',
+    width: 48, height: 48, borderRadius: '50%',
+    background: 'transparent', border: 'none',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     overflow: 'hidden',
   },
   loginLogoMarkImg: {
     width: '100%', height: '100%',
-    objectFit: 'contain', padding: 5,
+    objectFit: 'contain',
     filter: 'brightness(0)',
   },
   loginTitle: {
-    fontFamily: '"Playfair Display", serif', fontSize: 28, fontWeight: 500,
-    color: '#1a2620', textAlign: 'center', marginBottom: 6, letterSpacing: -0.3,
+    fontFamily: '"Playfair Display", serif', fontSize: 30, fontWeight: 400,
+    color: '#1a2620', textAlign: 'center', marginBottom: 8, letterSpacing: '-0.015em',
   },
   loginSub: {
     fontSize: 13, color: '#7a8270', textAlign: 'center', marginBottom: 28,
+    lineHeight: 1.5, fontWeight: 300,
   },
   loginField: { marginBottom: 16 },
   loginInput: {
-    width: '100%', padding: '12px 14px', borderRadius: 8,
-    border: '1px solid #d4cdb8', background: '#fff',
+    width: '100%', padding: '14px 16px', borderRadius: 10,
+    border: '1px solid #efe7d2', background: '#fffdf7',
     fontFamily: 'inherit', fontSize: 14, color: '#1a2620',
   },
   loginError: {
     fontSize: 12, color: '#c8442a', marginTop: 8, padding: '8px 12px',
-    background: '#fdebe5', borderRadius: 6, border: '1px solid #f3c8bd',
+    background: '#fef0ec', borderRadius: 6, border: '1px solid #f3c8bd',
   },
   termsRow: {
     display: 'flex', alignItems: 'flex-start', gap: 10,
