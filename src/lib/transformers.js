@@ -254,3 +254,18 @@ export const emailIntegrationFromDb = (row) => ({
   lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at).getTime() : null,
   // We deliberately don't expose access_token / refresh_token to the client.
 });
+
+export const stockItemFromDb = (row) => ({
+  id: row.id,
+  name: row.name,
+  category: row.category || 'other',
+  currentQty: row.current_qty ?? 0,
+  unit: row.unit || 'each',
+  lowThreshold: row.low_threshold ?? 1,
+  reorderUrl: row.reorder_url || '',
+  notes: row.notes || '',
+  archived: !!row.archived,
+  lastUpdatedBy: row.last_updated_by || null,
+  lastUpdatedAt: row.last_updated_at ? new Date(row.last_updated_at).getTime() : null,
+  createdAt: row.created_at ? new Date(row.created_at).getTime() : null,
+});
