@@ -3824,6 +3824,23 @@ function AdminInboxSection({ emailIntegration, onConnectGmail, data, currentUser
   const [filter, setFilter] = useState('urgent'); // urgent | open | cancellation | refund | inquiry | tour | complaint | handled
   const [busyIds, setBusyIds] = useState(new Set());
   const [nudgeTarget, setNudgeTarget] = useState(null); // msg being nudged about
+  const [draftReplyTarget, setDraftReplyTarget] = useState(null); // msg being replied to
+  const [density, setDensity] = useState(() => {
+    try { return localStorage.getItem('salus_inbox_density') || 'comfortable'; } catch { return 'comfortable'; }
+  });
+  const [expandedIds, setExpandedIds] = useState(new Set()); // for compact mode, tap to expand
+  const toggleExpanded = (id) => {
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const cycleDensity = () => {
+    const next = density === 'comfortable' ? 'compact' : 'comfortable';
+    setDensity(next);
+    try { localStorage.setItem('salus_inbox_density', next); } catch {}
+  };
 
   // Load existing classifications from Supabase (fast — no API call)
   const loadFromDb = async () => {
@@ -3952,12 +3969,20 @@ function AdminInboxSection({ emailIntegration, onConnectGmail, data, currentUser
                 ? `${openCount} to review`
                 : 'Nothing pending'}
           </div>
-          <button onClick={syncEmails} disabled={loading} className="salus-btn" style={{
-            background: 'transparent', border: 'none', padding: 4,
-            color: '#a59478', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
-          }}>
-            {loading ? 'Syncing' : 'Refresh'}
-          </button>
+          <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+            <button onClick={cycleDensity} className="salus-btn" style={{
+              background: 'transparent', border: 'none', padding: 4,
+              color: '#a59478', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
+            }}>
+              {density === 'comfortable' ? 'Compact' : 'Detailed'}
+            </button>
+            <button onClick={syncEmails} disabled={loading} className="salus-btn" style={{
+              background: 'transparent', border: 'none', padding: 4,
+              color: '#a59478', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
+            }}>
+              {loading ? 'Syncing' : 'Refresh'}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -4011,11 +4036,24 @@ function AdminInboxSection({ emailIntegration, onConnectGmail, data, currentUser
           key={msg.id}
           msg={msg}
           busy={busyIds.has(msg.id)}
+          density={density}
+          expanded={expandedIds.has(msg.id)}
+          onToggleExpand={() => toggleExpanded(msg.id)}
           onMarkHandled={() => handleMarkHandled(msg.id)}
           onUnmarkHandled={() => handleUnmarkHandled(msg.id)}
           onNudge={() => setNudgeTarget(msg)}
+          onDraftReply={() => setDraftReplyTarget(msg)}
         />
       ))}
+
+      {/* Draft reply modal */}
+      {draftReplyTarget && (
+        <DraftReplyModal
+          msg={draftReplyTarget}
+          onClose={() => setDraftReplyTarget(null)}
+          onMarkHandled={() => handleMarkHandled(draftReplyTarget.id)}
+        />
+      )}
 
       {/* Nudge modal */}
       {nudgeTarget && (
@@ -4053,11 +4091,12 @@ function FilterChip({ label, active, onClick, accent }) {
   );
 }
 
-function EmailCard({ msg, busy, onMarkHandled, onUnmarkHandled, onNudge }) {
+function EmailCard({ msg, busy, density, expanded, onToggleExpand, onMarkHandled, onUnmarkHandled, onNudge, onDraftReply }) {
   const meta = CATEGORY_META[msg.category] || CATEGORY_META.other;
   const isHandled = !!msg.handled_at;
   const isUrgent = msg.urgency === 'high';
   const [showCatMenu, setShowCatMenu] = useState(false);
+  const isCompact = density === 'compact' && !expanded;
 
   const reclassify = async (newCategory) => {
     setShowCatMenu(false);
@@ -4074,6 +4113,63 @@ function EmailCard({ msg, busy, onMarkHandled, onUnmarkHandled, onNudge }) {
     }
   };
 
+  // ─── Compact row — single tap-to-expand line ───
+  if (isCompact) {
+    return (
+      <button
+        onClick={onToggleExpand}
+        className="salus-btn"
+        style={{
+          width: '100%',
+          padding: '14px 4px',
+          background: 'transparent',
+          border: 'none',
+          borderBottom: '1px solid #efe7d2',
+          textAlign: 'left',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          opacity: isHandled ? 0.4 : 1,
+          fontFamily: 'inherit',
+        }}
+      >
+        {/* Category dot */}
+        <span style={{
+          width: 8, height: 8, borderRadius: '50%',
+          background: isUrgent && !isHandled ? '#c8442a' : meta.fg,
+          flexShrink: 0,
+        }} />
+
+        {/* From + Subject in one line */}
+        <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+          <div style={{
+            display: 'flex', alignItems: 'baseline', gap: 8,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
+            <span style={{
+              fontSize: 12, fontWeight: 600, color: '#5c4a38', flexShrink: 0,
+              maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {cleanEmailFrom(msg.email_from)}
+            </span>
+            <span style={{
+              fontSize: 13, color: '#1a2620', overflow: 'hidden', textOverflow: 'ellipsis',
+              fontFamily: '"Playfair Display", serif', letterSpacing: '-0.005em',
+            }}>
+              {msg.email_subject}
+            </span>
+          </div>
+        </div>
+
+        {/* Date */}
+        <div style={{ fontSize: 11, color: '#a59478', flexShrink: 0 }}>
+          {formatEmailDate(msg.email_date)}
+        </div>
+      </button>
+    );
+  }
+
+  // ─── Detailed/expanded card ───
   return (
     <div style={{
       padding: '20px 4px 18px',
@@ -4103,6 +4199,12 @@ function EmailCard({ msg, busy, onMarkHandled, onUnmarkHandled, onNudge }) {
         )}
         <div style={{ flex: 1 }} />
         <div style={{ fontSize: 11, color: '#a59478' }}>{formatEmailDate(msg.email_date)}</div>
+        {density === 'compact' && expanded && onToggleExpand && (
+          <button onClick={onToggleExpand} className="salus-btn" style={{
+            background: 'transparent', border: 'none', padding: 0,
+            color: '#a59478', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase',
+          }}>Close</button>
+        )}
       </div>
 
       {/* Category change menu */}
@@ -4149,7 +4251,7 @@ function EmailCard({ msg, busy, onMarkHandled, onUnmarkHandled, onNudge }) {
       )}
 
       {/* Quiet action row */}
-      <div style={{ display: 'flex', gap: 18, marginTop: 14, alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 18, marginTop: 14, alignItems: 'center', flexWrap: 'wrap' }}>
         {isHandled ? (
           <button onClick={onUnmarkHandled} disabled={busy} className="salus-btn"
             style={{ background: 'transparent', padding: 0, color: '#a59478', fontSize: 12, letterSpacing: '0.02em' }}>
@@ -4157,6 +4259,12 @@ function EmailCard({ msg, busy, onMarkHandled, onUnmarkHandled, onNudge }) {
           </button>
         ) : (
           <>
+            {onDraftReply && (
+              <button onClick={onDraftReply} className="salus-btn"
+                style={{ background: 'transparent', padding: 0, color: '#1a2620', fontSize: 12, fontWeight: 600, letterSpacing: '0.02em' }}>
+                Draft reply
+              </button>
+            )}
             <button onClick={onMarkHandled} disabled={busy} className="salus-btn"
               style={{ background: 'transparent', padding: 0, color: '#5b7245', fontSize: 12, fontWeight: 500, letterSpacing: '0.02em' }}>
               Mark as replied
@@ -4209,6 +4317,189 @@ function CategoryMenu({ current, onPick, onClose }) {
             </button>
           );
         })}
+      </div>
+    </>
+  );
+}
+
+// ─── DraftReplyModal — AI drafts a reply you can copy + paste into Gmail ───
+function DraftReplyModal({ msg, onClose, onMarkHandled }) {
+  const [loading, setLoading] = useState(true);
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+
+  const replyTo = cleanEmailFrom(msg.email_from);
+  const subject = `Re: ${msg.email_subject}`;
+
+  const generateDraft = async () => {
+    setError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        setError('Not signed in');
+        setLoading(false);
+        setRegenerating(false);
+        return;
+      }
+      const res = await fetch('/api/gmail-draft-reply', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ messageId: msg.id }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `HTTP ${res.status}`);
+      }
+      const json = await res.json();
+      setDraft(json.draft || '');
+    } catch (e) {
+      setError(e.message || 'Failed to generate draft');
+    } finally {
+      setLoading(false);
+      setRegenerating(false);
+    }
+  };
+
+  useEffect(() => {
+    generateDraft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const copyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(draft);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) {
+      const ta = document.getElementById('salus-draft-textarea');
+      if (ta) {
+        ta.select();
+        try { document.execCommand('copy'); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch {}
+      }
+    }
+  };
+
+  const openGmail = async () => {
+    await copyToClipboard();
+    const recipient = msg.email_from.match(/<(.+?)>/)?.[1] || msg.email_from;
+    const url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(recipient)}&su=${encodeURIComponent(subject)}`;
+    window.open(url, '_blank');
+  };
+
+  const regenerate = () => {
+    setRegenerating(true);
+    setLoading(true);
+    setDraft('');
+    generateDraft();
+  };
+
+  return (
+    <>
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.55)',
+        zIndex: 200,
+      }} />
+      <div style={{
+        position: 'fixed', left: 0, right: 0, bottom: 0,
+        background: '#fffdf7', borderRadius: '20px 20px 0 0',
+        zIndex: 201, padding: '20px 22px 28px',
+        paddingBottom: 'calc(28px + env(safe-area-inset-bottom))',
+        maxHeight: '92vh', overflowY: 'auto',
+        boxShadow: '0 -10px 40px rgba(26, 38, 32, 0.2)',
+      }}>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }}>
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 4 }}>
+              Draft reply
+            </div>
+            <div style={{
+              fontFamily: '"Playfair Display", serif',
+              fontSize: 20, fontWeight: 400, color: '#1a2620', letterSpacing: '-0.005em',
+            }}>
+              To {replyTo}
+            </div>
+          </div>
+          <button onClick={onClose} className="salus-btn" style={{
+            background: 'transparent', border: 'none', padding: 4,
+            color: '#a59478', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
+          }}>Close</button>
+        </div>
+
+        <div style={{ fontSize: 12, color: '#7a8270', marginBottom: 12, fontStyle: 'italic' }}>
+          {subject}
+        </div>
+
+        {loading && (
+          <div style={{ padding: '30px 0', textAlign: 'center' }}>
+            <div style={{
+              fontFamily: '"Playfair Display", serif', fontSize: 16, color: '#5c4a38',
+              fontStyle: 'italic',
+            }}>
+              {regenerating ? 'Rewriting…' : 'Drafting your reply…'}
+            </div>
+          </div>
+        )}
+
+        {error && !loading && (
+          <div style={{
+            padding: 14, background: '#fef0ec', color: '#5c4a38', borderRadius: 8,
+            fontSize: 13, marginBottom: 16,
+          }}>
+            {error}
+          </div>
+        )}
+
+        {!loading && draft && (
+          <textarea
+            id="salus-draft-textarea"
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            style={{
+              width: '100%', minHeight: 220, padding: '14px 16px',
+              borderRadius: 12, border: '1px solid #efe7d2', background: '#fffdf7',
+              fontFamily: 'inherit', fontSize: 14, lineHeight: 1.6, color: '#1a2620',
+              resize: 'vertical', boxSizing: 'border-box',
+            }}
+          />
+        )}
+
+        {!loading && (
+          <div style={{ display: 'flex', gap: 10, marginTop: 18, flexWrap: 'wrap' }}>
+            <button onClick={openGmail} className="salus-btn" style={{
+              ...styles.btnPrimary, flex: 1, justifyContent: 'center',
+            }}>
+              {copied ? 'Copied — paste in Gmail' : 'Copy & open Gmail'}
+            </button>
+            <button onClick={copyToClipboard} className="salus-btn" style={styles.btnGhost}>
+              {copied ? 'Copied' : 'Copy only'}
+            </button>
+            <button onClick={regenerate} className="salus-btn" style={styles.btnGhost}>
+              Rewrite
+            </button>
+            {onMarkHandled && (
+              <button onClick={() => { onMarkHandled(); onClose(); }} className="salus-btn" style={{
+                ...styles.btnGhost, color: '#5b7245',
+              }}>
+                Mark as replied
+              </button>
+            )}
+          </div>
+        )}
+
+        {!loading && draft && (
+          <div style={{
+            fontSize: 11, color: '#a59478', marginTop: 14, textAlign: 'center',
+            lineHeight: 1.5,
+          }}>
+            AI draft. Edit before sending. Tap <em>Copy &amp; open Gmail</em>, paste, review, send.
+          </div>
+        )}
       </div>
     </>
   );
