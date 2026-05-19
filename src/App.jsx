@@ -25,6 +25,7 @@ import {
   postCommentFromDb,
   bookingFromDb,
   dmFromDb,
+  emailIntegrationFromDb,
 } from './lib/transformers';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -74,6 +75,7 @@ const EMPTY_DATA = {
   postComments: [],
   bookings: [],
   dms: [],
+  emailIntegration: null,
 };
 
 const CLASS_TYPES = {
@@ -308,7 +310,7 @@ export default function SalusStaff() {
     if (!session) return;
     if (!silent) setLoading(true);
     try {
-      const [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes] = await Promise.all([
+      const [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes, emailIntRes] = await Promise.all([
         supabase.from('profiles').select('*'),
         supabase.from('classes').select('*'),
         supabase.from('cover_requests').select('*'),
@@ -326,6 +328,7 @@ export default function SalusStaff() {
         supabase.from('coach_post_comments').select('*').order('created_at', { ascending: true }),
         supabase.from('studio_bookings').select('*').order('date', { ascending: true }),
         supabase.from('direct_messages').select('*').order('created_at', { ascending: true }),
+        supabase.from('email_integrations').select('*').eq('user_id', session.user?.id).maybeSingle(),
       ]);
 
       const errors = [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes]
@@ -354,6 +357,7 @@ export default function SalusStaff() {
         postComments: (postCmRes.data || []).map(postCommentFromDb),
         bookings: (bookingsRes.data || []).map(bookingFromDb),
         dms: (dmsRes.data || []).map(dmFromDb),
+        emailIntegration: emailIntRes?.data ? emailIntegrationFromDb(emailIntRes.data) : null,
       });
     } catch (e) {
       console.error('Failed to load data:', e);
@@ -396,6 +400,7 @@ export default function SalusStaff() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'task_comments' }, silentReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'shift_notes' }, silentReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tours' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'email_integrations' }, silentReload)
       .subscribe();
     return () => { supabase.removeChannel(channel); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -478,6 +483,56 @@ export default function SalusStaff() {
     setTabInitialized(false);
     await supabase.auth.signOut();
   };
+
+  // ─── Gmail OAuth handlers ───────────────────────────────────────────────────
+  const handleConnectGmail = async () => {
+    try {
+      const { data: { session: s } } = await supabase.auth.getSession();
+      if (!s?.access_token) {
+        alert('You need to be signed in to connect Gmail.');
+        return;
+      }
+      // Redirect to our oauth-start endpoint, which redirects to Google.
+      window.location.href = `/api/oauth-start?token=${encodeURIComponent(s.access_token)}`;
+    } catch (e) {
+      console.error('Connect Gmail failed:', e);
+      alert('Could not start Gmail connection. Please try again.');
+    }
+  };
+
+  const handleDisconnectGmail = async () => {
+    try {
+      const { error } = await supabase
+        .from('email_integrations')
+        .delete()
+        .eq('user_id', currentUserId);
+      if (error) throw error;
+      await reloadData(true);
+    } catch (e) {
+      console.error('Disconnect Gmail failed:', e);
+      alert('Could not disconnect Gmail: ' + (e.message || e));
+    }
+  };
+
+  // Handle redirect back from Google OAuth (?gmail=connected / ?gmail=error&reason=X)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const gmailParam = params.get('gmail');
+    if (!gmailParam) return;
+    if (gmailParam === 'connected') {
+      // Reload data to pick up the new integration row, then show a toast.
+      reloadData(true).then(() => {
+        setTimeout(() => alert('Gmail connected successfully. Open the Me tab to verify.'), 200);
+      });
+    } else if (gmailParam === 'error') {
+      const reason = params.get('reason') || 'unknown';
+      alert(`Gmail connection failed (${reason}). Please try again.`);
+    }
+    // Clean up the URL so a refresh doesn't re-trigger
+    const cleanUrl = window.location.pathname;
+    window.history.replaceState(null, '', cleanUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ─── Loading screens ───────────────────────────────────────────────────────
   if (!authChecked) {
@@ -1562,11 +1617,14 @@ export default function SalusStaff() {
             data={data}
             currentUser={currentUser}
             isManager={isManager}
+            emailIntegration={data.emailIntegration}
             onOpenSettings={() => setModal({ type: 'settings' })}
             onShowInvoices={() => setModal({ type: 'invoices' })}
             onShowTimeOff={() => setModal({ type: 'timeOff' })}
             onShowTeam={() => setModal({ type: 'team' })}
             onSignOut={handleLogout}
+            onConnectGmail={handleConnectGmail}
+            onDisconnectGmail={handleDisconnectGmail}
           />
         )}
       </main>
@@ -6698,7 +6756,7 @@ const RATE_PER_SESSION = 30; // £ per class taught
 // ME — personal hub: profile, stats, settings link
 // ──────────────────────────────────────────────────────────────────────────────
 
-function MePage({ data, currentUser, isManager, onOpenSettings, onSignOut, onShowInvoices, onShowTimeOff, onShowTeam }) {
+function MePage({ data, currentUser, isManager, emailIntegration, onOpenSettings, onSignOut, onShowInvoices, onShowTimeOff, onShowTeam, onConnectGmail, onDisconnectGmail }) {
   const myClasses = data.classes.filter(c => c.coachId === currentUser.id);
   const sessionCount = myClasses.length;
   const totalMinutes = myClasses.reduce((acc, c) => acc + c.dur, 0);
@@ -6831,6 +6889,62 @@ function MePage({ data, currentUser, isManager, onOpenSettings, onSignOut, onSho
               </div>
               <ChevronRight size={16} color="#a59478" />
             </button>
+          </div>
+        </section>
+      )}
+
+      {/* Email integration (manager only for now) */}
+      {isManager && (
+        <section style={styles.homeSection}>
+          <div style={styles.homeSectionHead}>
+            <div style={styles.homeSectionTitle}>Connected accounts</div>
+          </div>
+          <div style={styles.meActionsList}>
+            {emailIntegration ? (
+              <div style={{ ...styles.meActionRow, cursor: 'default' }}>
+                <div style={{
+                  width: 32, height: 32, borderRadius: 8,
+                  background: '#7a8c5c', color: '#fff',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 14,
+                }}>✉</div>
+                <div style={{ flex: 1, textAlign: 'left' }}>
+                  <div style={{ fontSize: 14, color: '#1a2620' }}>
+                    Gmail · <span style={{ color: '#5c8a5a', fontWeight: 600 }}>Connected</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
+                    {emailIntegration.emailAddress || 'Connected'}
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    if (confirm('Disconnect Gmail? Your stored tokens will be deleted.')) {
+                      onDisconnectGmail();
+                    }
+                  }}
+                  className="salus-btn"
+                  style={{ ...styles.btnGhost, color: '#c8442a' }}
+                >
+                  Disconnect
+                </button>
+              </div>
+            ) : (
+              <button onClick={onConnectGmail} className="salus-btn" style={styles.meActionRow}>
+                <div style={{
+                  width: 32, height: 32, borderRadius: 8,
+                  background: '#fef7e8', color: '#c6926a',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 14,
+                }}>✉</div>
+                <div style={{ flex: 1, textAlign: 'left' }}>
+                  <div style={{ fontSize: 14, color: '#1a2620' }}>Connect Gmail</div>
+                  <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
+                    Read your inbox for cancellations, refunds, inquiries
+                  </div>
+                </div>
+                <ChevronRight size={16} color="#a59478" />
+              </button>
+            )}
           </div>
         </section>
       )}
@@ -9476,6 +9590,11 @@ function TaskCard({ task, data, currentUser, onOpen }) {
   const isProject = task.taskKind === 'project';
   const statusColor = TASK_STATUS_COLORS[task.status];
   const commentCount = data.taskComments?.filter(c => c.taskId === task.id && c.kind === 'comment').length || 0;
+  // Subtask progress (for project tasks)
+  const subtasks = data.tasks.filter(t => t.parentTaskId === task.id);
+  const subDone = subtasks.filter(s => s.status === 'done').length;
+  const hasSubtasks = subtasks.length > 0;
+  const subPct = hasSubtasks ? Math.round((subDone / subtasks.length) * 100) : 0;
 
   return (
     <button
@@ -9502,7 +9621,19 @@ function TaskCard({ task, data, currentUser, onOpen }) {
           {commentCount > 0 && (
             <span style={{ color: '#7a8270' }}>· 💬 {commentCount}</span>
           )}
+          {hasSubtasks && (
+            <span style={{ color: '#7a8270' }}>· {subDone}/{subtasks.length}</span>
+          )}
         </div>
+        {hasSubtasks && (
+          <div style={styles.progressTrackMini}>
+            <div style={{
+              ...styles.progressFill,
+              width: `${subPct}%`,
+              background: subPct === 100 ? '#7a8c5c' : '#c6926a',
+            }} />
+          </div>
+        )}
       </div>
       {isProject && (
         <span style={{
@@ -9551,9 +9682,9 @@ function CreateTaskModal({ data, currentUser, onClose, onCreate }) {
     setRecurrenceDays(days => days.includes(d) ? days.filter(x => x !== d) : [...days, d]);
   };
 
-  // Sort: FOH first, then coaches, alphabetical within
+  // Sort: FOH first, then coaches, alphabetical within. Include self (manager can self-assign).
   const pickableStaff = data.users
-    .filter(u => u.id !== currentUser.id && (u.isFoh || u.isCoach))
+    .filter(u => u.isFoh || u.isCoach || u.id === currentUser.id)
     .sort((a, b) => {
       if (a.isFoh !== b.isFoh) return a.isFoh ? -1 : 1;
       return (a.name || '').localeCompare(b.name || '');
@@ -9956,9 +10087,23 @@ function TaskDetailModal({ task, data, currentUser, isManager, onClose, onMarkDo
           {/* Subtasks — project tasks only */}
           {isProject && (
             <div style={{ marginTop: 14, borderTop: '1px solid #efe7d2', paddingTop: 14 }}>
-              <div style={styles.commentsLabel}>
-                Subtasks {subtasks.length > 0 && `· ${subDone}/${subtasks.length} done`}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <div style={{ ...styles.commentsLabel, marginBottom: 0 }}>Subtasks</div>
+                {subtasks.length > 0 && (
+                  <div style={{ fontSize: 11, color: '#7a8270', fontWeight: 600 }}>
+                    {subDone} of {subtasks.length}
+                  </div>
+                )}
               </div>
+              {subtasks.length > 0 && (
+                <div style={styles.progressTrack}>
+                  <div style={{
+                    ...styles.progressFill,
+                    width: `${Math.round((subDone / subtasks.length) * 100)}%`,
+                    background: subDone === subtasks.length ? '#7a8c5c' : '#c6926a',
+                  }} />
+                </div>
+              )}
               {subtasks.map(s => {
                 const sAssignee = s.assigneeId ? data.users.find(u => u.id === s.assigneeId) : null;
                 const sDone = s.status === 'done';
@@ -11629,6 +11774,23 @@ const styles = {
     background: '#fffdf7',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     cursor: 'pointer', flexShrink: 0,
+  },
+
+  // ─── PROGRESS BAR (subtask completion) ───
+  progressTrack: {
+    height: 6, borderRadius: 999,
+    background: '#efe7d2', overflow: 'hidden',
+    marginBottom: 10,
+  },
+  progressFill: {
+    height: '100%', borderRadius: 999,
+    background: '#c6926a',
+    transition: 'width 0.25s ease',
+  },
+  progressTrackMini: {
+    height: 4, borderRadius: 999,
+    background: '#efe7d2', overflow: 'hidden',
+    marginTop: 4,
   },
 
   // ─── @MENTION DROPDOWN ───
