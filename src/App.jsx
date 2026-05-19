@@ -4,6 +4,7 @@ import {
   Send, ArrowLeftRight, Check, X, Clock, Bell, RotateCcw, Settings, Mail, LogOut,
   ChevronLeft, ChevronRight, TrendingUp, Award, Activity, Trash2,
   Sparkles, Play, Heart, Flame, Bookmark, MoreHorizontal, Music, Lightbulb,
+  Inbox, Shield, RefreshCw, MapPin,
   Home as HomeIcon, FileText, User as UserIcon, Settings as SettingsIcon
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
@@ -1449,6 +1450,7 @@ export default function SalusStaff() {
         .salus-card:hover { box-shadow: 0 4px 12px rgba(92, 74, 56, 0.08); }
         .salus-tab { transition: all 0.2s ease; }
         @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .salus-modal-content { animation: slideUp 0.22s ease; }
         .salus-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
         .salus-scroll::-webkit-scrollbar-track { background: transparent; }
@@ -1529,7 +1531,7 @@ export default function SalusStaff() {
               }
             }}
             onRequestCover={() => setModal({ type: 'pickClassToRequestCover' })}
-            onHireStudio={() => { setTab('bookings'); setModal({ type: 'createBooking' }); }}
+            onHireStudio={() => { setTab('admin'); setModal({ type: 'createBooking' }); }}
             onClaim={(req) => setModal({ type: 'coverThread', coverRequestId: req.id })}
             onExpressInterest={expressInterest}
             onViewAllCover={() => setTab('cover')}
@@ -1603,13 +1605,15 @@ export default function SalusStaff() {
             ? <ManagerStats data={data} onShowInvoices={() => setModal({ type: 'invoices' })} />
             : <CoachStats data={data} currentUser={currentUser} />
         )}
-        {tab === 'bookings' && (
-          <StudioBookingsView
+        {tab === 'admin' && (
+          <AdminPage
             data={data}
             currentUser={currentUser}
             isManager={isManager}
+            emailIntegration={data.emailIntegration}
             onCreate={() => setModal({ type: 'createBooking' })}
             onOpenBooking={(id) => setModal({ type: 'bookingDetail', id })}
+            onConnectGmail={handleConnectGmail}
           />
         )}
         {tab === 'me' && (
@@ -1632,8 +1636,8 @@ export default function SalusStaff() {
       {/* Bottom nav */}
       <nav style={styles.bottomNav}>
         <BottomTab icon={HomeIcon} label="Home" active={tab==='home'} onClick={() => setTab('home')} />
+        <BottomTab icon={Shield} label="Admin" active={tab==='admin'} onClick={() => setTab('admin')} />
         <BottomTab icon={Calendar} label="Schedule" active={tab==='timetable'} onClick={() => setTab('timetable')} />
-        <BottomTab icon={Bookmark} label="Bookings" active={tab==='bookings'} onClick={() => setTab('bookings')} />
         <BottomTab icon={MessageSquare} label="Chat" active={tab==='chat'} onClick={() => setTab('chat')} badge={chatUnread + dmUnread} />
         <BottomTab icon={UserIcon} label="Me" active={tab==='me'} onClick={() => setTab('me')} />
       </nav>
@@ -3725,6 +3729,248 @@ function generateRecurringDates(startIso, endIso, days /* 0=Mon..6=Sun */) {
   return out;
 }
 
+// ============================================================
+// AdminPage — wraps Inbox, Cancellations, Tours, and Bookings.
+// Coaches see Bookings only; manager + FOH see all sections.
+// ============================================================
+function AdminPage({ data, currentUser, isManager, emailIntegration, onCreate, onOpenBooking, onConnectGmail }) {
+  const canSeeAdminSections = isManager || currentUser.isFoh;
+  const [section, setSection] = useState(canSeeAdminSections ? 'inbox' : 'bookings');
+
+  // If the user can't see admin sections, just show bookings.
+  if (!canSeeAdminSections) {
+    return (
+      <StudioBookingsView
+        data={data}
+        currentUser={currentUser}
+        isManager={isManager}
+        onCreate={onCreate}
+        onOpenBooking={onOpenBooking}
+      />
+    );
+  }
+
+  return (
+    <div style={styles.homeContainer}>
+      {/* Section tabs */}
+      <div style={styles.adminTabRow}>
+        <button onClick={() => setSection('inbox')} className="salus-btn"
+          style={{ ...styles.adminTab, ...(section === 'inbox' ? styles.adminTabActive : {}) }}>
+          <Inbox size={14} /> Inbox
+        </button>
+        <button onClick={() => setSection('cancellations')} className="salus-btn"
+          style={{ ...styles.adminTab, ...(section === 'cancellations' ? styles.adminTabActive : {}) }}>
+          <AlertCircle size={14} /> Cancellations
+        </button>
+        <button onClick={() => setSection('tours')} className="salus-btn"
+          style={{ ...styles.adminTab, ...(section === 'tours' ? styles.adminTabActive : {}) }}>
+          <MapPin size={14} /> Tours
+        </button>
+        <button onClick={() => setSection('bookings')} className="salus-btn"
+          style={{ ...styles.adminTab, ...(section === 'bookings' ? styles.adminTabActive : {}) }}>
+          <Bookmark size={14} /> Bookings
+        </button>
+      </div>
+
+      {/* Section content */}
+      {section === 'inbox' && (
+        <AdminInboxSection
+          emailIntegration={emailIntegration}
+          onConnectGmail={onConnectGmail}
+        />
+      )}
+      {section === 'cancellations' && <AdminCancellationsSection />}
+      {section === 'tours' && <AdminToursSection data={data} currentUser={currentUser} />}
+      {section === 'bookings' && (
+        <StudioBookingsView
+          data={data}
+          currentUser={currentUser}
+          isManager={isManager}
+          onCreate={onCreate}
+          onOpenBooking={onOpenBooking}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Admin · Inbox section ────────────────────────────────────────────────
+function AdminInboxSection({ emailIntegration, onConnectGmail }) {
+  const [messages, setMessages] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [lastFetched, setLastFetched] = useState(null);
+
+  const fetchEmails = async () => {
+    if (!emailIntegration) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        setError('Not signed in');
+        return;
+      }
+      const res = await fetch(`/api/gmail-fetch?token=${encodeURIComponent(session.access_token)}`);
+      const json = await res.json();
+      if (!res.ok) {
+        setError(json.error || 'Failed to fetch emails');
+        return;
+      }
+      setMessages(json.messages || []);
+      setLastFetched(Date.now());
+    } catch (e) {
+      setError(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Auto-fetch when integration becomes available
+  useEffect(() => {
+    if (emailIntegration && messages.length === 0 && !lastFetched) {
+      fetchEmails();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emailIntegration?.id]);
+
+  if (!emailIntegration) {
+    return (
+      <div style={styles.emptyCard}>
+        <Inbox size={28} color="#c6926a" />
+        <div style={styles.emptyTitle}>Connect your inbox</div>
+        <div style={styles.emptyBody}>
+          Once connected, your recent emails appear here so you can keep on top of cancellations,
+          refunds, and member inquiries.
+        </div>
+        <button onClick={onConnectGmail} className="salus-btn" style={styles.btnPrimary}>
+          <Mail size={14} /> Connect Gmail
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div style={styles.adminSectionHead}>
+        <div>
+          <div style={styles.adminSectionTitle}>Recent emails</div>
+          <div style={styles.adminSectionSubtitle}>
+            {emailIntegration.emailAddress}
+            {lastFetched && ` · last checked ${new Date(lastFetched).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+          </div>
+        </div>
+        <button onClick={fetchEmails} disabled={loading} className="salus-btn" style={styles.btnGhost}>
+          <RefreshCw size={14} style={loading ? { animation: 'spin 1s linear infinite' } : {}} />
+          {loading ? 'Loading…' : 'Refresh'}
+        </button>
+      </div>
+
+      {error && (
+        <div style={{ padding: 12, background: '#f5dcd6', color: '#5c4a38', borderRadius: 12, fontSize: 13, marginBottom: 12 }}>
+          {error}
+        </div>
+      )}
+
+      {!loading && messages.length === 0 && !error && (
+        <div style={styles.emptyCard}>
+          <Inbox size={24} color="#a59478" />
+          <div style={styles.emptyBody}>No emails yet. Tap Refresh to fetch.</div>
+        </div>
+      )}
+
+      {messages.map(msg => (
+        <div key={msg.id} style={styles.emailCard}>
+          <div style={styles.emailCardHead}>
+            <div style={styles.emailFrom}>{cleanEmailFrom(msg.from)}</div>
+            <div style={styles.emailDate}>{formatEmailDate(msg.date)}</div>
+          </div>
+          <div style={styles.emailSubject}>{msg.subject}</div>
+          <div style={styles.emailSnippet}>{msg.snippet}</div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+// Helpers for inbox display
+function cleanEmailFrom(from) {
+  if (!from) return 'Unknown';
+  // "Sarah Smith <sarah@example.com>" → "Sarah Smith"
+  const match = from.match(/^"?([^"<]+?)"?\s*<.+>/);
+  return match ? match[1].trim() : from;
+}
+function formatEmailDate(dateStr) {
+  if (!dateStr) return '';
+  try {
+    const d = new Date(dateStr);
+    const now = new Date();
+    const isToday = d.toDateString() === now.toDateString();
+    if (isToday) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleDateString([], { day: '2-digit', month: 'short' });
+  } catch { return ''; }
+}
+
+// ─── Admin · Cancellations section (placeholder until Xplor) ──────────────
+function AdminCancellationsSection() {
+  return (
+    <div style={styles.emptyCard}>
+      <AlertCircle size={28} color="#c6926a" />
+      <div style={styles.emptyTitle}>Cancellation queue</div>
+      <div style={styles.emptyBody}>
+        Cancellations and refund requests will appear here. Once Xplor API access is approved,
+        this will populate automatically from member actions in Xplor.
+        <br /><br />
+        For now, the Inbox tab catches member emails about cancellations, and you can track them
+        as tasks.
+      </div>
+    </div>
+  );
+}
+
+// ─── Admin · Tours section ────────────────────────────────────────────────
+function AdminToursSection({ data, currentUser }) {
+  const upcoming = (data.tours || [])
+    .filter(t => t.startTime >= Date.now() - 24 * 3600 * 1000)
+    .sort((a, b) => a.startTime - b.startTime);
+
+  if (upcoming.length === 0) {
+    return (
+      <div style={styles.emptyCard}>
+        <MapPin size={28} color="#c6926a" />
+        <div style={styles.emptyTitle}>No upcoming tours</div>
+        <div style={styles.emptyBody}>Tours from Google Calendar appear here automatically.</div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div style={styles.adminSectionHead}>
+        <div>
+          <div style={styles.adminSectionTitle}>Upcoming tours</div>
+          <div style={styles.adminSectionSubtitle}>{upcoming.length} scheduled</div>
+        </div>
+      </div>
+      {upcoming.map(tour => {
+        const d = new Date(tour.startTime);
+        const isToday = d.toDateString() === new Date().toDateString();
+        const dayLabel = isToday ? 'Today' : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+        const timeLabel = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return (
+          <div key={tour.id} style={styles.emailCard}>
+            <div style={styles.emailCardHead}>
+              <div style={styles.emailFrom}>{tour.guestName || tour.title || 'Tour'}</div>
+              <div style={styles.emailDate}>{dayLabel} · {timeLabel}</div>
+            </div>
+            {tour.guestEmail && <div style={styles.emailSnippet}>{tour.guestEmail}</div>}
+            {tour.notes && <div style={{ ...styles.emailSnippet, marginTop: 4, fontStyle: 'italic' }}>{tour.notes}</div>}
+          </div>
+        );
+      })}
+    </>
+  );
+}
 function StudioBookingsView({ data, currentUser, isManager, onCreate, onOpenBooking }) {
   const [filter, setFilter] = useState('upcoming');
   const todayIso = toIsoDate(new Date());
@@ -6893,8 +7139,8 @@ function MePage({ data, currentUser, isManager, emailIntegration, onOpenSettings
         </section>
       )}
 
-      {/* Email integration (manager only for now) */}
-      {isManager && (
+      {/* Email integration — managers + FOH staff */}
+      {(isManager || currentUser.isFoh) && (
         <section style={styles.homeSection}>
           <div style={styles.homeSectionHead}>
             <div style={styles.homeSectionTitle}>Connected accounts</div>
@@ -11791,6 +12037,68 @@ const styles = {
     height: 4, borderRadius: 999,
     background: '#efe7d2', overflow: 'hidden',
     marginTop: 4,
+  },
+
+  // ─── ADMIN PAGE ───
+  adminTabRow: {
+    display: 'flex', gap: 6, padding: '0 0 12px 0',
+    overflowX: 'auto', WebkitOverflowScrolling: 'touch',
+    scrollbarWidth: 'none',
+  },
+  adminTab: {
+    display: 'flex', alignItems: 'center', gap: 4,
+    padding: '8px 12px', borderRadius: 999,
+    background: '#fffdf7', border: '1px solid #efe7d2',
+    color: '#7a8270', fontSize: 12, fontWeight: 600,
+    whiteSpace: 'nowrap', flexShrink: 0,
+  },
+  adminTabActive: {
+    background: '#5c4a38', borderColor: '#5c4a38', color: '#fffdf7',
+  },
+  adminSectionHead: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: 12, padding: '0 4px',
+  },
+  adminSectionTitle: {
+    fontFamily: '"Fraunces", serif', fontSize: 18, color: '#1a2620',
+  },
+  adminSectionSubtitle: {
+    fontSize: 11, color: '#7a8270', marginTop: 2,
+  },
+  emailCard: {
+    background: '#fffdf7', border: '1px solid #efe7d2',
+    borderRadius: 12, padding: 12, marginBottom: 8,
+  },
+  emailCardHead: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  emailFrom: {
+    fontSize: 13, fontWeight: 700, color: '#1a2620',
+    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+    flex: 1, marginRight: 8,
+  },
+  emailDate: {
+    fontSize: 11, color: '#a59478', flexShrink: 0,
+  },
+  emailSubject: {
+    fontSize: 13, color: '#5c4a38', marginBottom: 4,
+    overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box',
+    WebkitLineClamp: 1, WebkitBoxOrient: 'vertical',
+  },
+  emailSnippet: {
+    fontSize: 12, color: '#7a8270', lineHeight: 1.4,
+    overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box',
+    WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+  },
+  emptyCard: {
+    background: '#fffdf7', border: '1px solid #efe7d2',
+    borderRadius: 14, padding: 24,
+    display: 'flex', flexDirection: 'column', alignItems: 'center',
+    textAlign: 'center', gap: 10,
+  },
+  emptyBody: {
+    fontSize: 13, color: '#7a8270', lineHeight: 1.5, maxWidth: 300,
   },
 
   // ─── @MENTION DROPDOWN ───
