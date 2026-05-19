@@ -1614,6 +1614,7 @@ export default function SalusStaff() {
             onCreate={() => setModal({ type: 'createBooking' })}
             onOpenBooking={(id) => setModal({ type: 'bookingDetail', id })}
             onConnectGmail={handleConnectGmail}
+            onCreateTask={createTask}
           />
         )}
         {tab === 'me' && (
@@ -3733,7 +3734,7 @@ function generateRecurringDates(startIso, endIso, days /* 0=Mon..6=Sun */) {
 // AdminPage — wraps Inbox, Cancellations, Tours, and Bookings.
 // Coaches see Bookings only; manager + FOH see all sections.
 // ============================================================
-function AdminPage({ data, currentUser, isManager, emailIntegration, onCreate, onOpenBooking, onConnectGmail }) {
+function AdminPage({ data, currentUser, isManager, emailIntegration, onCreate, onOpenBooking, onConnectGmail, onCreateTask }) {
   const canSeeAdminSections = isManager || currentUser.isFoh;
   const [section, setSection] = useState(canSeeAdminSections ? 'inbox' : 'bookings');
 
@@ -3781,6 +3782,9 @@ function AdminPage({ data, currentUser, isManager, emailIntegration, onCreate, o
         <AdminInboxSection
           emailIntegration={emailIntegration}
           onConnectGmail={onConnectGmail}
+          data={data}
+          currentUser={currentUser}
+          onCreateTask={onCreateTask}
         />
       )}
       {section === 'reports' && (
@@ -3817,14 +3821,15 @@ const CATEGORY_META = {
   other:         { label: 'Other',      bg: '#efe7d2', fg: '#7a8270' },
 };
 
-function AdminInboxSection({ emailIntegration, onConnectGmail }) {
+function AdminInboxSection({ emailIntegration, onConnectGmail, data, currentUser, onCreateTask }) {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [lastFetched, setLastFetched] = useState(null);
   const [newlyClassified, setNewlyClassified] = useState(0);
-  const [filter, setFilter] = useState('open'); // open | cancellation | refund | inquiry | tour | complaint | handled
+  const [filter, setFilter] = useState('urgent'); // urgent | open | cancellation | refund | inquiry | tour | complaint | handled
   const [busyIds, setBusyIds] = useState(new Set());
+  const [nudgeTarget, setNudgeTarget] = useState(null); // msg being nudged about
 
   // Load existing classifications from Supabase (fast — no API call)
   const loadFromDb = async () => {
@@ -3923,12 +3928,14 @@ function AdminInboxSection({ emailIntegration, onConnectGmail }) {
 
   // Filter messages based on chip
   const visible = messages.filter(m => {
+    if (filter === 'urgent') return !m.handled_at && m.urgency === 'high';
     if (filter === 'open') return !m.handled_at;
     if (filter === 'handled') return !!m.handled_at;
     return !m.handled_at && m.category === filter;
   });
 
   // Counts for chips
+  const urgentCount = messages.filter(m => !m.handled_at && m.urgency === 'high').length;
   const openCount = messages.filter(m => !m.handled_at).length;
   const handledCount = messages.filter(m => !!m.handled_at).length;
   const cancelCount = messages.filter(m => !m.handled_at && m.category === 'cancellation').length;
@@ -3951,8 +3958,28 @@ function AdminInboxSection({ emailIntegration, onConnectGmail }) {
         </button>
       </div>
 
+      {/* Urgent banner (only when there are urgent items) */}
+      {urgentCount > 0 && filter !== 'urgent' && (
+        <button onClick={() => setFilter('urgent')} className="salus-btn" style={{
+          width: '100%', padding: 12, marginBottom: 12,
+          background: '#fef0ec', border: '1px solid #f5dcd6', borderRadius: 12,
+          color: '#c8442a', fontSize: 13, fontWeight: 600,
+          display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
+        }}>
+          <AlertOctagon size={16} />
+          {urgentCount} urgent email{urgentCount === 1 ? '' : 's'} need{urgentCount === 1 ? 's' : ''} a reply
+          <ChevronRight size={14} style={{ marginLeft: 'auto' }} />
+        </button>
+      )}
+
       {/* Filter chips */}
       <div style={styles.adminTabRow}>
+        <FilterChip
+          label={`🔥 Urgent · ${urgentCount}`}
+          active={filter === 'urgent'}
+          onClick={() => setFilter('urgent')}
+          accent={urgentCount > 0 ? '#c8442a' : null}
+        />
         <FilterChip label={`Open · ${openCount}`} active={filter === 'open'} onClick={() => setFilter('open')} />
         {cancelCount > 0 && <FilterChip label={`Cancel · ${cancelCount}`} active={filter === 'cancellation'} onClick={() => setFilter('cancellation')} />}
         {refundCount > 0 && <FilterChip label={`Refund · ${refundCount}`} active={filter === 'refund'} onClick={() => setFilter('refund')} />}
@@ -3972,7 +3999,9 @@ function AdminInboxSection({ emailIntegration, onConnectGmail }) {
         <div style={styles.emptyCard}>
           <Inbox size={24} color="#a59478" />
           <div style={styles.emptyBody}>
-            {filter === 'open' ? 'Inbox zero. All caught up.' : `No emails in this category.`}
+            {filter === 'urgent' ? 'No urgent items right now. 🎉' :
+             filter === 'open' ? 'Inbox zero. All caught up.' :
+             `No emails in this category.`}
           </div>
         </div>
       )}
@@ -3984,39 +4013,76 @@ function AdminInboxSection({ emailIntegration, onConnectGmail }) {
           busy={busyIds.has(msg.id)}
           onMarkHandled={() => handleMarkHandled(msg.id)}
           onUnmarkHandled={() => handleUnmarkHandled(msg.id)}
+          onNudge={() => setNudgeTarget(msg)}
         />
       ))}
+
+      {/* Nudge modal */}
+      {nudgeTarget && (
+        <NudgeModal
+          msg={nudgeTarget}
+          users={data.users || []}
+          currentUserId={currentUser.id}
+          onCreateTask={onCreateTask}
+          onClose={() => setNudgeTarget(null)}
+        />
+      )}
     </>
   );
 }
 
-function FilterChip({ label, active, onClick }) {
+function FilterChip({ label, active, onClick, accent }) {
+  const accentStyle = accent && active
+    ? { background: accent, borderColor: accent, color: '#fffdf7' }
+    : accent && !active
+      ? { color: accent, borderColor: '#f5dcd6', background: '#fef0ec' }
+      : {};
   return (
     <button onClick={onClick} className="salus-btn"
-      style={{ ...styles.adminTab, ...(active ? styles.adminTabActive : {}) }}>
+      style={{ ...styles.adminTab, ...(active ? styles.adminTabActive : {}), ...accentStyle }}>
       {label}
     </button>
   );
 }
 
-function EmailCard({ msg, busy, onMarkHandled, onUnmarkHandled }) {
+function EmailCard({ msg, busy, onMarkHandled, onUnmarkHandled, onNudge }) {
   const meta = CATEGORY_META[msg.category] || CATEGORY_META.other;
   const isHandled = !!msg.handled_at;
   const isUrgent = msg.urgency === 'high';
+  const [showCatMenu, setShowCatMenu] = useState(false);
+
+  const reclassify = async (newCategory) => {
+    setShowCatMenu(false);
+    if (newCategory === msg.category) return;
+    try {
+      const { error: err } = await supabase
+        .from('email_classifications')
+        .update({ category: newCategory })
+        .eq('id', msg.id);
+      if (err) throw err;
+      // realtime will trigger reload — but bump the local state quickly too
+      msg.category = newCategory;
+    } catch (e) {
+      alert('Failed to reclassify: ' + (e.message || e));
+    }
+  };
+
   return (
     <div style={{
       ...styles.emailCard,
       opacity: isHandled ? 0.55 : 1,
       borderLeft: isUrgent && !isHandled ? '3px solid #c8442a' : `1px solid #efe7d2`,
+      position: 'relative',
     }}>
       {/* Top row: category badge + urgency + date */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-        <span style={{
+        <button onClick={() => setShowCatMenu(!showCatMenu)} className="salus-btn" style={{
           fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 999,
           background: meta.bg, color: meta.fg, textTransform: 'uppercase', letterSpacing: 0.4,
+          display: 'flex', alignItems: 'center', gap: 3,
         }}>
-          {meta.label}
-        </span>
+          {meta.label} <ChevronRight size={9} style={{ transform: 'rotate(90deg)', opacity: 0.7 }} />
+        </button>
         {isUrgent && !isHandled && (
           <span style={{ fontSize: 10, color: '#c8442a', fontWeight: 700 }}>● URGENT</span>
         )}
@@ -4024,36 +4090,249 @@ function EmailCard({ msg, busy, onMarkHandled, onUnmarkHandled }) {
         <div style={styles.emailDate}>{formatEmailDate(msg.email_date)}</div>
       </div>
 
-      {/* From + subject */}
+      {/* Category change menu */}
+      {showCatMenu && (
+        <CategoryMenu
+          current={msg.category}
+          onPick={reclassify}
+          onClose={() => setShowCatMenu(false)}
+        />
+      )}
+
       <div style={styles.emailFrom}>{cleanEmailFrom(msg.email_from)}</div>
       <div style={styles.emailSubject}>{msg.email_subject}</div>
 
-      {/* AI summary (replaces raw snippet — more useful) */}
       {msg.summary && (
-        <div style={{ ...styles.emailSnippet, color: '#5c4a38', marginTop: 4 }}>
-          {msg.summary}
-        </div>
+        <div style={{ ...styles.emailSnippet, color: '#5c4a38', marginTop: 4 }}>{msg.summary}</div>
       )}
 
-      {/* Suggested action */}
       {msg.suggested_action && !isHandled && (
         <div style={{ fontSize: 11, color: '#7a8270', marginTop: 6, fontStyle: 'italic' }}>
           → {msg.suggested_action}
         </div>
       )}
 
-      {/* Action buttons */}
       <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
         {isHandled ? (
           <button onClick={onUnmarkHandled} disabled={busy} className="salus-btn" style={styles.btnGhost}>
             ↩ Unmark
           </button>
         ) : (
-          <button onClick={onMarkHandled} disabled={busy} className="salus-btn"
-            style={{ ...styles.btnGhost, color: '#5b7245', borderColor: '#cdd9bc' }}>
-            <Check size={12} /> Mark handled
-          </button>
+          <>
+            <button onClick={onMarkHandled} disabled={busy} className="salus-btn"
+              style={{ ...styles.btnGhost, color: '#5b7245', borderColor: '#cdd9bc' }}>
+              <Check size={12} /> Mark handled
+            </button>
+            {onNudge && (
+              <button onClick={onNudge} className="salus-btn"
+                style={{ ...styles.btnGhost, color: '#5c4a38' }}>
+                <Users size={12} /> Nudge…
+              </button>
+            )}
+          </>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Reusable category-change dropdown
+function CategoryMenu({ current, onPick, onClose }) {
+  const options = ['cancellation', 'refund', 'tour', 'inquiry', 'complaint', 'newsletter', 'internal', 'other'];
+  return (
+    <>
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, zIndex: 49,
+      }} />
+      <div style={{
+        position: 'absolute', top: 32, left: 12, zIndex: 50,
+        background: '#fffdf7', border: '1px solid #efe7d2',
+        borderRadius: 10, boxShadow: '0 4px 12px rgba(92, 74, 56, 0.15)',
+        padding: 4, minWidth: 140,
+      }}>
+        <div style={{ fontSize: 10, color: '#a59478', padding: '6px 8px 4px', fontWeight: 600 }}>
+          CHANGE CATEGORY
+        </div>
+        {options.map(opt => {
+          const m = CATEGORY_META[opt];
+          const isCurrent = opt === current;
+          return (
+            <button key={opt} onClick={() => onPick(opt)} className="salus-btn" style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '8px 8px', width: '100%', textAlign: 'left',
+              fontSize: 12, color: isCurrent ? '#a59478' : '#1a2620',
+              fontWeight: isCurrent ? 400 : 500,
+            }}>
+              <span style={{
+                width: 8, height: 8, borderRadius: '50%', background: m.fg,
+              }} />
+              {m.label}
+              {isCurrent && <span style={{ marginLeft: 'auto', fontSize: 10 }}>(current)</span>}
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+// ─── Nudge modal — creates a task for a teammate to handle this email ───
+function NudgeModal({ msg, users, currentUserId, onCreateTask, onClose }) {
+  const [assigneeId, setAssigneeId] = useState(null);
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  // Sort: FOH first, then coaches, alphabetical. Exclude current user.
+  const pickable = users
+    .filter(u => u.id !== currentUserId && (u.isFoh || u.isCoach || u.role === 'manager'))
+    .sort((a, b) => {
+      if (a.isFoh !== b.isFoh) return a.isFoh ? -1 : 1;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+
+  const fromName = cleanEmailFrom(msg.email_from);
+  const meta = CATEGORY_META[msg.category] || CATEGORY_META.other;
+
+  const handleSend = async () => {
+    if (!assigneeId) { alert('Pick a teammate first.'); return; }
+    setBusy(true);
+    try {
+      const taskTitle = `Reply: ${msg.email_subject || `email from ${fromName}`}`.slice(0, 100);
+      const desc = [
+        `📧 Email from: ${fromName}`,
+        msg.email_subject ? `Subject: ${msg.email_subject}` : '',
+        '',
+        msg.summary ? `Summary: ${msg.summary}` : '',
+        msg.suggested_action ? `Suggested: ${msg.suggested_action}` : '',
+        '',
+        note ? `Note from Luke: ${note}` : '',
+      ].filter(Boolean).join('\n');
+
+      const ok = await onCreateTask({
+        title: taskTitle,
+        description: desc,
+        assigneeId,
+        audience: 'specific',
+        dueDate: new Date().toISOString().slice(0, 10), // today
+        priority: msg.urgency === 'high' ? 'urgent' : 'normal',
+        recurrence: 'none',
+        taskKind: 'project',
+      });
+
+      if (ok) {
+        const assignee = users.find(u => u.id === assigneeId);
+        alert(`Nudge sent to ${assignee?.name || 'teammate'}. They'll see a task on their Home + a push notification.`);
+        onClose();
+      } else {
+        alert('Could not create the task. Try again.');
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 60,
+      background: 'rgba(26, 38, 32, 0.55)',
+      display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+    }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="salus-modal-content" style={{
+        width: '100%', maxWidth: 460,
+        background: '#fffdf7', borderRadius: '16px 16px 0 0',
+        padding: 20, maxHeight: '85vh', overflowY: 'auto',
+      }}>
+        {/* Handle bar */}
+        <div style={{ width: 36, height: 4, background: '#efe7d2', borderRadius: 999, margin: '0 auto 16px' }} />
+
+        <div style={{ fontFamily: '"Fraunces", serif', fontSize: 20, color: '#1a2620', marginBottom: 4 }}>
+          Nudge a teammate
+        </div>
+        <div style={{ fontSize: 12, color: '#7a8270', marginBottom: 16 }}>
+          Creates a task for them to handle this email. They'll get a push notification.
+        </div>
+
+        {/* Email context card */}
+        <div style={{
+          background: '#fef7e8', border: '1px solid #efe7d2', borderRadius: 10,
+          padding: 10, marginBottom: 16,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <span style={{
+              fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 999,
+              background: meta.bg, color: meta.fg, textTransform: 'uppercase', letterSpacing: 0.4,
+            }}>{meta.label}</span>
+            <div style={{ fontSize: 11, color: '#7a8270' }}>From {fromName}</div>
+          </div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#1a2620' }}>{msg.email_subject}</div>
+          {msg.summary && (
+            <div style={{ fontSize: 12, color: '#5c4a38', marginTop: 4 }}>{msg.summary}</div>
+          )}
+        </div>
+
+        {/* Assignee picker */}
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
+          Send to
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 16, maxHeight: 220, overflowY: 'auto' }}>
+          {pickable.map(u => (
+            <button key={u.id} onClick={() => setAssigneeId(u.id)} className="salus-btn" style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '10px 12px', borderRadius: 10, textAlign: 'left',
+              background: assigneeId === u.id ? '#fef0d8' : 'transparent',
+              border: assigneeId === u.id ? '1px solid #c6926a' : '1px solid transparent',
+            }}>
+              <div style={{
+                width: 28, height: 28, borderRadius: '50%',
+                background: u.isFoh ? '#fef7e8' : '#e8ede0',
+                color: u.isFoh ? '#c6926a' : '#7a8c5c',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 11, fontWeight: 700,
+              }}>{(u.name || '?').slice(0, 1).toUpperCase()}</div>
+              <div>
+                <div style={{ fontSize: 13, color: '#1a2620' }}>{u.name}</div>
+                <div style={{ fontSize: 10, color: '#a59478' }}>
+                  {u.isFoh ? 'FOH' : ''}{u.isFoh && u.isCoach ? ' · ' : ''}{u.isCoach ? 'Coach' : ''}{u.role === 'manager' ? ' · Manager' : ''}
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+
+        {/* Optional note */}
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
+          Note (optional)
+        </div>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="e.g. Reply by tomorrow, copy me in"
+          style={{
+            width: '100%', minHeight: 60, padding: 10, marginBottom: 16,
+            borderRadius: 10, border: '1px solid #efe7d2',
+            background: '#fffdf7', fontFamily: 'inherit', fontSize: 13, color: '#1a2620',
+            resize: 'vertical',
+          }}
+        />
+
+        {/* Action buttons */}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={onClose} className="salus-btn" style={{
+            flex: 1, padding: '12px', borderRadius: 999,
+            background: '#fffdf7', border: '1px solid #efe7d2', color: '#5c4a38',
+            fontSize: 14, fontWeight: 600,
+          }}>
+            Cancel
+          </button>
+          <button onClick={handleSend} disabled={!assigneeId || busy} className="salus-btn" style={{
+            flex: 1, padding: '12px', borderRadius: 999,
+            background: assigneeId ? '#5c4a38' : '#a59478', color: '#fffdf7',
+            fontSize: 14, fontWeight: 600,
+            opacity: busy ? 0.6 : 1,
+          }}>
+            {busy ? 'Sending…' : 'Send nudge'}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -5516,144 +5795,484 @@ function Home({ data, currentUser, isManager, onClassClick, onRequestCover, onHi
 
   const firstName = currentUser.name?.split(' ')[0] || 'there';
 
+  // Widget config — fallback to defaults if user hasn't set anything
+  const widgets = currentUser.homeWidgets && currentUser.homeWidgets.length > 0
+    ? currentUser.homeWidgets
+    : ['cover', 'upcoming', 'tours', 'tasks', 'request_cover', 'hire_studio'];
+  const has = (key) => widgets.includes(key);
+  const [showCustomize, setShowCustomize] = useState(false);
+
   return (
     <div style={styles.homeContainer}>
       {/* Greeting */}
       <div style={styles.homeGreeting}>
-        <h1 style={styles.homeH1}>{greeting}, {firstName}</h1>
-        <p style={styles.homeGreetSub}>{todayStr} · {classesToday.length} {classesToday.length === 1 ? 'class' : 'classes'} today</p>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+          <div>
+            <h1 style={styles.homeH1}>{greeting}, {firstName}</h1>
+            <p style={styles.homeGreetSub}>{todayStr} · {classesToday.length} {classesToday.length === 1 ? 'class' : 'classes'} today</p>
+          </div>
+          <button onClick={() => setShowCustomize(true)} className="salus-btn" style={{
+            padding: '6px 10px', borderRadius: 999,
+            background: '#fffdf7', border: '1px solid #efe7d2',
+            color: '#7a8270', fontSize: 11, fontWeight: 600,
+            display: 'flex', alignItems: 'center', gap: 4,
+          }}>
+            <SettingsIcon size={11} /> Customize
+          </button>
+        </div>
       </div>
 
-      {/* Cover tile */}
-      <HomeTile
-        title="Needs cover"
-        count={totalCoverAttention}
-        summary={coverSummary}
-        open={coverOpen}
-        onToggle={() => setCoverOpen(o => !o)}
-        urgent={totalCoverAttention > 0}
-        onViewAll={totalCoverAttention > 0 ? onViewAllCover : null}
-      >
-        {totalCoverAttention === 0 ? (
-          <div style={styles.homeEmptyCover}>
-            <div style={{ fontSize: 22, marginBottom: 4 }}>✓</div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#5c4a38' }}>All shifts covered</div>
-            <div style={{ fontSize: 11, color: '#a59478', marginTop: 2 }}>Nothing on the board right now.</div>
-          </div>
-        ) : (
-          <>
-            {openCovers.map((req, idx) => (
-              <CoverHomeCard
-                key={req.id}
-                req={req}
-                users={data.users}
-                interested={data.users.filter(u => req.interestedCovers?.includes(u.id))}
-                urgent={idx === 0}
-                onClick={() => onClassClick(req.cls.id)}
-                onClaim={() => onClaim(req)}
-                currentUser={currentUser}
-              />
-            ))}
-            {pendingForManager.length > 0 && (
-              <>
-                <div style={{ ...styles.homeSectionTitle, marginTop: 14, marginBottom: 8, color: '#7a8270', paddingLeft: 4 }}>
-                  Awaiting your approval
+      {/* Render widgets in user's chosen order */}
+      {widgets.map(widgetKey => {
+        switch (widgetKey) {
+          case 'cover': return (
+            <HomeTile
+              key="cover"
+              title="Needs cover"
+              count={totalCoverAttention}
+              summary={coverSummary}
+              open={coverOpen}
+              onToggle={() => setCoverOpen(o => !o)}
+              urgent={totalCoverAttention > 0}
+              onViewAll={totalCoverAttention > 0 ? onViewAllCover : null}
+            >
+              {totalCoverAttention === 0 ? (
+                <div style={styles.homeEmptyCover}>
+                  <div style={{ fontSize: 22, marginBottom: 4 }}>✓</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#5c4a38' }}>All shifts covered</div>
+                  <div style={{ fontSize: 11, color: '#a59478', marginTop: 2 }}>Nothing on the board right now.</div>
                 </div>
-                {pendingForManager.map(req => (
-                  <CoverHomeCard
-                    key={req.id}
-                    req={req}
-                    users={data.users}
-                    interested={[]}
-                    pending={true}
-                    onClick={() => onClassClick(req.cls.id)}
-                    currentUser={currentUser}
-                  />
-                ))}
-              </>
-            )}
+              ) : (
+                <>
+                  {openCovers.map((req, idx) => (
+                    <CoverHomeCard
+                      key={req.id}
+                      req={req}
+                      users={data.users}
+                      interested={data.users.filter(u => req.interestedCovers?.includes(u.id))}
+                      urgent={idx === 0}
+                      onClick={() => onClassClick(req.cls.id)}
+                      onClaim={() => onClaim(req)}
+                      currentUser={currentUser}
+                    />
+                  ))}
+                  {pendingForManager.length > 0 && (
+                    <>
+                      <div style={{ ...styles.homeSectionTitle, marginTop: 14, marginBottom: 8, color: '#7a8270', paddingLeft: 4 }}>
+                        Awaiting your approval
+                      </div>
+                      {pendingForManager.map(req => (
+                        <CoverHomeCard
+                          key={req.id}
+                          req={req}
+                          users={data.users}
+                          interested={[]}
+                          pending={true}
+                          onClick={() => onClassClick(req.cls.id)}
+                          currentUser={currentUser}
+                        />
+                      ))}
+                    </>
+                  )}
+                </>
+              )}
+            </HomeTile>
+          );
+
+          case 'upcoming': return (
+            <HomeTile
+              key="upcoming"
+              title="Your upcoming classes"
+              count={myUpcoming.length}
+              summary={daySummary}
+              open={dayOpen}
+              onToggle={() => setDayOpen(o => !o)}
+            >
+              {myUpcoming.length === 0 ? (
+                <div style={{ ...styles.homeEmptyCover, padding: '18px 14px' }}>
+                  <div style={{ fontSize: 12, color: '#7a8270' }}>Nothing scheduled.</div>
+                </div>
+              ) : (
+                <div style={styles.homeDayCard}>
+                  {myUpcoming.map((cls, idx) => {
+                    const isToday = cls.date === todayIso;
+                    const dayPrefix = isToday ? '' : new Date(cls.date).toLocaleDateString('en-GB', { weekday: 'short' });
+                    return (
+                      <button
+                        key={cls.id}
+                        onClick={() => onClassClick(cls.id)}
+                        className="salus-btn"
+                        style={{ ...styles.homeDayRow, ...(idx > 0 ? styles.homeDayRowBorder : {}) }}
+                      >
+                        <div style={styles.homeDayTime}>
+                          {dayPrefix && <div style={{ fontSize: 9, color: '#a59478', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 600 }}>{dayPrefix}</div>}
+                          {cls.time}
+                        </div>
+                        <div style={{ flex: 1, textAlign: 'left' }}>
+                          <div style={styles.homeDayTitle}>{cls.type}</div>
+                          <div style={styles.homeDayMeta}>{cls.dur} min · {STUDIOS[cls.studio]?.short}</div>
+                        </div>
+                        {idx === 0 && isToday && <span style={styles.homeDayTagNow}>Up next</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </HomeTile>
+          );
+
+          case 'tours': return <ToursTile key="tours" data={data} currentUser={currentUser} onOpenTour={onOpenTour} />;
+          case 'tasks': return <TasksTile key="tasks" data={data} currentUser={currentUser} isManager={isManager} onCreate={onCreateTask} onOpenTask={onOpenTask} onOpenAll={onOpenAllTasks} />;
+
+          case 'request_cover': return (
+            <button key="request_cover" onClick={onRequestCover} style={styles.homeRequestCard} className="salus-btn">
+              <div style={styles.homeRequestIcon}><Plus size={18} /></div>
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={styles.homeRequestTitle}>
+                  {isManager ? 'Post a shift for cover' : 'I need cover for one of my classes'}
+                </div>
+                <div style={styles.homeRequestSub}>Your team will see it instantly</div>
+              </div>
+            </button>
+          );
+
+          case 'hire_studio': return (
+            <button key="hire_studio" onClick={onHireStudio} style={styles.homeHireCard} className="salus-btn">
+              <div style={styles.homeHireIcon}><Calendar size={18} /></div>
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={styles.homeRequestTitle}>Hire a studio</div>
+                <div style={styles.homeRequestSub}>For a 1:1 session or private event</div>
+              </div>
+            </button>
+          );
+
+          case 'total_hours': return <TotalHoursWidget key="total_hours" data={data} currentUser={currentUser} />;
+          case 'quote':       return <QuoteWidget key="quote" />;
+          case 'chat_preview': return <ChatPreviewWidget key="chat_preview" data={data} currentUser={currentUser} onViewChat={onViewChat} />;
+          default: return null;
+        }
+      })}
+
+      {/* Customize modal */}
+      {showCustomize && (
+        <CustomizeHomeModal
+          currentWidgets={widgets}
+          isManager={isManager}
+          currentUser={currentUser}
+          onClose={() => setShowCustomize(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Total Hours widget ──────────────────────────────────────────────────
+function TotalHoursWidget({ data, currentUser }) {
+  // Calculate this week's hours: classes (45min default) + FOH shifts
+  const today = new Date();
+  const dayOfWeek = (today.getDay() + 6) % 7; // 0=Mon
+  const monday = new Date(today); monday.setDate(today.getDate() - dayOfWeek); monday.setHours(0, 0, 0, 0);
+  const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6); sunday.setHours(23, 59, 59, 999);
+  const isoMon = monday.toISOString().slice(0, 10);
+  const isoSun = sunday.toISOString().slice(0, 10);
+
+  // Class hours
+  const myClasses = (data.classes || []).filter(c =>
+    c.coachId === currentUser.id && c.date >= isoMon && c.date <= isoSun
+  );
+  const classHours = myClasses.reduce((sum, c) => sum + (c.dur || 45) / 60, 0);
+
+  // FOH shift hours
+  const myShifts = (data.shifts || []).filter(s =>
+    s.userId === currentUser.id && s.date >= isoMon && s.date <= isoSun
+  );
+  const shiftHours = myShifts.reduce((sum, s) => {
+    if (!s.startTime || !s.endTime) return sum;
+    const [sh, sm] = s.startTime.split(':').map(Number);
+    const [eh, em] = s.endTime.split(':').map(Number);
+    return sum + ((eh * 60 + em) - (sh * 60 + sm)) / 60;
+  }, 0);
+
+  const total = classHours + shiftHours;
+
+  return (
+    <div style={{ ...styles.tile, padding: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{
+          width: 44, height: 44, borderRadius: 12,
+          background: '#fef0d8', color: '#c6926a',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <Clock size={22} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 11, color: '#7a8270', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            This week's hours
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
+            <div style={{ fontFamily: '"Fraunces", serif', fontSize: 28, color: '#1a2620' }}>
+              {total.toFixed(1)}
+            </div>
+            <div style={{ fontSize: 13, color: '#7a8270' }}>hours</div>
+          </div>
+          <div style={{ fontSize: 11, color: '#a59478', marginTop: 2 }}>
+            {classHours > 0 && `${classHours.toFixed(1)}h teaching`}
+            {classHours > 0 && shiftHours > 0 && ' · '}
+            {shiftHours > 0 && `${shiftHours.toFixed(1)}h FOH`}
+            {total === 0 && 'Nothing scheduled'}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Daily quote widget ──────────────────────────────────────────────────
+const QUOTES = [
+  { text: "The body achieves what the mind believes.", author: "Napoleon Hill" },
+  { text: "Take care of your body. It's the only place you have to live.", author: "Jim Rohn" },
+  { text: "Movement is a medicine for creating change in a person's physical, emotional, and mental states.", author: "Carol Welch" },
+  { text: "Pilates is complete coordination of body, mind, and spirit.", author: "Joseph Pilates" },
+  { text: "Change happens through movement and movement heals.", author: "Joseph Pilates" },
+  { text: "A few well-designed movements, properly performed in a balanced sequence, are worth hours of doing sloppy calisthenics.", author: "Joseph Pilates" },
+  { text: "Strength does not come from the body. It comes from the will.", author: "Mahatma Gandhi" },
+  { text: "Be kind to yourself. Push your limits but listen to your body.", author: "Unknown" },
+  { text: "Every expert was once a beginner.", author: "Helen Hayes" },
+  { text: "Small daily improvements are the key to staggering long-term results.", author: "Robin Sharma" },
+  { text: "What you do today can improve all your tomorrows.", author: "Ralph Marston" },
+  { text: "The only bad workout is the one that didn't happen.", author: "Unknown" },
+  { text: "Wellness is not a state of being, it is a way of doing.", author: "Unknown" },
+  { text: "The groundwork for all happiness is good health.", author: "Leigh Hunt" },
+];
+function QuoteWidget() {
+  // Stable across the day — pick based on day of year
+  const dayOfYear = Math.floor((Date.now() / 86400000)) % QUOTES.length;
+  const q = QUOTES[dayOfYear];
+  return (
+    <div style={{
+      ...styles.tile, padding: 16,
+      background: '#fef7e8', borderColor: '#efe7d2',
+    }}>
+      <div style={{ fontSize: 11, color: '#a59478', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
+        Quote of the day
+      </div>
+      <div style={{ fontFamily: '"Fraunces", serif', fontSize: 16, color: '#1a2620', lineHeight: 1.4, fontStyle: 'italic' }}>
+        "{q.text}"
+      </div>
+      <div style={{ fontSize: 11, color: '#7a8270', marginTop: 8 }}>— {q.author}</div>
+    </div>
+  );
+}
+
+// ─── Chat preview widget ─────────────────────────────────────────────────
+function ChatPreviewWidget({ data, currentUser, onViewChat }) {
+  const recent = [...(data.messages || [])]
+    .filter(m => m.userId !== currentUser.id)
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    .slice(0, 3);
+
+  if (recent.length === 0) {
+    return (
+      <div style={{ ...styles.tile, padding: 16 }}>
+        <div style={{ fontSize: 11, color: '#7a8270', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
+          Team chat
+        </div>
+        <div style={{ fontSize: 13, color: '#a59478' }}>No messages yet.</div>
+      </div>
+    );
+  }
+
+  return (
+    <button onClick={onViewChat} className="salus-btn" style={{ ...styles.tile, padding: 16, textAlign: 'left', width: '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <div style={{ fontSize: 11, color: '#7a8270', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+          Team chat
+        </div>
+        <ChevronRight size={14} color="#a59478" />
+      </div>
+      {recent.map((m, idx) => {
+        const author = (data.users || []).find(u => u.id === m.userId);
+        return (
+          <div key={m.id} style={{
+            display: 'flex', gap: 8, alignItems: 'flex-start',
+            paddingTop: idx > 0 ? 8 : 0, paddingBottom: 8,
+            borderTop: idx > 0 ? '1px solid #efe7d2' : 'none',
+          }}>
+            <div style={{
+              width: 24, height: 24, borderRadius: '50%',
+              background: '#e8ede0', color: '#7a8c5c',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 10, fontWeight: 700, flexShrink: 0,
+            }}>{(author?.name || '?').slice(0, 1).toUpperCase()}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#1a2620' }}>{author?.name || 'Unknown'}</div>
+              <div style={{
+                fontSize: 12, color: '#7a8270', marginTop: 1,
+                overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box',
+                WebkitLineClamp: 1, WebkitBoxOrient: 'vertical',
+              }}>{m.text}</div>
+            </div>
+          </div>
+        );
+      })}
+    </button>
+  );
+}
+
+// ─── Widget registry — used by the customize modal ───
+const ALL_WIDGETS = [
+  { key: 'cover',         label: 'Cover requests',       icon: '🔄', desc: 'Classes/shifts needing cover' },
+  { key: 'upcoming',      label: 'Your upcoming classes', icon: '📅', desc: 'Your next teaching slots' },
+  { key: 'tours',         label: 'Tours',                icon: '🚪', desc: 'Today and upcoming tours from Google Calendar' },
+  { key: 'tasks',         label: 'Tasks',                icon: '✅', desc: 'Your task list' },
+  { key: 'total_hours',   label: 'Total hours this week', icon: '⏱️', desc: 'Your scheduled hours (classes + FOH)' },
+  { key: 'request_cover', label: 'Request cover',        icon: '➕', desc: 'Quick button to post a cover request' },
+  { key: 'hire_studio',   label: 'Hire a studio',        icon: '🏛️', desc: 'Quick button to book the studio' },
+  { key: 'quote',         label: 'Quote of the day',     icon: '💭', desc: 'A different inspiring quote each day' },
+  { key: 'chat_preview',  label: 'Team chat preview',    icon: '💬', desc: 'Latest 3 messages from team chat' },
+];
+
+// ─── Customize Home modal ────────────────────────────────────────────────
+function CustomizeHomeModal({ currentWidgets, isManager, currentUser, onClose }) {
+  const [selected, setSelected] = useState(currentWidgets);
+  const [saving, setSaving] = useState(false);
+
+  const toggle = (key) => {
+    setSelected(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
+  };
+  const moveUp = (key) => {
+    setSelected(prev => {
+      const i = prev.indexOf(key);
+      if (i <= 0) return prev;
+      const copy = [...prev];
+      [copy[i - 1], copy[i]] = [copy[i], copy[i - 1]];
+      return copy;
+    });
+  };
+  const moveDown = (key) => {
+    setSelected(prev => {
+      const i = prev.indexOf(key);
+      if (i < 0 || i >= prev.length - 1) return prev;
+      const copy = [...prev];
+      [copy[i + 1], copy[i]] = [copy[i], copy[i + 1]];
+      return copy;
+    });
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ home_widgets: selected })
+        .eq('id', currentUser.id);
+      if (error) throw error;
+      onClose();
+    } catch (e) {
+      alert('Failed to save: ' + (e.message || e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Active widgets in user's order + inactive widgets at the bottom
+  const inactive = ALL_WIDGETS.filter(w => !selected.includes(w.key));
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 60,
+      background: 'rgba(26, 38, 32, 0.55)',
+      display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+    }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="salus-modal-content" style={{
+        width: '100%', maxWidth: 460,
+        background: '#fffdf7', borderRadius: '16px 16px 0 0',
+        padding: 20, maxHeight: '85vh', overflowY: 'auto',
+      }}>
+        <div style={{ width: 36, height: 4, background: '#efe7d2', borderRadius: 999, margin: '0 auto 16px' }} />
+
+        <div style={{ fontFamily: '"Fraunces", serif', fontSize: 20, color: '#1a2620', marginBottom: 4 }}>
+          Customize home
+        </div>
+        <div style={{ fontSize: 12, color: '#7a8270', marginBottom: 16 }}>
+          Pick the widgets you want on your home page. Drag-order with ↑↓ arrows.
+        </div>
+
+        {/* Active widgets (in order) */}
+        {selected.length > 0 && (
+          <>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
+              Showing on your home
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              {selected.map((key, idx) => {
+                const w = ALL_WIDGETS.find(x => x.key === key);
+                if (!w) return null;
+                return (
+                  <div key={key} style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '10px 4px', borderBottom: idx < selected.length - 1 ? '1px solid #efe7d2' : 'none',
+                  }}>
+                    <span style={{ fontSize: 18 }}>{w.icon}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, color: '#1a2620', fontWeight: 500 }}>{w.label}</div>
+                    </div>
+                    <button onClick={() => moveUp(key)} disabled={idx === 0} className="salus-btn"
+                      style={{ padding: 6, opacity: idx === 0 ? 0.3 : 1, color: '#7a8270' }}>↑</button>
+                    <button onClick={() => moveDown(key)} disabled={idx === selected.length - 1} className="salus-btn"
+                      style={{ padding: 6, opacity: idx === selected.length - 1 ? 0.3 : 1, color: '#7a8270' }}>↓</button>
+                    <button onClick={() => toggle(key)} className="salus-btn"
+                      style={{ padding: '4px 8px', borderRadius: 6, background: '#fef0ec', color: '#c8442a', fontSize: 11 }}>
+                      Hide
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           </>
         )}
-      </HomeTile>
 
-      {/* Your day tile */}
-      <HomeTile
-        title="Your upcoming classes"
-        count={myUpcoming.length}
-        summary={daySummary}
-        open={dayOpen}
-        onToggle={() => setDayOpen(o => !o)}
-      >
-        {myUpcoming.length === 0 ? (
-          <div style={{ ...styles.homeEmptyCover, padding: '18px 14px' }}>
-            <div style={{ fontSize: 12, color: '#7a8270' }}>Nothing scheduled.</div>
-          </div>
-        ) : (
-          <div style={styles.homeDayCard}>
-            {myUpcoming.map((cls, idx) => {
-              const isToday = cls.date === todayIso;
-              const dayPrefix = isToday ? '' : new Date(cls.date).toLocaleDateString('en-GB', { weekday: 'short' });
-              return (
-                <button
-                  key={cls.id}
-                  onClick={() => onClassClick(cls.id)}
-                  className="salus-btn"
-                  style={{ ...styles.homeDayRow, ...(idx > 0 ? styles.homeDayRowBorder : {}) }}
-                >
-                  <div style={styles.homeDayTime}>
-                    {dayPrefix && <div style={{ fontSize: 9, color: '#a59478', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 600 }}>{dayPrefix}</div>}
-                    {cls.time}
+        {/* Inactive widgets */}
+        {inactive.length > 0 && (
+          <>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
+              Available widgets
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              {inactive.map((w, idx) => (
+                <div key={w.key} style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '10px 4px', borderBottom: idx < inactive.length - 1 ? '1px solid #efe7d2' : 'none',
+                }}>
+                  <span style={{ fontSize: 18 }}>{w.icon}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, color: '#1a2620', fontWeight: 500 }}>{w.label}</div>
+                    <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>{w.desc}</div>
                   </div>
-                  <div style={{ flex: 1, textAlign: 'left' }}>
-                    <div style={styles.homeDayTitle}>{cls.type}</div>
-                    <div style={styles.homeDayMeta}>{cls.dur} min · {STUDIOS[cls.studio]?.short}</div>
-                  </div>
-                  {idx === 0 && isToday && <span style={styles.homeDayTagNow}>Up next</span>}
-                </button>
-              );
-            })}
-          </div>
+                  <button onClick={() => toggle(w.key)} className="salus-btn"
+                    style={{ padding: '4px 10px', borderRadius: 6, background: '#e3ecd8', color: '#5b7245', fontSize: 11, fontWeight: 600 }}>
+                    + Add
+                  </button>
+                </div>
+              ))}
+            </div>
+          </>
         )}
-      </HomeTile>
 
-      {/* Tours (synced from Google Calendar) */}
-      <ToursTile
-        data={data}
-        currentUser={currentUser}
-        onOpenTour={onOpenTour}
-      />
-
-      {/* Tasks / reminders */}
-      <TasksTile
-        data={data}
-        currentUser={currentUser}
-        isManager={isManager}
-        onCreate={onCreateTask}
-        onOpenTask={onOpenTask}
-        onOpenAll={onOpenAllTasks}
-      />
-
-      {/* Request cover CTA */}
-      <button onClick={onRequestCover} style={styles.homeRequestCard} className="salus-btn">
-        <div style={styles.homeRequestIcon}><Plus size={18} /></div>
-        <div style={{ flex: 1, textAlign: 'left' }}>
-          <div style={styles.homeRequestTitle}>
-            {isManager ? 'Post a shift for cover' : 'I need cover for one of my classes'}
-          </div>
-          <div style={styles.homeRequestSub}>Your team will see it instantly</div>
+        {/* Actions */}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={onClose} className="salus-btn" style={{
+            flex: 1, padding: 12, borderRadius: 999,
+            background: '#fffdf7', border: '1px solid #efe7d2', color: '#5c4a38',
+            fontSize: 14, fontWeight: 600,
+          }}>Cancel</button>
+          <button onClick={handleSave} disabled={saving} className="salus-btn" style={{
+            flex: 1, padding: 12, borderRadius: 999,
+            background: '#5c4a38', color: '#fffdf7',
+            fontSize: 14, fontWeight: 600, opacity: saving ? 0.6 : 1,
+          }}>{saving ? 'Saving…' : 'Save'}</button>
         </div>
-      </button>
-
-      {/* Hire studio CTA */}
-      <button onClick={onHireStudio} style={styles.homeHireCard} className="salus-btn">
-        <div style={styles.homeHireIcon}>
-          <Calendar size={18} />
-        </div>
-        <div style={{ flex: 1, textAlign: 'left' }}>
-          <div style={styles.homeRequestTitle}>Hire a studio</div>
-          <div style={styles.homeRequestSub}>For a 1:1 session or private event</div>
-        </div>
-      </button>
+      </div>
     </div>
   );
 }
