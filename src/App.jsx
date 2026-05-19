@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Calendar, MessageSquare, Users, BarChart3, AlertCircle, AlertOctagon, Plus,
   Send, ArrowLeftRight, Check, X, Clock, Bell, RotateCcw, Settings, Mail, LogOut,
@@ -122,6 +122,28 @@ function toIsoDate(date) {
   return d.getFullYear() + '-' +
     String(d.getMonth() + 1).padStart(2, '0') + '-' +
     String(d.getDate()).padStart(2, '0');
+}
+
+// Renders text with @mentions highlighted. If `me` is mentioned, the highlight is stronger.
+function renderMentionedText(text, mentionUserIds, meId) {
+  if (!text) return null;
+  // Split on @word patterns
+  const parts = text.split(/(@[\p{L}\p{N}_-]+)/gu);
+  return parts.map((p, i) => {
+    if (p.startsWith('@')) {
+      const meMentioned = mentionUserIds && mentionUserIds.length > 0; // approximate
+      return (
+        <span key={i} style={{
+          color: meMentioned ? '#c6926a' : '#5c4a38',
+          fontWeight: 600,
+          background: meMentioned ? '#fef7e8' : 'transparent',
+          padding: meMentioned ? '0 4px' : 0,
+          borderRadius: 4,
+        }}>{p}</span>
+      );
+    }
+    return p;
+  });
 }
 
 // Build a Google Calendar "render" URL that pre-fills a new event.
@@ -831,6 +853,67 @@ export default function SalusStaff() {
     return true;
   };
 
+  // ─── Subtasks ───
+  // A subtask is a normal task row with parent_task_id set to the parent.
+  // Inherits audience='specific' and the parent's assignee unless overridden.
+  const addSubtask = async (parentId, title, assigneeId) => {
+    if (!parentId || !title?.trim()) return false;
+    const parent = data.tasks.find(t => t.id === parentId);
+    if (!parent) return false;
+    const { error } = await supabase.from('tasks').insert({
+      title: title.trim(),
+      audience: 'specific',
+      assignee_id: assigneeId || parent.assigneeId || currentUserId,
+      created_by: currentUserId,
+      status: 'todo',
+      priority: 'normal',
+      task_kind: 'daily', // subtasks are simple ✓/✗
+      parent_task_id: parentId,
+    });
+    if (error) { console.error('addSubtask', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  const toggleSubtask = async (subtaskId, done) => {
+    return await setTaskStatus(subtaskId, done ? 'done' : 'todo');
+  };
+
+  const deleteSubtask = async (subtaskId) => {
+    if (!subtaskId) return false;
+    const { error } = await supabase.from('tasks').delete().eq('id', subtaskId);
+    if (error) { console.error('deleteSubtask', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
+  // ─── Comment with @mentions ───
+  // Parses @firstName from the text and stores matched user IDs.
+  const addTaskCommentWithMentions = async (taskId, text) => {
+    if (!taskId || !text?.trim()) return false;
+    const trimmed = text.trim();
+    // Match @word — captures the name following the @
+    const matches = [...trimmed.matchAll(/@([\p{L}\p{N}_-]+)/gu)].map(m => m[1].toLowerCase());
+    const mentionIds = matches
+      .map(name => data.users.find(u =>
+        (u.name || '').toLowerCase().split(' ')[0] === name
+        || (u.name || '').toLowerCase().replace(/\s+/g, '') === name
+      )?.id)
+      .filter(Boolean);
+    const unique = [...new Set(mentionIds)];
+
+    const { error } = await supabase.from('task_comments').insert({
+      task_id: taskId,
+      user_id: currentUserId,
+      text: trimmed,
+      kind: 'comment',
+      mention_user_ids: unique.length ? unique : null,
+    });
+    if (error) { console.error('addTaskComment', error); return false; }
+    await reloadData(true);
+    return true;
+  };
+
   // ─── Shift handover notes ───
   const addShiftNote = async (shiftId, text) => {
     if (!shiftId || !text?.trim()) return false;
@@ -1398,6 +1481,7 @@ export default function SalusStaff() {
             onViewChat={() => setTab('chat')}
             onCreateTask={() => setModal({ type: 'createTask' })}
             onOpenTask={(taskId) => setModal({ type: 'taskDetail', taskId })}
+            onOpenAllTasks={() => setModal({ type: 'tasksPage' })}
             onOpenTour={(tourId) => setModal({ type: 'tourDetail', tourId })}
             onCreateMaintenance={() => setModal({ type: 'createMaintenance' })}
             onOpenMaintenance={(id) => setModal({ type: 'maintenanceDetail', id })}
@@ -1632,11 +1716,24 @@ export default function SalusStaff() {
             onMarkDone={markTaskDone}
             onSetStatus={setTaskStatus}
             onDelete={deleteTask}
-            onAddComment={addTaskComment}
+            onAddComment={addTaskCommentWithMentions}
             onDeleteComment={deleteTaskComment}
+            onAddSubtask={addSubtask}
+            onToggleSubtask={toggleSubtask}
+            onDeleteSubtask={deleteSubtask}
           />
         );
       })()}
+      {modal?.type === 'tasksPage' && (
+        <TasksPage
+          data={data}
+          currentUser={currentUser}
+          isManager={isManager}
+          onClose={() => setModal(null)}
+          onOpenTask={(taskId) => setModal({ type: 'taskDetail', taskId })}
+          onCreateTask={() => setModal({ type: 'createTask' })}
+        />
+      )}
       {modal?.type === 'createMaintenance' && (
         <CreateMaintenanceModal onClose={() => setModal(null)} onCreate={createMaintenanceLog} />
       )}
@@ -4639,7 +4736,7 @@ function MonthView({ classes, coverRequests, currentUser, onDayClick }) {
 // HOME — cover-first dashboard, the new app landing screen
 // ──────────────────────────────────────────────────────────────────────────────
 
-function Home({ data, currentUser, isManager, onClassClick, onRequestCover, onHireStudio, onClaim, onExpressInterest, onViewAllCover, onViewChat, onCreateTask, onOpenTask, onOpenTour, onCreateMaintenance, onOpenMaintenance, onCreateFeedback, onOpenFeedback }) {
+function Home({ data, currentUser, isManager, onClassClick, onRequestCover, onHireStudio, onClaim, onExpressInterest, onViewAllCover, onViewChat, onCreateTask, onOpenTask, onOpenAllTasks, onOpenTour, onCreateMaintenance, onOpenMaintenance, onCreateFeedback, onOpenFeedback }) {
   const now = new Date();
   const hour = now.getHours();
   const greeting = hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening';
@@ -4807,6 +4904,7 @@ function Home({ data, currentUser, isManager, onClassClick, onRequestCover, onHi
         isManager={isManager}
         onCreate={onCreateTask}
         onOpenTask={onOpenTask}
+        onOpenAll={onOpenAllTasks}
       />
 
       {/* Request cover CTA */}
@@ -8901,6 +8999,172 @@ function tasksForUser(allTasks, user) {
 // TOURS — synced from Google Calendar
 // ──────────────────────────────────────────────────────────────────────────────
 
+// ──────────────────────────────────────────────────────────────────────────────
+// TASKS PAGE — full-screen view: By Person / All / Mine
+// ──────────────────────────────────────────────────────────────────────────────
+
+function TasksPage({ data, currentUser, isManager, onClose, onOpenTask, onCreateTask }) {
+  const [view, setView] = useState(isManager ? 'byPerson' : 'mine');
+  // 'byPerson' | 'all' | 'mine'
+
+  const openTasks = data.tasks.filter(t =>
+    !t.isTemplate
+    && !t.parentTaskId       // hide subtasks from top level
+    && t.status !== 'done'
+  );
+
+  // Bucket: per user
+  const byPerson = useMemo(() => {
+    const map = new Map();
+    // Initialise every staffer's row even if they have 0 open
+    data.users.filter(u => u.isFoh || u.isCoach || u.role === 'manager').forEach(u => {
+      map.set(u.id, { user: u, tasks: [] });
+    });
+    openTasks.forEach(t => {
+      if (t.audience === 'specific' && t.assigneeId) {
+        if (map.has(t.assigneeId)) map.get(t.assigneeId).tasks.push(t);
+      } else {
+        // Group-audience tasks: shown under each matching person
+        data.users.forEach(u => {
+          if ((t.audience === 'all_foh'   && u.isFoh)
+           || (t.audience === 'all_coach' && u.isCoach)
+           || (t.audience === 'all_staff')) {
+            if (map.has(u.id)) map.get(u.id).tasks.push(t);
+          }
+        });
+      }
+    });
+    // Sort: most tasks first, then alphabetical
+    return [...map.values()].sort((a, b) => {
+      if (b.tasks.length !== a.tasks.length) return b.tasks.length - a.tasks.length;
+      return (a.user.name || '').localeCompare(b.user.name || '');
+    });
+  }, [data.tasks, data.users]);
+
+  const mine = openTasks.filter(t =>
+    (t.audience === 'specific' && t.assigneeId === currentUser.id)
+    || (t.audience === 'all_foh'   && currentUser.isFoh)
+    || (t.audience === 'all_coach' && currentUser.isCoach)
+    || (t.audience === 'all_staff')
+  );
+
+  return (
+    <div style={styles.threadBackdrop} onClick={onClose}>
+      <div style={{ ...styles.threadSheet, maxHeight: '92vh' }} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.threadHeader}>
+          <button onClick={onClose} className="salus-btn" style={styles.threadCloseBtn}><X size={20} /></button>
+          <div style={styles.threadHeaderTitle}>Tasks</div>
+          <button onClick={onCreateTask} className="salus-btn" style={styles.threadCloseBtn}><Plus size={20} /></button>
+        </div>
+
+        {/* View switcher */}
+        <div style={styles.tasksPageViewRow}>
+          {isManager && (
+            <button onClick={() => setView('byPerson')} className="salus-btn"
+              style={{ ...styles.tasksPageViewBtn, ...(view === 'byPerson' ? styles.tasksPageViewBtnActive : {}) }}>
+              By person
+            </button>
+          )}
+          <button onClick={() => setView('mine')} className="salus-btn"
+            style={{ ...styles.tasksPageViewBtn, ...(view === 'mine' ? styles.tasksPageViewBtnActive : {}) }}>
+            Mine ({mine.length})
+          </button>
+          <button onClick={() => setView('all')} className="salus-btn"
+            style={{ ...styles.tasksPageViewBtn, ...(view === 'all' ? styles.tasksPageViewBtnActive : {}) }}>
+            All ({openTasks.length})
+          </button>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: 12 }}>
+          {view === 'byPerson' && (
+            byPerson.length === 0 ? (
+              <div style={styles.tasksPageEmpty}>No staff yet.</div>
+            ) : (
+              byPerson.map(({ user, tasks }) => (
+                <PersonTaskGroup
+                  key={user.id}
+                  user={user}
+                  tasks={tasks}
+                  data={data}
+                  currentUser={currentUser}
+                  onOpenTask={onOpenTask}
+                />
+              ))
+            )
+          )}
+
+          {view === 'mine' && (
+            mine.length === 0 ? (
+              <div style={styles.tasksPageEmpty}>Nothing on your plate. Nice.</div>
+            ) : (
+              mine.map(t => (
+                <TaskCard key={t.id} task={t} data={data} currentUser={currentUser}
+                  onOpen={() => onOpenTask(t.id)} />
+              ))
+            )
+          )}
+
+          {view === 'all' && (
+            openTasks.length === 0 ? (
+              <div style={styles.tasksPageEmpty}>No open tasks.</div>
+            ) : (
+              openTasks
+                .sort((a, b) => {
+                  // Urgent first, then by due date, then by created
+                  if (a.priority !== b.priority) return a.priority === 'urgent' ? -1 : 1;
+                  if (a.dueDate && b.dueDate) return a.dueDate.localeCompare(b.dueDate);
+                  if (a.dueDate) return -1;
+                  if (b.dueDate) return 1;
+                  return b.createdAt - a.createdAt;
+                })
+                .map(t => (
+                  <TaskCard key={t.id} task={t} data={data} currentUser={currentUser}
+                    onOpen={() => onOpenTask(t.id)} />
+                ))
+            )
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PersonTaskGroup({ user, tasks, data, currentUser, onOpenTask }) {
+  const [open, setOpen] = useState(tasks.length > 0 && tasks.length <= 5);
+  const projectCount = tasks.filter(t => t.taskKind === 'project').length;
+  const urgentCount = tasks.filter(t => t.priority === 'urgent').length;
+  const blockedCount = tasks.filter(t => t.status === 'blocked').length;
+
+  return (
+    <div style={styles.personGroup}>
+      <button onClick={() => setOpen(o => !o)} className="salus-btn" style={styles.personGroupHeader}>
+        <UserAvatar user={user} size={36} fontSize={13} />
+        <div style={{ flex: 1, textAlign: 'left' }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: '#1a2620' }}>{user.name}</div>
+          <div style={{ fontSize: 11, color: '#7a8270', marginTop: 2 }}>
+            {tasks.length === 0
+              ? 'No open tasks'
+              : `${tasks.length} open${projectCount > 0 ? ` · ${projectCount} project` : ''}${urgentCount > 0 ? ` · ${urgentCount} urgent` : ''}${blockedCount > 0 ? ` · ${blockedCount} blocked` : ''}`}
+          </div>
+        </div>
+        {tasks.length > 0 && (
+          <ChevronRight size={16} color="#a59478" style={{
+            transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s',
+          }} />
+        )}
+      </button>
+      {open && tasks.length > 0 && (
+        <div style={{ marginTop: 6 }}>
+          {tasks.map(t => (
+            <TaskCard key={t.id} task={t} data={data} currentUser={currentUser}
+              onOpen={() => onOpenTask(t.id)} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ToursTile({ data, currentUser, onOpenTour }) {
   const [open, setOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -9117,13 +9381,14 @@ function TourDetailModal({ tour, currentUser, onClose, onUpdate }) {
   );
 }
 
-function TasksTile({ data, currentUser, isManager, onCreate, onOpenTask }) {
+function TasksTile({ data, currentUser, isManager, onCreate, onOpenTask, onOpenAll }) {
   const [open, setOpen] = useState(false);
 
   // Manager sees all open tasks; everyone else sees only theirs.
-  // Templates are hidden — they only spawn instances via the cron.
+  // Hide templates AND subtasks (subtasks are managed inside their parent).
   const allOpen = data.tasks.filter(t =>
     !t.isTemplate
+    && !t.parentTaskId
     && t.status !== 'done'
     && t.status !== 'completed'
   );
@@ -9146,6 +9411,10 @@ function TasksTile({ data, currentUser, isManager, onCreate, onOpenTask }) {
       ? sorted[0].title
       : `${sorted.length} open · ${sorted[0].title}`;
 
+  // In the tile, only show first 5. "View all" button opens the full TasksPage.
+  const preview = sorted.slice(0, 5);
+  const hasMore = sorted.length > preview.length;
+
   return (
     <HomeTile
       title="Tasks"
@@ -9163,7 +9432,7 @@ function TasksTile({ data, currentUser, isManager, onCreate, onOpenTask }) {
         </div>
       ) : (
         <div style={styles.tasksList}>
-          {sorted.map(t => (
+          {preview.map(t => (
             <TaskCard
               key={t.id}
               task={t}
@@ -9174,11 +9443,16 @@ function TasksTile({ data, currentUser, isManager, onCreate, onOpenTask }) {
           ))}
         </div>
       )}
-      {isManager && (
-        <button onClick={onCreate} className="salus-btn" style={styles.tasksCreateBtn}>
-          <Plus size={16} /> New task or reminder
+      <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+        <button onClick={onOpenAll} className="salus-btn" style={styles.tasksOpenAllBtn}>
+          {hasMore ? `View all ${sorted.length} tasks →` : 'Open Tasks board →'}
         </button>
-      )}
+        {isManager && (
+          <button onClick={onCreate} className="salus-btn" style={styles.tasksCreateBtn}>
+            <Plus size={16} /> New task
+          </button>
+        )}
+      </div>
     </HomeTile>
   );
 }
@@ -9265,8 +9539,8 @@ function CreateTaskModal({ data, currentUser, onClose, onCreate }) {
     setSaving(true);
     const ok = await onCreate({
       title, description, assigneeId, audience, dueDate, priority,
-      recurrence: taskKind === 'project' ? 'none' : recurrence,
-      recurrenceDays: taskKind === 'project' ? [] : recurrenceDays,
+      recurrence,
+      recurrenceDays,
       taskKind,
     });
     setSaving(false);
@@ -9405,8 +9679,8 @@ function CreateTaskModal({ data, currentUser, onClose, onCreate }) {
             style={{ width: '100%', marginBottom: 14, fontFamily: 'inherit' }}
           />
 
-          {taskKind !== 'project' && (
-            <>
+          {/* Recurrence — available for both daily and project tasks */}
+          <>
           <label style={styles.label}>Repeat</label>
           <div style={styles.audienceRow}>
             {[
@@ -9468,7 +9742,6 @@ function CreateTaskModal({ data, currentUser, onClose, onCreate }) {
             </div>
           )}
             </>
-          )}
 
           <label style={styles.label}>Priority</label>
           <div style={styles.audienceRow}>
@@ -9513,9 +9786,14 @@ function CreateTaskModal({ data, currentUser, onClose, onCreate }) {
   );
 }
 
-function TaskDetailModal({ task, data, currentUser, isManager, onClose, onMarkDone, onSetStatus, onDelete, onAddComment, onDeleteComment }) {
+function TaskDetailModal({ task, data, currentUser, isManager, onClose, onMarkDone, onSetStatus, onDelete, onAddComment, onDeleteComment, onAddSubtask, onToggleSubtask, onDeleteSubtask }) {
   const [commentText, setCommentText] = useState('');
   const [posting, setPosting] = useState(false);
+  const [showMentionList, setShowMentionList] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [subtaskTitle, setSubtaskTitle] = useState('');
+  const [addingSubtask, setAddingSubtask] = useState(false);
+  const composerRef = useRef(null);
   if (!task) return null;
   const assignee = task.assigneeId ? data.users.find(u => u.id === task.assigneeId) : null;
   const creator = task.createdBy ? data.users.find(u => u.id === task.createdBy) : null;
@@ -9528,6 +9806,51 @@ function TaskDetailModal({ task, data, currentUser, isManager, onClose, onMarkDo
     all_coach: 'Every coach',
     all_staff: 'Everyone at Salus',
   }[task.audience];
+
+  // Subtasks
+  const subtasks = data.tasks
+    .filter(t => t.parentTaskId === task.id)
+    .sort((a, b) => a.createdAt - b.createdAt);
+  const subDone = subtasks.filter(s => s.status === 'done').length;
+
+  // Mention autocomplete: show users matching the current @query
+  const mentionableUsers = (mentionQuery
+    ? data.users.filter(u => (u.name || '').toLowerCase().startsWith(mentionQuery.toLowerCase()) && u.id !== currentUser.id)
+    : data.users.filter(u => u.id !== currentUser.id)
+  ).slice(0, 6);
+
+  const insertMention = (user) => {
+    const firstName = (user.name || '').split(' ')[0];
+    // Replace the @query in progress with @FirstName
+    const cursor = composerRef.current?.selectionStart ?? commentText.length;
+    const before = commentText.slice(0, cursor);
+    const atIdx = before.lastIndexOf('@');
+    if (atIdx >= 0) {
+      const replaced = commentText.slice(0, atIdx) + '@' + firstName + ' ' + commentText.slice(cursor);
+      setCommentText(replaced);
+    }
+    setShowMentionList(false);
+    setMentionQuery('');
+    setTimeout(() => composerRef.current?.focus(), 0);
+  };
+
+  const handleComposerChange = (val) => {
+    setCommentText(val);
+    // Detect @query: text between last @ and current cursor
+    const cursor = composerRef.current?.selectionStart ?? val.length;
+    const before = val.slice(0, cursor);
+    const atIdx = before.lastIndexOf('@');
+    if (atIdx >= 0 && (atIdx === 0 || /\s/.test(before[atIdx - 1]))) {
+      const after = before.slice(atIdx + 1);
+      if (!/\s/.test(after)) {
+        setShowMentionList(true);
+        setMentionQuery(after);
+        return;
+      }
+    }
+    setShowMentionList(false);
+    setMentionQuery('');
+  };
 
   const canUpdate = isManager
     || task.assigneeId === currentUser.id
@@ -9630,6 +9953,74 @@ function TaskDetailModal({ task, data, currentUser, isManager, onClose, onMarkDo
             </div>
           )}
 
+          {/* Subtasks — project tasks only */}
+          {isProject && (
+            <div style={{ marginTop: 14, borderTop: '1px solid #efe7d2', paddingTop: 14 }}>
+              <div style={styles.commentsLabel}>
+                Subtasks {subtasks.length > 0 && `· ${subDone}/${subtasks.length} done`}
+              </div>
+              {subtasks.map(s => {
+                const sAssignee = s.assigneeId ? data.users.find(u => u.id === s.assigneeId) : null;
+                const sDone = s.status === 'done';
+                return (
+                  <div key={s.id} style={styles.subtaskRow}>
+                    <button
+                      onClick={() => onToggleSubtask(s.id, !sDone)}
+                      className="salus-btn"
+                      style={styles.subtaskCheck}
+                      aria-label={sDone ? 'Mark not done' : 'Mark done'}
+                    >
+                      {sDone && <Check size={12} color="#fff" strokeWidth={3} />}
+                    </button>
+                    <div style={{ flex: 1, textAlign: 'left' }}>
+                      <div style={{
+                        fontSize: 13, color: sDone ? '#a59478' : '#1a2620',
+                        textDecoration: sDone ? 'line-through' : 'none',
+                      }}>
+                        {s.title}
+                      </div>
+                      {sAssignee && (
+                        <div style={{ fontSize: 10, color: '#7a8270', marginTop: 1 }}>
+                          {sAssignee.name?.split(' ')[0]}
+                        </div>
+                      )}
+                    </div>
+                    {(s.createdBy === currentUser.id || isManager || s.assigneeId === currentUser.id) && (
+                      <button
+                        onClick={() => { if (confirm('Delete this subtask?')) onDeleteSubtask(s.id); }}
+                        className="salus-btn"
+                        style={{ background: 'transparent', border: 'none', padding: 2, color: '#a59478' }}
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              {/* Add subtask */}
+              {canUpdate && (
+                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                  <input
+                    type="text"
+                    className="salus-input"
+                    value={subtaskTitle}
+                    onChange={(e) => setSubtaskTitle(e.target.value)}
+                    onKeyDown={async (e) => {
+                      if (e.key === 'Enter' && subtaskTitle.trim() && !addingSubtask) {
+                        setAddingSubtask(true);
+                        await onAddSubtask(task.id, subtaskTitle, null);
+                        setSubtaskTitle('');
+                        setAddingSubtask(false);
+                      }
+                    }}
+                    placeholder="+ Add a subtask…"
+                    style={{ flex: 1, fontSize: 13, fontFamily: 'inherit' }}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Comments thread — for project tasks */}
           {isProject && (
             <div style={{ marginTop: 8, borderTop: '1px solid #efe7d2', paddingTop: 14 }}>
@@ -9659,7 +10050,7 @@ function TaskDetailModal({ task, data, currentUser, isManager, onClose, onMarkDo
                           {new Date(c.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                         </span>
                       </div>
-                      <div style={styles.commentText}>{c.text}</div>
+                      <div style={styles.commentText}>{renderMentionedText(c.text, c.mentionUserIds, currentUser.id)}</div>
                     </div>
                     {(c.userId === currentUser.id || isManager) && (
                       <button
@@ -9686,30 +10077,63 @@ function TaskDetailModal({ task, data, currentUser, isManager, onClose, onMarkDo
 
         {/* Comment composer (project tasks) OR Mark-done button (daily tasks) */}
         {isProject ? (
-          <div style={{ display: 'flex', gap: 6, padding: '10px 12px', borderTop: '1px solid #ebe3cf', background: '#fffdf7' }}>
-            <input
-              type="text"
-              className="salus-input"
-              value={commentText}
-              onChange={(e) => setCommentText(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSendComment()}
-              placeholder="Add a note or share feedback…"
-              style={{ flex: 1, fontFamily: 'inherit' }}
-            />
-            <button onClick={handleSendComment}
-              disabled={!commentText.trim() || posting}
-              className="salus-btn"
-              style={{ ...styles.sendBtn, opacity: (!commentText.trim() || posting) ? 0.5 : 1 }}>
-              <Send size={16} />
-            </button>
-            {isManager && (
-              <button
-                onClick={() => { if (confirm('Delete this task?')) { onDelete(task.id); onClose(); } }}
-                className="salus-btn"
-                style={{ ...styles.btnGhost, color: '#c8442a' }}>
-                <Trash2 size={14} />
-              </button>
+          <div style={{ position: 'relative', borderTop: '1px solid #ebe3cf', background: '#fffdf7' }}>
+            {/* @mention autocomplete dropdown */}
+            {showMentionList && mentionableUsers.length > 0 && (
+              <div style={styles.mentionDropdown}>
+                {mentionableUsers.map(u => (
+                  <button
+                    key={u.id}
+                    onClick={() => insertMention(u)}
+                    className="salus-btn"
+                    style={styles.mentionRow}
+                  >
+                    <UserAvatar user={u} size={26} fontSize={10} />
+                    <div style={{ flex: 1, textAlign: 'left' }}>
+                      <div style={{ fontSize: 13, color: '#1a2620' }}>{u.name}</div>
+                      <div style={{ fontSize: 10, color: '#7a8270' }}>
+                        {u.isCoach ? 'Coach' : ''}{u.isCoach && u.isFoh ? ' · ' : ''}{u.isFoh ? 'FOH' : ''}
+                        {u.role === 'manager' ? 'Manager' : ''}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
             )}
+            <div style={{ display: 'flex', gap: 6, padding: '10px 12px', alignItems: 'flex-end' }}>
+              <textarea
+                ref={composerRef}
+                className="salus-input"
+                value={commentText}
+                onChange={(e) => handleComposerChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey && !showMentionList) {
+                    e.preventDefault();
+                    handleSendComment();
+                  }
+                }}
+                placeholder="Add a note. Type @ to mention someone…"
+                rows={1}
+                style={{
+                  flex: 1, fontFamily: 'inherit', resize: 'none',
+                  minHeight: 38, maxHeight: 120, lineHeight: 1.4,
+                }}
+              />
+              <button onClick={handleSendComment}
+                disabled={!commentText.trim() || posting}
+                className="salus-btn"
+                style={{ ...styles.sendBtn, opacity: (!commentText.trim() || posting) ? 0.5 : 1 }}>
+                <Send size={16} />
+              </button>
+              {isManager && (
+                <button
+                  onClick={() => { if (confirm('Delete this task?')) { onDelete(task.id); onClose(); } }}
+                  className="salus-btn"
+                  style={{ ...styles.btnGhost, color: '#c8442a' }}>
+                  <Trash2 size={14} />
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           <div style={styles.threadActionBar}>
@@ -11158,6 +11582,69 @@ const styles = {
     padding: '6px 10px', margin: '4px 0',
     background: '#f5f1e8', borderRadius: 6,
     textAlign: 'center', lineHeight: 1.4,
+  },
+
+  // ─── TASKS PAGE ───
+  tasksPageViewRow: {
+    display: 'flex', gap: 4, padding: '8px 12px',
+    borderBottom: '1px solid #efe7d2', background: '#fffdf7',
+    overflowX: 'auto',
+  },
+  tasksPageViewBtn: {
+    padding: '7px 14px', borderRadius: 999,
+    background: 'transparent', color: '#7a8270',
+    fontSize: 13, fontWeight: 600, border: '1px solid #efe7d2',
+    fontFamily: 'inherit', whiteSpace: 'nowrap', cursor: 'pointer',
+  },
+  tasksPageViewBtnActive: {
+    background: '#5c4a38', color: '#fff', borderColor: '#5c4a38',
+  },
+  tasksPageEmpty: {
+    padding: 40, textAlign: 'center', fontSize: 13, color: '#7a8270',
+  },
+  personGroup: {
+    marginBottom: 14,
+  },
+  personGroupHeader: {
+    display: 'flex', alignItems: 'center', gap: 10,
+    padding: '10px 12px', background: '#fffdf7',
+    border: '1px solid #efe7d2', borderRadius: 10,
+    width: '100%', cursor: 'pointer', fontFamily: 'inherit',
+  },
+  tasksOpenAllBtn: {
+    flex: 1, padding: '10px 14px', borderRadius: 999,
+    background: '#5c4a38', color: '#fffdf7',
+    border: 'none', fontSize: 12, fontWeight: 700,
+    fontFamily: 'inherit', cursor: 'pointer',
+  },
+
+  // ─── SUBTASKS ───
+  subtaskRow: {
+    display: 'flex', alignItems: 'center', gap: 8,
+    padding: '6px 0', borderBottom: '1px solid #f5f1e8',
+  },
+  subtaskCheck: {
+    width: 20, height: 20, borderRadius: 4,
+    border: '1.5px solid #c6926a',
+    background: '#fffdf7',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    cursor: 'pointer', flexShrink: 0,
+  },
+
+  // ─── @MENTION DROPDOWN ───
+  mentionDropdown: {
+    position: 'absolute', bottom: '100%', left: 12, right: 12,
+    background: '#fffdf7', border: '1px solid #ebe3cf',
+    borderRadius: 10, boxShadow: '0 -4px 12px rgba(92, 74, 56, 0.15)',
+    maxHeight: 220, overflowY: 'auto',
+    marginBottom: 4,
+  },
+  mentionRow: {
+    display: 'flex', alignItems: 'center', gap: 10,
+    padding: '8px 10px', width: '100%',
+    background: 'transparent', border: 'none',
+    borderBottom: '1px solid #f5f1e8',
+    cursor: 'pointer', fontFamily: 'inherit',
   },
 
   // ─── GOOGLE CALENDAR LINK ───
