@@ -3758,6 +3758,10 @@ function AdminPage({ data, currentUser, isManager, emailIntegration, onCreate, o
           style={{ ...styles.adminTab, ...(section === 'inbox' ? styles.adminTabActive : {}) }}>
           <Inbox size={14} /> Inbox
         </button>
+        <button onClick={() => setSection('reports')} className="salus-btn"
+          style={{ ...styles.adminTab, ...(section === 'reports' ? styles.adminTabActive : {}) }}>
+          <BarChart3 size={14} /> Reports
+        </button>
         <button onClick={() => setSection('cancellations')} className="salus-btn"
           style={{ ...styles.adminTab, ...(section === 'cancellations' ? styles.adminTabActive : {}) }}>
           <AlertCircle size={14} /> Cancellations
@@ -3779,6 +3783,12 @@ function AdminPage({ data, currentUser, isManager, emailIntegration, onCreate, o
           onConnectGmail={onConnectGmail}
         />
       )}
+      {section === 'reports' && (
+        <AdminReportsSection
+          emailIntegration={emailIntegration}
+          onConnectGmail={onConnectGmail}
+        />
+      )}
       {section === 'cancellations' && <AdminCancellationsSection />}
       {section === 'tours' && <AdminToursSection data={data} currentUser={currentUser} />}
       {section === 'bookings' && (
@@ -3795,29 +3805,56 @@ function AdminPage({ data, currentUser, isManager, emailIntegration, onCreate, o
 }
 
 // ─── Admin · Inbox section ────────────────────────────────────────────────
+// ─── Category metadata (colours + icons) ───
+const CATEGORY_META = {
+  cancellation:  { label: 'Cancel',     bg: '#f5dcd6', fg: '#c8442a' },
+  refund:        { label: 'Refund',     bg: '#fef0d8', fg: '#b87034' },
+  inquiry:       { label: 'Inquiry',    bg: '#e0e8ee', fg: '#3d6478' },
+  tour:          { label: 'Tour',       bg: '#e3ecd8', fg: '#5b7245' },
+  complaint:     { label: 'Complaint',  bg: '#f5dcd6', fg: '#c8442a' },
+  newsletter:    { label: 'Newsletter', bg: '#efe7d2', fg: '#7a8270' },
+  internal:      { label: 'Internal',   bg: '#efe7d2', fg: '#7a8270' },
+  other:         { label: 'Other',      bg: '#efe7d2', fg: '#7a8270' },
+};
+
 function AdminInboxSection({ emailIntegration, onConnectGmail }) {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [lastFetched, setLastFetched] = useState(null);
+  const [newlyClassified, setNewlyClassified] = useState(0);
+  const [filter, setFilter] = useState('open'); // open | cancellation | refund | inquiry | tour | complaint | handled
+  const [busyIds, setBusyIds] = useState(new Set());
 
-  const fetchEmails = async () => {
+  // Load existing classifications from Supabase (fast — no API call)
+  const loadFromDb = async () => {
+    if (!emailIntegration) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user?.id) return;
+    const { data, error: err } = await supabase
+      .from('email_classifications')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .order('classified_at', { ascending: false })
+      .limit(100);
+    if (err) { setError(err.message); return; }
+    setMessages(data || []);
+  };
+
+  // Sync = fetch new emails from Gmail + classify via Claude
+  const syncEmails = async () => {
     if (!emailIntegration) return;
     setLoading(true);
     setError(null);
+    setNewlyClassified(0);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
-        setError('Not signed in');
-        return;
-      }
-      const res = await fetch(`/api/gmail-fetch?token=${encodeURIComponent(session.access_token)}`);
+      if (!session?.access_token) { setError('Not signed in'); return; }
+      const res = await fetch(`/api/gmail-sync?token=${encodeURIComponent(session.access_token)}`);
       const json = await res.json();
-      if (!res.ok) {
-        setError(json.error || 'Failed to fetch emails');
-        return;
-      }
+      if (!res.ok) { setError(json.error || 'Sync failed'); return; }
       setMessages(json.messages || []);
+      setNewlyClassified(json.newly_classified || 0);
       setLastFetched(Date.now());
     } catch (e) {
       setError(String(e?.message || e));
@@ -3826,13 +3863,47 @@ function AdminInboxSection({ emailIntegration, onConnectGmail }) {
     }
   };
 
-  // Auto-fetch when integration becomes available
+  // On mount: load from DB instantly, then sync in background
   useEffect(() => {
-    if (emailIntegration && messages.length === 0 && !lastFetched) {
-      fetchEmails();
-    }
+    if (!emailIntegration) return;
+    loadFromDb();
+    syncEmails();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [emailIntegration?.id]);
+
+  const handleMarkHandled = async (msgId) => {
+    setBusyIds(prev => new Set(prev).add(msgId));
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const { error: err } = await supabase
+        .from('email_classifications')
+        .update({ handled_at: new Date().toISOString(), handled_by: session?.user?.id })
+        .eq('id', msgId);
+      if (err) throw err;
+      // Optimistic update
+      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, handled_at: new Date().toISOString() } : m));
+    } catch (e) {
+      alert('Failed: ' + (e.message || e));
+    } finally {
+      setBusyIds(prev => { const n = new Set(prev); n.delete(msgId); return n; });
+    }
+  };
+
+  const handleUnmarkHandled = async (msgId) => {
+    setBusyIds(prev => new Set(prev).add(msgId));
+    try {
+      const { error: err } = await supabase
+        .from('email_classifications')
+        .update({ handled_at: null, handled_by: null })
+        .eq('id', msgId);
+      if (err) throw err;
+      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, handled_at: null } : m));
+    } catch (e) {
+      alert('Failed: ' + (e.message || e));
+    } finally {
+      setBusyIds(prev => { const n = new Set(prev); n.delete(msgId); return n; });
+    }
+  };
 
   if (!emailIntegration) {
     return (
@@ -3840,8 +3911,8 @@ function AdminInboxSection({ emailIntegration, onConnectGmail }) {
         <Inbox size={28} color="#c6926a" />
         <div style={styles.emptyTitle}>Connect your inbox</div>
         <div style={styles.emptyBody}>
-          Once connected, your recent emails appear here so you can keep on top of cancellations,
-          refunds, and member inquiries.
+          Once connected, recent emails are read, AI-tagged, and shown here so you can keep on top of
+          cancellations, refunds, and member inquiries.
         </div>
         <button onClick={onConnectGmail} className="salus-btn" style={styles.btnPrimary}>
           <Mail size={14} /> Connect Gmail
@@ -3850,20 +3921,45 @@ function AdminInboxSection({ emailIntegration, onConnectGmail }) {
     );
   }
 
+  // Filter messages based on chip
+  const visible = messages.filter(m => {
+    if (filter === 'open') return !m.handled_at;
+    if (filter === 'handled') return !!m.handled_at;
+    return !m.handled_at && m.category === filter;
+  });
+
+  // Counts for chips
+  const openCount = messages.filter(m => !m.handled_at).length;
+  const handledCount = messages.filter(m => !!m.handled_at).length;
+  const cancelCount = messages.filter(m => !m.handled_at && m.category === 'cancellation').length;
+  const refundCount = messages.filter(m => !m.handled_at && m.category === 'refund').length;
+
   return (
     <>
       <div style={styles.adminSectionHead}>
         <div>
-          <div style={styles.adminSectionTitle}>Recent emails</div>
+          <div style={styles.adminSectionTitle}>Inbox</div>
           <div style={styles.adminSectionSubtitle}>
             {emailIntegration.emailAddress}
-            {lastFetched && ` · last checked ${new Date(lastFetched).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+            {lastFetched && ` · checked ${new Date(lastFetched).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+            {newlyClassified > 0 && ` · ${newlyClassified} newly classified`}
           </div>
         </div>
-        <button onClick={fetchEmails} disabled={loading} className="salus-btn" style={styles.btnGhost}>
+        <button onClick={syncEmails} disabled={loading} className="salus-btn" style={styles.btnGhost}>
           <RefreshCw size={14} style={loading ? { animation: 'spin 1s linear infinite' } : {}} />
-          {loading ? 'Loading…' : 'Refresh'}
+          {loading ? 'Syncing…' : 'Sync'}
         </button>
+      </div>
+
+      {/* Filter chips */}
+      <div style={styles.adminTabRow}>
+        <FilterChip label={`Open · ${openCount}`} active={filter === 'open'} onClick={() => setFilter('open')} />
+        {cancelCount > 0 && <FilterChip label={`Cancel · ${cancelCount}`} active={filter === 'cancellation'} onClick={() => setFilter('cancellation')} />}
+        {refundCount > 0 && <FilterChip label={`Refund · ${refundCount}`} active={filter === 'refund'} onClick={() => setFilter('refund')} />}
+        <FilterChip label="Inquiry" active={filter === 'inquiry'} onClick={() => setFilter('inquiry')} />
+        <FilterChip label="Tour" active={filter === 'tour'} onClick={() => setFilter('tour')} />
+        <FilterChip label="Complaint" active={filter === 'complaint'} onClick={() => setFilter('complaint')} />
+        <FilterChip label={`Handled · ${handledCount}`} active={filter === 'handled'} onClick={() => setFilter('handled')} />
       </div>
 
       {error && (
@@ -3872,24 +3968,94 @@ function AdminInboxSection({ emailIntegration, onConnectGmail }) {
         </div>
       )}
 
-      {!loading && messages.length === 0 && !error && (
+      {!loading && visible.length === 0 && !error && (
         <div style={styles.emptyCard}>
           <Inbox size={24} color="#a59478" />
-          <div style={styles.emptyBody}>No emails yet. Tap Refresh to fetch.</div>
+          <div style={styles.emptyBody}>
+            {filter === 'open' ? 'Inbox zero. All caught up.' : `No emails in this category.`}
+          </div>
         </div>
       )}
 
-      {messages.map(msg => (
-        <div key={msg.id} style={styles.emailCard}>
-          <div style={styles.emailCardHead}>
-            <div style={styles.emailFrom}>{cleanEmailFrom(msg.from)}</div>
-            <div style={styles.emailDate}>{formatEmailDate(msg.date)}</div>
-          </div>
-          <div style={styles.emailSubject}>{msg.subject}</div>
-          <div style={styles.emailSnippet}>{msg.snippet}</div>
-        </div>
+      {visible.map(msg => (
+        <EmailCard
+          key={msg.id}
+          msg={msg}
+          busy={busyIds.has(msg.id)}
+          onMarkHandled={() => handleMarkHandled(msg.id)}
+          onUnmarkHandled={() => handleUnmarkHandled(msg.id)}
+        />
       ))}
     </>
+  );
+}
+
+function FilterChip({ label, active, onClick }) {
+  return (
+    <button onClick={onClick} className="salus-btn"
+      style={{ ...styles.adminTab, ...(active ? styles.adminTabActive : {}) }}>
+      {label}
+    </button>
+  );
+}
+
+function EmailCard({ msg, busy, onMarkHandled, onUnmarkHandled }) {
+  const meta = CATEGORY_META[msg.category] || CATEGORY_META.other;
+  const isHandled = !!msg.handled_at;
+  const isUrgent = msg.urgency === 'high';
+  return (
+    <div style={{
+      ...styles.emailCard,
+      opacity: isHandled ? 0.55 : 1,
+      borderLeft: isUrgent && !isHandled ? '3px solid #c8442a' : `1px solid #efe7d2`,
+    }}>
+      {/* Top row: category badge + urgency + date */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+        <span style={{
+          fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 999,
+          background: meta.bg, color: meta.fg, textTransform: 'uppercase', letterSpacing: 0.4,
+        }}>
+          {meta.label}
+        </span>
+        {isUrgent && !isHandled && (
+          <span style={{ fontSize: 10, color: '#c8442a', fontWeight: 700 }}>● URGENT</span>
+        )}
+        <div style={{ flex: 1 }} />
+        <div style={styles.emailDate}>{formatEmailDate(msg.email_date)}</div>
+      </div>
+
+      {/* From + subject */}
+      <div style={styles.emailFrom}>{cleanEmailFrom(msg.email_from)}</div>
+      <div style={styles.emailSubject}>{msg.email_subject}</div>
+
+      {/* AI summary (replaces raw snippet — more useful) */}
+      {msg.summary && (
+        <div style={{ ...styles.emailSnippet, color: '#5c4a38', marginTop: 4 }}>
+          {msg.summary}
+        </div>
+      )}
+
+      {/* Suggested action */}
+      {msg.suggested_action && !isHandled && (
+        <div style={{ fontSize: 11, color: '#7a8270', marginTop: 6, fontStyle: 'italic' }}>
+          → {msg.suggested_action}
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+        {isHandled ? (
+          <button onClick={onUnmarkHandled} disabled={busy} className="salus-btn" style={styles.btnGhost}>
+            ↩ Unmark
+          </button>
+        ) : (
+          <button onClick={onMarkHandled} disabled={busy} className="salus-btn"
+            style={{ ...styles.btnGhost, color: '#5b7245', borderColor: '#cdd9bc' }}>
+            <Check size={12} /> Mark handled
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -3911,7 +4077,263 @@ function formatEmailDate(dateStr) {
   } catch { return ''; }
 }
 
-// ─── Admin · Cancellations section (placeholder until Xplor) ──────────────
+// ─── Admin · Reports section (historical view by month) ──────────────────
+function AdminReportsSection({ emailIntegration, onConnectGmail }) {
+  const [messages, setMessages] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
+  const [error, setError] = useState(null);
+  // Selected month — defaults to last month
+  const now = new Date();
+  const [year, setYear] = useState(now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth() === 0 ? 11 : now.getMonth() - 1); // 0-indexed
+  const [categoryFilter, setCategoryFilter] = useState('all'); // all | cancellation | refund | ...
+
+  const loadFromDb = async () => {
+    if (!emailIntegration) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user?.id) return;
+      const { data, error: err } = await supabase
+        .from('email_classifications')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .order('classified_at', { ascending: false })
+        .limit(1000);
+      if (err) throw err;
+      setMessages(data || []);
+    } catch (e) {
+      setError(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (emailIntegration) loadFromDb();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emailIntegration?.id]);
+
+  const backfillMonth = async () => {
+    if (!emailIntegration) return;
+    if (!confirm(`Backfill emails for ${MONTH_NAMES[month]} ${year}? This pulls them from Gmail and runs each through AI classification (a few pennies of API cost).`)) return;
+    setBackfilling(true);
+    setError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) { setError('Not signed in'); return; }
+      // Gmail wants "after:" = first day of month, "before:" = first day of NEXT month
+      const monthStr = String(month + 1).padStart(2, '0');
+      const nextMonth = month === 11 ? 1 : month + 2;
+      const nextYear = month === 11 ? year + 1 : year;
+      const nextMonthStr = String(nextMonth).padStart(2, '0');
+      const after = `${year}-${monthStr}-01`;
+      const before = `${nextYear}-${nextMonthStr}-01`;
+      const res = await fetch(`/api/gmail-sync?token=${encodeURIComponent(session.access_token)}&after=${after}&before=${before}`);
+      const json = await res.json();
+      if (!res.ok) { setError(json.error || 'Backfill failed'); return; }
+      // Reload from db to get the freshly classified emails
+      await loadFromDb();
+      alert(`Backfill complete. ${json.newly_classified || 0} new emails classified for ${MONTH_NAMES[month]} ${year}.`);
+    } catch (e) {
+      setError(String(e?.message || e));
+    } finally {
+      setBackfilling(false);
+    }
+  };
+
+  if (!emailIntegration) {
+    return (
+      <div style={styles.emptyCard}>
+        <BarChart3 size={28} color="#c6926a" />
+        <div style={styles.emptyTitle}>Connect your inbox first</div>
+        <div style={styles.emptyBody}>
+          Reports needs Gmail connected so it can pull and classify your past emails.
+        </div>
+        <button onClick={onConnectGmail} className="salus-btn" style={styles.btnPrimary}>
+          <Mail size={14} /> Connect Gmail
+        </button>
+      </div>
+    );
+  }
+
+  // Filter messages to just the selected month
+  const monthStart = new Date(year, month, 1).getTime();
+  const monthEnd = new Date(year, month + 1, 1).getTime();
+  const monthMessages = messages.filter(m => {
+    if (!m.email_date) return false;
+    const ts = new Date(m.email_date).getTime();
+    if (isNaN(ts)) return false;
+    return ts >= monthStart && ts < monthEnd;
+  });
+
+  // Compute per-category stats for this month
+  const stats = {
+    cancellation: monthMessages.filter(m => m.category === 'cancellation'),
+    refund:       monthMessages.filter(m => m.category === 'refund'),
+    inquiry:      monthMessages.filter(m => m.category === 'inquiry'),
+    tour:         monthMessages.filter(m => m.category === 'tour'),
+    complaint:    monthMessages.filter(m => m.category === 'complaint'),
+  };
+
+  const filtered = categoryFilter === 'all'
+    ? monthMessages.filter(m => ['cancellation', 'refund', 'inquiry', 'tour', 'complaint'].includes(m.category))
+    : monthMessages.filter(m => m.category === categoryFilter);
+
+  const goPrev = () => {
+    if (month === 0) { setYear(year - 1); setMonth(11); }
+    else setMonth(month - 1);
+  };
+  const goNext = () => {
+    if (month === 11) { setYear(year + 1); setMonth(0); }
+    else setMonth(month + 1);
+  };
+
+  return (
+    <>
+      {/* Month nav */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+        <button onClick={goPrev} className="salus-btn" style={styles.btnGhost}>
+          <ChevronLeft size={14} />
+        </button>
+        <div style={{ flex: 1, textAlign: 'center', fontFamily: '"Fraunces", serif', fontSize: 18, color: '#1a2620' }}>
+          {MONTH_NAMES[month]} {year}
+        </div>
+        <button onClick={goNext} className="salus-btn" style={styles.btnGhost}>
+          <ChevronRight size={14} />
+        </button>
+      </div>
+
+      {/* Stats grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginBottom: 16 }}>
+        <StatTile label="Cancellations" items={stats.cancellation} color="#c8442a" onClick={() => setCategoryFilter('cancellation')} />
+        <StatTile label="Refunds"       items={stats.refund}       color="#b87034" onClick={() => setCategoryFilter('refund')} />
+        <StatTile label="Inquiries"     items={stats.inquiry}      color="#3d6478" onClick={() => setCategoryFilter('inquiry')} />
+        <StatTile label="Tour requests" items={stats.tour}         color="#5b7245" onClick={() => setCategoryFilter('tour')} />
+      </div>
+
+      {error && (
+        <div style={{ padding: 12, background: '#f5dcd6', color: '#5c4a38', borderRadius: 12, fontSize: 13, marginBottom: 12 }}>
+          {error}
+        </div>
+      )}
+
+      {/* Backfill button — most useful when we have <some emails> for this month */}
+      {monthMessages.length < 3 && (
+        <div style={{ ...styles.emptyCard, marginBottom: 16 }}>
+          <BarChart3 size={24} color="#c6926a" />
+          <div style={styles.emptyBody}>
+            {monthMessages.length === 0
+              ? `No classified emails for ${MONTH_NAMES[month]} ${year} yet.`
+              : `Only ${monthMessages.length} email(s) classified for this month.`}
+          </div>
+          <button onClick={backfillMonth} disabled={backfilling} className="salus-btn" style={styles.btnPrimary}>
+            {backfilling ? <><RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> Backfilling…</> : <>Backfill {MONTH_NAMES[month]} {year}</>}
+          </button>
+        </div>
+      )}
+
+      {/* Filtered email list */}
+      {filtered.length > 0 && (
+        <>
+          <div style={{ ...styles.adminSectionHead, marginTop: 8 }}>
+            <div style={styles.adminSectionTitle}>
+              {categoryFilter === 'all' ? 'All actionable emails' : `${categoryFilter}s in ${MONTH_NAMES[month]}`}
+              <span style={{ color: '#a59478', fontSize: 13, marginLeft: 6 }}>({filtered.length})</span>
+            </div>
+            {categoryFilter !== 'all' && (
+              <button onClick={() => setCategoryFilter('all')} className="salus-btn" style={styles.btnGhost}>
+                Clear filter
+              </button>
+            )}
+          </div>
+          {filtered.map(msg => (
+            <ReportEmailRow key={msg.id} msg={msg} onReload={loadFromDb} />
+          ))}
+        </>
+      )}
+    </>
+  );
+}
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+function StatTile({ label, items, color, onClick }) {
+  const total = items.length;
+  const unhandled = items.filter(i => !i.handled_at).length;
+  return (
+    <button onClick={onClick} className="salus-btn" style={{
+      background: '#fffdf7', border: '1px solid #efe7d2',
+      borderRadius: 12, padding: 12, textAlign: 'left',
+    }}>
+      <div style={{ fontSize: 11, color: '#7a8270', marginBottom: 4 }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+        <div style={{ fontSize: 24, fontWeight: 700, color }}>{total}</div>
+        {unhandled > 0 && (
+          <div style={{ fontSize: 11, color: '#c8442a', fontWeight: 600 }}>{unhandled} open</div>
+        )}
+      </div>
+    </button>
+  );
+}
+
+function ReportEmailRow({ msg, onReload }) {
+  const meta = CATEGORY_META[msg.category] || CATEGORY_META.other;
+  const isHandled = !!msg.handled_at;
+  const [busy, setBusy] = useState(false);
+
+  const toggleHandled = async () => {
+    setBusy(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const payload = isHandled
+        ? { handled_at: null, handled_by: null }
+        : { handled_at: new Date().toISOString(), handled_by: session?.user?.id };
+      const { error: err } = await supabase
+        .from('email_classifications')
+        .update(payload)
+        .eq('id', msg.id);
+      if (err) throw err;
+      await onReload();
+    } catch (e) {
+      alert('Failed: ' + (e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{
+      ...styles.emailCard,
+      opacity: isHandled ? 0.55 : 1,
+      borderLeft: !isHandled && msg.urgency === 'high' ? '3px solid #c8442a' : `1px solid #efe7d2`,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+        <span style={{
+          fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 999,
+          background: meta.bg, color: meta.fg, textTransform: 'uppercase', letterSpacing: 0.4,
+        }}>{meta.label}</span>
+        <div style={{ flex: 1 }} />
+        <div style={styles.emailDate}>{formatEmailDate(msg.email_date)}</div>
+      </div>
+      <div style={styles.emailFrom}>{cleanEmailFrom(msg.email_from)}</div>
+      <div style={styles.emailSubject}>{msg.email_subject}</div>
+      {msg.summary && (
+        <div style={{ ...styles.emailSnippet, color: '#5c4a38', marginTop: 4 }}>{msg.summary}</div>
+      )}
+      <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+        <button onClick={toggleHandled} disabled={busy} className="salus-btn"
+          style={isHandled ? styles.btnGhost : { ...styles.btnGhost, color: '#5b7245', borderColor: '#cdd9bc' }}>
+          {isHandled ? '↩ Unmark' : <><Check size={12} /> Mark handled</>}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
 function AdminCancellationsSection() {
   return (
     <div style={styles.emptyCard}>
