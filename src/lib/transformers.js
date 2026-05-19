@@ -239,3 +239,15 @@ export const tourFromDb = (row) => ({
   outcomeAt: row.outcome_at ? new Date(row.outcome_at).getTime() : null,
   lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at).getTime() : null,
 });
+
+export const emailIntegrationFromDb = (row) => ({
+  id: row.id,
+  userId: row.user_id,
+  provider: row.provider,
+  emailAddress: row.email_address || '',
+  scope: row.scope || '',
+  tokenExpiry: row.token_expiry ? new Date(row.token_expiry).getTime() : null,
+  connectedAt: row.connected_at ? new Date(row.connected_at).getTime() : null,
+  lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at).getTime() : null,
+  // We deliberately don't expose access_token / refresh_token to the client.
+});
