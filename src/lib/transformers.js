@@ -202,6 +202,7 @@ export const taskFromDb = (row) => ({
   recurrenceDays: row.recurrence_days || null,
   recurrenceParentId: row.recurrence_parent_id || null,
   taskKind: row.task_kind || 'daily',
+  parentTaskId: row.parent_task_id || null,
 });
 
 export const taskCommentFromDb = (row) => ({
@@ -210,6 +211,7 @@ export const taskCommentFromDb = (row) => ({
   userId: row.user_id,
   text: row.text,
   kind: row.kind || 'comment',
+  mentionUserIds: row.mention_user_ids || [],
   createdAt: row.created_at ? new Date(row.created_at).getTime() : 0,
 });
 
