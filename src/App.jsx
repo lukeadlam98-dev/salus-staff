@@ -3963,15 +3963,9 @@ function AdminInboxSection({ emailIntegration, onConnectGmail, data, currentUser
           <button onClick={syncEmails} disabled={loading} className="salus-btn" style={{
             background: 'transparent', border: 'none', padding: 4,
             color: '#a59478', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
-            display: 'flex', alignItems: 'center', gap: 5,
           }}>
-            <RefreshCw size={11} style={loading ? { animation: 'spin 1s linear infinite' } : {}} />
             {loading ? 'Syncing' : 'Refresh'}
           </button>
-        </div>
-        <div style={{ fontSize: 12, color: '#7a8270', marginTop: 6 }}>
-          {emailIntegration.emailAddress}
-          {lastFetched && ` · last checked ${new Date(lastFetched).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
         </div>
       </div>
 
@@ -4524,6 +4518,12 @@ function AdminReportsSection({ emailIntegration, onConnectGmail }) {
 
   return (
     <>
+      <PageHeader
+        eyebrow="Audit"
+        title="Reports"
+        subtitle="Month by month"
+      />
+
       {/* Month nav */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
         <button onClick={goPrev} className="salus-btn" style={styles.btnGhost}>
@@ -4680,17 +4680,25 @@ function ReportEmailRow({ msg, onReload }) {
 
 function AdminCancellationsSection() {
   return (
-    <div style={styles.emptyCard}>
-      <AlertCircle size={28} color="#c6926a" />
-      <div style={styles.emptyTitle}>Cancellation queue</div>
-      <div style={styles.emptyBody}>
-        Cancellations and refund requests will appear here. Once Xplor API access is approved,
-        this will populate automatically from member actions in Xplor.
-        <br /><br />
-        For now, the Inbox tab catches member emails about cancellations, and you can track them
-        as tasks.
+    <>
+      <PageHeader
+        eyebrow="Members"
+        title="Cancellations"
+        subtitle="Refund requests and membership changes"
+      />
+      <div style={{ padding: '40px 20px', textAlign: 'center' }}>
+        <div style={{
+          fontFamily: '"Playfair Display", serif', fontSize: 18, color: '#5c4a38',
+          fontStyle: 'italic', letterSpacing: '-0.005em', marginBottom: 10,
+        }}>
+          Waiting on Xplor.
+        </div>
+        <div style={{ fontSize: 13, color: '#7a8270', lineHeight: 1.6, maxWidth: 320, margin: '0 auto' }}>
+          Once Xplor API access is approved, this will populate automatically from member actions.
+          In the meantime, the Inbox catches anything that comes by email.
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -4700,25 +4708,30 @@ function AdminToursSection({ data, currentUser }) {
     .filter(t => t.startTime >= Date.now() - 24 * 3600 * 1000)
     .sort((a, b) => a.startTime - b.startTime);
 
-  if (upcoming.length === 0) {
-    return (
-      <div style={styles.emptyCard}>
-        <MapPin size={28} color="#c6926a" />
-        <div style={styles.emptyTitle}>No upcoming tours</div>
-        <div style={styles.emptyBody}>Tours from Google Calendar appear here automatically.</div>
-      </div>
-    );
-  }
-
   return (
     <>
-      <div style={styles.adminSectionHead}>
-        <div>
-          <div style={styles.adminSectionTitle}>Upcoming tours</div>
-          <div style={styles.adminSectionSubtitle}>{upcoming.length} scheduled</div>
+      <PageHeader
+        eyebrow="Visitors"
+        title="Tours"
+        subtitle={upcoming.length > 0
+          ? `${upcoming.length} ${upcoming.length === 1 ? 'tour' : 'tours'} scheduled`
+          : 'Synced from Google Calendar'}
+      />
+
+      {upcoming.length === 0 ? (
+        <div style={{ padding: '40px 20px', textAlign: 'center' }}>
+          <div style={{
+            fontFamily: '"Playfair Display", serif', fontSize: 18, color: '#5c4a38',
+            fontStyle: 'italic', letterSpacing: '-0.005em',
+          }}>
+            No tours scheduled.
+          </div>
+          <div style={{ fontSize: 12, color: '#a59478', marginTop: 8 }}>
+            New bookings appear here automatically.
+          </div>
         </div>
-      </div>
-      {upcoming.map(tour => {
+      ) : (
+        upcoming.map(tour => {
         const d = new Date(tour.startTime);
         const isToday = d.toDateString() === new Date().toDateString();
         const dayLabel = isToday ? 'Today' : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
@@ -4733,7 +4746,8 @@ function AdminToursSection({ data, currentUser }) {
             {tour.notes && <div style={{ ...styles.emailSnippet, marginTop: 4, fontStyle: 'italic' }}>{tour.notes}</div>}
           </div>
         );
-      })}
+      })
+      )}
     </>
   );
 }
@@ -4760,25 +4774,29 @@ function StudioBookingsView({ data, currentUser, isManager, onCreate, onOpenBook
 
   return (
     <div style={styles.bookingsContainer}>
-      <div style={styles.bookingsHero}>
-        <div>
-          <div style={styles.bookingsEyebrow}>Salus House</div>
-          <div style={styles.bookingsTitle}>Studio Bookings</div>
-          <div style={styles.bookingsSubtitle}>Hires, workshops, and special events.</div>
-        </div>
-        {isManager && (
-          <button onClick={onCreate} className="salus-btn" style={styles.flowsCreateBtn}>
-            <Plus size={18} />
-          </button>
-        )}
-        {!isManager && currentUser.isCoach && (
-          <button onClick={onCreate} className="salus-btn" style={styles.flowsCreateBtn}>
-            <Plus size={18} />
+      <div style={{ position: 'relative' }}>
+        <PageHeader
+          eyebrow="Salus House"
+          title="Studio Bookings"
+        />
+        {(isManager || (!isManager && currentUser.isCoach)) && (
+          <button onClick={onCreate} className="salus-btn" style={{
+            position: 'absolute', top: 0, right: 0,
+            width: 44, height: 44, borderRadius: '50%',
+            background: '#1a2620', color: '#fffdf7',
+            border: 'none', display: 'flex',
+            alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 4px 12px rgba(26, 38, 32, 0.25)',
+          }}>
+            <Plus size={20} />
           </button>
         )}
       </div>
 
-      <div style={styles.flowsFilterRow}>
+      <div style={{
+        display: 'flex', gap: 20, padding: '0 4px 12px',
+        borderBottom: '1px solid #efe7d2', marginBottom: 4,
+      }}>
         {[
           { key: 'upcoming',  label: 'Upcoming' },
           { key: 'past',      label: 'Past' },
@@ -4789,8 +4807,14 @@ function StudioBookingsView({ data, currentUser, isManager, onCreate, onOpenBook
             onClick={() => setFilter(f.key)}
             className="salus-btn"
             style={{
-              ...styles.flowsFilterPill,
-              ...(filter === f.key ? styles.flowsFilterPillActive : {}),
+              padding: '6px 0',
+              background: 'transparent', border: 'none',
+              borderBottom: filter === f.key ? '1.5px solid #1a2620' : '1.5px solid transparent',
+              fontSize: 11, fontWeight: filter === f.key ? 600 : 500,
+              color: filter === f.key ? '#1a2620' : '#a59478',
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              fontFamily: 'inherit', cursor: 'pointer',
+              marginBottom: -1,
             }}
           >
             {f.label}
@@ -4799,17 +4823,20 @@ function StudioBookingsView({ data, currentUser, isManager, onCreate, onOpenBook
       </div>
 
       {bookings.length === 0 ? (
-        <div style={styles.flowsEmpty}>
-          
-          <div style={styles.flowsEmptyTitle}>
-            {filter === 'upcoming' ? 'Nothing booked yet' :
-             filter === 'past'     ? 'No past bookings' :
-                                      'No cancelled bookings'}
+        <div style={{ padding: '60px 20px', textAlign: 'center' }}>
+          <div style={{
+            fontFamily: '"Playfair Display", serif', fontSize: 18, color: '#5c4a38',
+            fontStyle: 'italic', letterSpacing: '-0.005em',
+          }}>
+            {filter === 'upcoming' ? 'Nothing booked yet.' :
+             filter === 'past'     ? 'No past bookings.' :
+                                      'No cancelled bookings.'}
           </div>
-          <div style={styles.flowsEmptySub}>
-            {filter === 'upcoming' && isManager && 'Add a booking with the + button above.'}
-            {filter === 'upcoming' && !isManager && 'Bookings will appear here when added.'}
-          </div>
+          {filter === 'upcoming' && (
+            <div style={{ fontSize: 12, color: '#a59478', marginTop: 8 }}>
+              {isManager ? 'Add a booking with the + button.' : 'Bookings appear here when added.'}
+            </div>
+          )}
         </div>
       ) : (
         <div style={{ padding: '0 14px' }}>
@@ -5915,22 +5942,7 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
         backgroundImage: `url(/brand/${hour < 12 ? 'reformer' : hour < 18 ? 'cardio' : 'ice'}.jpg)`,
         backgroundSize: 'cover', backgroundPosition: 'center',
         boxShadow: '0 1px 0 rgba(92, 74, 56, 0.06)',
-      }}>
-        <div style={{
-          position: 'absolute', inset: 0,
-          background: 'linear-gradient(180deg, rgba(26, 38, 32, 0.08) 0%, rgba(26, 38, 32, 0.45) 100%)',
-        }} />
-        <div style={{
-          position: 'absolute', left: 18, bottom: 14, right: 18,
-          color: '#fffdf7',
-          fontFamily: '"Playfair Display", serif', fontSize: 14, fontStyle: 'italic',
-          letterSpacing: '-0.005em', textShadow: '0 1px 2px rgba(0, 0, 0, 0.25)',
-        }}>
-          {hour < 12 ? 'A slow start. Move with intent.' :
-           hour < 18 ? 'The middle of the day.' :
-           'Wind down. Reset.'}
-        </div>
-      </div>
+      }} />
 
       {/* Render widgets in user's chosen order */}
       {widgets.map(widgetKey => {
@@ -6400,6 +6412,44 @@ function CustomizeHomeModal({ currentWidgets, isManager, currentUser, onReload, 
   );
 }
 
+// ─── PageHeader — reusable editorial header with optional photo ───
+// Used at the top of major sections (Schedule, Admin sub-sections, etc).
+function PageHeader({ eyebrow, title, subtitle, photo }) {
+  return (
+    <div style={{ padding: '8px 0 18px' }}>
+      {photo && (
+        <div style={{
+          height: 120, borderRadius: 18, overflow: 'hidden',
+          backgroundImage: `url(${photo})`,
+          backgroundSize: 'cover', backgroundPosition: 'center',
+          marginBottom: 18, position: 'relative',
+          boxShadow: '0 1px 0 rgba(92, 74, 56, 0.06)',
+        }}>
+          <div style={{
+            position: 'absolute', inset: 0,
+            background: 'linear-gradient(180deg, rgba(26, 38, 32, 0.0) 0%, rgba(26, 38, 32, 0.35) 100%)',
+          }} />
+        </div>
+      )}
+      {eyebrow && (
+        <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 6 }}>
+          {eyebrow}
+        </div>
+      )}
+      <div style={{
+        fontFamily: '"Playfair Display", serif',
+        fontSize: 30, fontWeight: 400, color: '#1a2620',
+        lineHeight: 1.1, letterSpacing: '-0.015em',
+      }}>
+        {title}
+      </div>
+      {subtitle && (
+        <div style={{ fontSize: 13, color: '#7a8270', marginTop: 6 }}>{subtitle}</div>
+      )}
+    </div>
+  );
+}
+
 function HomeTile({ title, count, summary, open, onToggle, urgent, onViewAll, children }) {
   return (
     <div style={styles.tile}>
@@ -6525,6 +6575,12 @@ function ScheduleView({
 
   return (
     <>
+      {/* Editorial page header */}
+      <PageHeader
+        eyebrow="The week"
+        title="Schedule"
+      />
+
       {canSeeBoth && (
         <div style={styles.viewToggleRow}>
           <button
@@ -8183,38 +8239,68 @@ function MePage({ data, currentUser, isManager, emailIntegration, onOpenSettings
 
   return (
     <div style={styles.homeContainer}>
-      {/* Profile card */}
-      <div style={styles.meProfileCard}>
+      {/* Profile cover with photo */}
+      <div style={{
+        height: 140, borderRadius: 18, overflow: 'hidden', marginTop: 8, position: 'relative',
+        backgroundImage: 'url(/brand/reformer.jpg)',
+        backgroundSize: 'cover', backgroundPosition: 'center 30%',
+      }}>
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: 'linear-gradient(180deg, rgba(26, 38, 32, 0.0) 0%, rgba(26, 38, 32, 0.55) 100%)',
+        }} />
+      </div>
+
+      {/* Profile card — overlapping the cover */}
+      <div style={{
+        background: '#fffdf7', borderRadius: 18,
+        marginTop: -38, marginLeft: 8, marginRight: 8,
+        padding: '20px 22px',
+        display: 'flex', alignItems: 'center', gap: 16,
+        boxShadow: '0 4px 16px rgba(26, 38, 32, 0.08)',
+        position: 'relative', zIndex: 2,
+      }}>
         <UserAvatar user={currentUser} size={64} fontSize={22} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={styles.meName}>{currentUser.name}</div>
-          <div style={styles.meRole}>{roleLabel}</div>
+          <div style={{
+            fontFamily: '"Playfair Display", serif',
+            fontSize: 20, fontWeight: 500, color: '#1a2620', letterSpacing: '-0.005em',
+          }}>{currentUser.name}</div>
+          <div style={{ fontSize: 11, color: '#a59478', marginTop: 4, letterSpacing: '0.05em', textTransform: 'uppercase', fontWeight: 500 }}>
+            {roleLabel}
+          </div>
         </div>
-        <button onClick={onOpenSettings} className="salus-btn" style={styles.meEditBtn}>
+        <button onClick={onOpenSettings} className="salus-btn" style={{
+          background: 'transparent', border: 'none', padding: 4,
+          color: '#a59478', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
+        }}>
           Edit
         </button>
       </div>
 
-      {/* Stats — gamified for coaches/FOH, simple for manager */}
+      {/* Stats — gamified for coaches/FOH, single hero stat for manager */}
       {isManager ? (
-        <section style={styles.homeSection}>
-          <div style={styles.homeSectionHead}>
-            <div style={styles.homeSectionTitle}>This week</div>
+        <section style={{ marginTop: 36, padding: '0 8px' }}>
+          <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 14 }}>
+            This week
           </div>
-          <div style={styles.meStatsGrid}>
-            <div style={styles.meStatCell}>
-              <div style={styles.meStatNum}>{sessionCount}</div>
-              <div style={styles.meStatLabel}>Sessions</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 18 }}>
+            <div style={{
+              fontFamily: '"Playfair Display", serif',
+              fontSize: 56, fontWeight: 400, color: '#1a2620',
+              lineHeight: 1, letterSpacing: '-0.02em',
+            }}>
+              {sessionCount}
             </div>
-            <div style={styles.meStatCell}>
-              <div style={styles.meStatNum}>{Math.round(totalMinutes / 60 * 10) / 10}</div>
-              <div style={styles.meStatLabel}>Hours</div>
-            </div>
-            <div style={styles.meStatCell}>
-              <div style={styles.meStatNum}>£{owed}</div>
-              <div style={styles.meStatLabel}>Owed</div>
+            <div style={{ fontSize: 12, color: '#7a8270', letterSpacing: '0.02em' }}>
+              {sessionCount === 1 ? 'session taught' : 'sessions taught'}
             </div>
           </div>
+          {sessionCount > 0 && (
+            <div style={{ marginTop: 16, fontSize: 13, color: '#5c4a38' }}>
+              {Math.round(totalMinutes / 60 * 10) / 10} hours · £{owed} earned
+            </div>
+          )}
         </section>
       ) : (
         <section style={styles.homeSection}>
@@ -12618,17 +12704,22 @@ const styles = {
 
   // ─── FOH SCHEDULE ───
   viewToggleRow: {
-    display: 'flex', gap: 6, padding: '12px 14px 0',
-    background: '#fff', borderBottom: '1px solid #ebe3cf',
+    display: 'flex', gap: 20, padding: '0 4px 12px',
+    background: 'transparent', borderBottom: '1px solid #efe7d2',
+    marginBottom: 4,
   },
   viewToggleBtn: {
-    flex: 1, padding: '10px 12px', borderRadius: 999,
-    background: 'transparent', border: '1px solid #ebe3cf',
-    fontSize: 13, fontWeight: 600, color: '#7a8270',
+    padding: '6px 0', borderRadius: 0,
+    background: 'transparent', border: 'none',
+    borderBottom: '1.5px solid transparent',
+    fontSize: 11, fontWeight: 500, color: '#a59478',
     fontFamily: 'inherit', cursor: 'pointer',
+    letterSpacing: '0.08em', textTransform: 'uppercase',
+    marginBottom: -1,
   },
   viewToggleBtnActive: {
-    background: '#5c4a38', color: '#fff', borderColor: '#5c4a38',
+    background: 'transparent', color: '#1a2620',
+    borderBottomColor: '#1a2620', fontWeight: 600,
   },
   fohStatsRow: {
     display: 'flex', gap: 8, padding: '12px 14px',
