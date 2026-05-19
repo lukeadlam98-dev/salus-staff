@@ -22,6 +22,9 @@ export const profileFromDb = (row, authEmail) => ({
   afterClassAckedAt: row.after_class_acked_at,
   uniformAckedAt: row.uniform_acked_at,
   onboardingCompletedAt: row.onboarding_completed_at,
+  homeWidgets: Array.isArray(row.home_widgets)
+    ? row.home_widgets
+    : ['cover', 'upcoming', 'tours', 'tasks', 'request_cover', 'hire_studio'],
 });
 
 export const maintenanceFromDb = (row) => ({
