@@ -6,7 +6,8 @@ import {
   Sparkles, Play, Heart, Flame, Bookmark, MoreHorizontal, Music, Lightbulb,
   Inbox, Shield, RefreshCw, MapPin, Target, Phone, AtSign, Briefcase,
   RotateCcw as CoverIcon, ListChecks, Quote, Building2, MessageCircle,
-  Home as HomeIcon, FileText, User as UserIcon, Settings as SettingsIcon
+  Home as HomeIcon, FileText, User as UserIcon, Settings as SettingsIcon,
+  Package, ExternalLink
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import {
@@ -28,6 +29,7 @@ import {
   bookingFromDb,
   dmFromDb,
   emailIntegrationFromDb,
+  stockItemFromDb,
 } from './lib/transformers';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -78,6 +80,7 @@ const EMPTY_DATA = {
   bookings: [],
   dms: [],
   emailIntegration: null,
+  stock: [],
 };
 
 const CLASS_TYPES = {
@@ -312,7 +315,7 @@ export default function SalusStaff() {
     if (!session) return;
     if (!silent) setLoading(true);
     try {
-      const [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes, emailIntRes] = await Promise.all([
+      const [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes, emailIntRes, stockRes] = await Promise.all([
         supabase.from('profiles').select('*'),
         supabase.from('classes').select('*'),
         supabase.from('cover_requests').select('*'),
@@ -331,6 +334,7 @@ export default function SalusStaff() {
         supabase.from('studio_bookings').select('*').order('date', { ascending: true }),
         supabase.from('direct_messages').select('*').order('created_at', { ascending: true }),
         supabase.from('email_integrations').select('*').eq('user_id', session.user?.id).maybeSingle(),
+        supabase.from('stock_items').select('*').eq('archived', false).order('name'),
       ]);
 
       const errors = [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes]
@@ -360,6 +364,7 @@ export default function SalusStaff() {
         bookings: (bookingsRes.data || []).map(bookingFromDb),
         dms: (dmsRes.data || []).map(dmFromDb),
         emailIntegration: emailIntRes?.data ? emailIntegrationFromDb(emailIntRes.data) : null,
+        stock: (stockRes.data || []).map(stockItemFromDb),
       });
     } catch (e) {
       console.error('Failed to load data:', e);
@@ -1609,6 +1614,7 @@ export default function SalusStaff() {
             onOpenBooking={(id) => setModal({ type: 'bookingDetail', id })}
             onConnectGmail={handleConnectGmail}
             onCreateTask={createTask}
+            onReload={reloadData}
           />
         )}
         {tab === 'me' && (
@@ -3728,7 +3734,7 @@ function generateRecurringDates(startIso, endIso, days /* 0=Mon..6=Sun */) {
 // AdminPage — wraps Inbox, Cancellations, Tours, and Bookings.
 // Coaches see Bookings only; manager + FOH see all sections.
 // ============================================================
-function AdminPage({ data, currentUser, isManager, emailIntegration, onCreate, onOpenBooking, onConnectGmail, onCreateTask }) {
+function AdminPage({ data, currentUser, isManager, emailIntegration, onCreate, onOpenBooking, onConnectGmail, onCreateTask, onReload }) {
   const canSeeAdminSections = isManager || currentUser.isFoh;
   const [section, setSection] = useState(canSeeAdminSections ? 'inbox' : 'bookings');
 
@@ -3765,6 +3771,10 @@ function AdminPage({ data, currentUser, isManager, emailIntegration, onCreate, o
           style={{ ...styles.adminTab, ...(section === 'tours' ? styles.adminTabActive : {}) }}>
           <MapPin size={14} /> Tours
         </button>
+        <button onClick={() => setSection('stock')} className="salus-btn"
+          style={{ ...styles.adminTab, ...(section === 'stock' ? styles.adminTabActive : {}) }}>
+          <Package size={14} /> Stock
+        </button>
         <button onClick={() => setSection('bookings')} className="salus-btn"
           style={{ ...styles.adminTab, ...(section === 'bookings' ? styles.adminTabActive : {}) }}>
           <Bookmark size={14} /> Bookings
@@ -3789,6 +3799,14 @@ function AdminPage({ data, currentUser, isManager, emailIntegration, onCreate, o
       )}
       {section === 'cancellations' && <AdminCancellationsSection />}
       {section === 'tours' && <AdminToursSection data={data} currentUser={currentUser} />}
+      {section === 'stock' && (
+        <AdminStockSection
+          data={data}
+          currentUser={currentUser}
+          isManager={isManager}
+          onReload={onReload}
+        />
+      )}
       {section === 'bookings' && (
         <StudioBookingsView
           data={data}
@@ -5034,6 +5052,398 @@ function AdminToursSection({ data, currentUser }) {
     </>
   );
 }
+
+// ─── Admin · Stock section ──────────────────────────────────────────────
+const STOCK_CATEGORIES = {
+  studio:   { label: 'Studio',   order: 1 },
+  bathroom: { label: 'Bathroom', order: 2 },
+  kitchen:  { label: 'Kitchen',  order: 3 },
+  cleaning: { label: 'Cleaning', order: 4 },
+  office:   { label: 'Office',   order: 5 },
+  other:    { label: 'Other',    order: 6 },
+};
+
+function AdminStockSection({ data, currentUser, isManager, onReload }) {
+  const items = data.stock || [];
+  const [filter, setFilter] = useState('all'); // all | low
+  const [editItem, setEditItem] = useState(null); // item being edited (or 'new')
+  const [busyIds, setBusyIds] = useState(new Set());
+
+  const visible = filter === 'low'
+    ? items.filter(i => i.currentQty <= i.lowThreshold)
+    : items;
+
+  const lowCount = items.filter(i => i.currentQty <= i.lowThreshold).length;
+
+  // Group by category
+  const groups = {};
+  visible.forEach(item => {
+    const cat = item.category || 'other';
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push(item);
+  });
+  const orderedCats = Object.keys(groups).sort((a, b) =>
+    (STOCK_CATEGORIES[a]?.order || 99) - (STOCK_CATEGORIES[b]?.order || 99)
+  );
+
+  const setBusy = (id, busy) => {
+    setBusyIds(prev => {
+      const next = new Set(prev);
+      if (busy) next.add(id); else next.delete(id);
+      return next;
+    });
+  };
+
+  const updateQty = async (item, delta) => {
+    const newQty = Math.max(0, item.currentQty + delta);
+    setBusy(item.id, true);
+    try {
+      const { error } = await supabase
+        .from('stock_items')
+        .update({
+          current_qty: newQty,
+          last_updated_by: currentUser.id,
+          last_updated_at: new Date().toISOString(),
+        })
+        .eq('id', item.id);
+      if (error) throw error;
+      // Optimistic local update — reload picks up the real state
+      item.currentQty = newQty;
+      onReload?.();
+    } catch (e) {
+      alert('Failed to update: ' + (e.message || e));
+    } finally {
+      setBusy(item.id, false);
+    }
+  };
+
+  return (
+    <>
+      <div style={{ position: 'relative' }}>
+        <PageHeader
+          eyebrow="Studio"
+          title="Stock"
+          subtitle={lowCount > 0 ? `${lowCount} running low` : 'Everything is stocked'}
+        />
+        {isManager && (
+          <button onClick={() => setEditItem('new')} className="salus-btn" style={{
+            position: 'absolute', top: 0, right: 0,
+            width: 44, height: 44, borderRadius: '50%',
+            background: '#1a2620', color: '#fffdf7',
+            border: 'none', display: 'flex',
+            alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 4px 12px rgba(26, 38, 32, 0.25)',
+          }}>
+            <Plus size={20} />
+          </button>
+        )}
+      </div>
+
+      {/* Filter tabs */}
+      <div style={{
+        display: 'flex', gap: 20, padding: '0 4px 12px',
+        borderBottom: '1px solid #efe7d2', marginBottom: 4,
+      }}>
+        <button onClick={() => setFilter('all')} className="salus-btn" style={{
+          padding: '6px 0', background: 'transparent', border: 'none',
+          borderBottom: filter === 'all' ? '1.5px solid #1a2620' : '1.5px solid transparent',
+          fontSize: 11, fontWeight: filter === 'all' ? 600 : 500,
+          color: filter === 'all' ? '#1a2620' : '#a59478',
+          letterSpacing: '0.08em', textTransform: 'uppercase',
+          fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1,
+        }}>
+          All {items.length}
+        </button>
+        <button onClick={() => setFilter('low')} className="salus-btn" style={{
+          padding: '6px 0', background: 'transparent', border: 'none',
+          borderBottom: filter === 'low' ? `1.5px solid ${lowCount > 0 ? '#c8442a' : '#1a2620'}` : '1.5px solid transparent',
+          fontSize: 11, fontWeight: filter === 'low' ? 600 : 500,
+          color: filter === 'low' ? (lowCount > 0 ? '#c8442a' : '#1a2620') : (lowCount > 0 ? '#c8442a' : '#a59478'),
+          letterSpacing: '0.08em', textTransform: 'uppercase',
+          fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1,
+        }}>
+          Running low {lowCount > 0 ? lowCount : ''}
+        </button>
+      </div>
+
+      {/* Empty state */}
+      {visible.length === 0 && (
+        <div style={{ padding: '60px 20px', textAlign: 'center' }}>
+          <div style={{
+            fontFamily: '"Playfair Display", serif', fontSize: 18, color: '#5c4a38',
+            fontStyle: 'italic', letterSpacing: '-0.005em',
+          }}>
+            {filter === 'low' ? 'Nothing running low.' : 'No stock items yet.'}
+          </div>
+          {filter === 'low' && (
+            <div style={{ fontSize: 12, color: '#a59478', marginTop: 8 }}>The shelves are full.</div>
+          )}
+        </div>
+      )}
+
+      {/* Items grouped by category */}
+      {orderedCats.map(cat => (
+        <div key={cat} style={{ marginTop: 20 }}>
+          <div style={{
+            fontSize: 10, fontWeight: 500, color: '#a59478',
+            letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 8, padding: '0 2px',
+          }}>
+            {STOCK_CATEGORIES[cat]?.label || cat}
+          </div>
+          {groups[cat].map(item => (
+            <StockItemRow
+              key={item.id}
+              item={item}
+              busy={busyIds.has(item.id)}
+              isManager={isManager}
+              onDecrement={() => updateQty(item, -1)}
+              onIncrement={() => updateQty(item, +1)}
+              onEdit={() => setEditItem(item)}
+            />
+          ))}
+        </div>
+      ))}
+
+      {/* Edit / new item modal */}
+      {editItem && (
+        <StockItemEditModal
+          item={editItem === 'new' ? null : editItem}
+          isManager={isManager}
+          currentUserId={currentUser.id}
+          onClose={() => setEditItem(null)}
+          onSaved={() => { setEditItem(null); onReload?.(); }}
+        />
+      )}
+    </>
+  );
+}
+
+function StockItemRow({ item, busy, isManager, onDecrement, onIncrement, onEdit }) {
+  const isLow = item.currentQty <= item.lowThreshold;
+  const isOut = item.currentQty === 0;
+
+  return (
+    <div style={{
+      padding: '16px 4px',
+      borderBottom: '1px solid #efe7d2',
+      display: 'flex', alignItems: 'center', gap: 14,
+    }}>
+      {/* Name + qty */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontFamily: '"Playfair Display", serif',
+          fontSize: 16, fontWeight: 500, color: '#1a2620', letterSpacing: '-0.005em',
+        }}>
+          {item.name}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+          <span style={{
+            fontFamily: '"Playfair Display", serif',
+            fontSize: 18, fontWeight: 500,
+            color: isOut ? '#c8442a' : isLow ? '#c6926a' : '#5c4a38',
+          }}>
+            {item.currentQty}
+          </span>
+          <span style={{ fontSize: 11, color: '#a59478', letterSpacing: '0.02em' }}>
+            {item.unit}{item.currentQty !== 1 ? 's' : ''}
+          </span>
+          {isLow && (
+            <span style={{
+              fontSize: 10, color: isOut ? '#c8442a' : '#c6926a', fontWeight: 600,
+              textTransform: 'uppercase', letterSpacing: 2, marginLeft: 4,
+            }}>
+              {isOut ? 'Out' : 'Low'}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Quick actions */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <button onClick={onDecrement} disabled={busy || item.currentQty === 0} className="salus-btn" style={{
+          width: 36, height: 36, borderRadius: '50%',
+          background: 'transparent', border: '1px solid #efe7d2',
+          color: '#5c4a38', fontSize: 18, fontWeight: 400,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          opacity: item.currentQty === 0 ? 0.3 : 1,
+        }} aria-label="Took one">
+          −
+        </button>
+        <button onClick={onIncrement} disabled={busy} className="salus-btn" style={{
+          width: 36, height: 36, borderRadius: '50%',
+          background: 'transparent', border: '1px solid #efe7d2',
+          color: '#5c4a38', fontSize: 18, fontWeight: 400,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }} aria-label="Added one">
+          +
+        </button>
+        {isManager && (
+          <button onClick={onEdit} className="salus-btn" style={{
+            background: 'transparent', border: 'none', padding: '0 4px',
+            color: '#a59478', fontSize: 10, letterSpacing: '0.12em',
+            textTransform: 'uppercase', fontWeight: 500, marginLeft: 4,
+          }}>
+            Edit
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StockItemEditModal({ item, isManager, currentUserId, onClose, onSaved }) {
+  const isNew = !item;
+  const [name, setName] = useState(item?.name || '');
+  const [category, setCategory] = useState(item?.category || 'other');
+  const [currentQty, setCurrentQty] = useState(String(item?.currentQty ?? 0));
+  const [unit, setUnit] = useState(item?.unit || 'each');
+  const [lowThreshold, setLowThreshold] = useState(String(item?.lowThreshold ?? 1));
+  const [reorderUrl, setReorderUrl] = useState(item?.reorderUrl || '');
+  const [notes, setNotes] = useState(item?.notes || '');
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    if (!name.trim()) { alert('Name required'); return; }
+    setBusy(true);
+    try {
+      const payload = {
+        name: name.trim(),
+        category,
+        current_qty: Math.max(0, parseInt(currentQty) || 0),
+        unit: unit.trim() || 'each',
+        low_threshold: Math.max(0, parseInt(lowThreshold) || 1),
+        reorder_url: reorderUrl.trim() || null,
+        notes: notes.trim() || null,
+        last_updated_by: currentUserId,
+        last_updated_at: new Date().toISOString(),
+      };
+      if (isNew) {
+        const { error } = await supabase.from('stock_items').insert(payload);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('stock_items').update(payload).eq('id', item.id);
+        if (error) throw error;
+      }
+      onSaved();
+    } catch (e) {
+      alert('Save failed: ' + (e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const archive = async () => {
+    if (!confirm(`Archive "${item.name}"? You can restore from Supabase.`)) return;
+    setBusy(true);
+    try {
+      const { error } = await supabase
+        .from('stock_items')
+        .update({ archived: true })
+        .eq('id', item.id);
+      if (error) throw error;
+      onSaved();
+    } catch (e) {
+      alert('Failed: ' + (e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.55)', zIndex: 200,
+      }} />
+      <div style={{
+        position: 'fixed', left: 0, right: 0, bottom: 0,
+        background: '#fffdf7', borderRadius: '20px 20px 0 0',
+        zIndex: 201, padding: '20px 22px 28px',
+        paddingBottom: 'calc(28px + env(safe-area-inset-bottom))',
+        maxHeight: '92vh', overflowY: 'auto',
+        boxShadow: '0 -10px 40px rgba(26, 38, 32, 0.2)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 4 }}>
+              {isNew ? 'New item' : 'Edit item'}
+            </div>
+            <div style={{
+              fontFamily: '"Playfair Display", serif',
+              fontSize: 22, fontWeight: 400, color: '#1a2620', letterSpacing: '-0.005em',
+            }}>
+              {isNew ? 'Add to stock' : item.name}
+            </div>
+          </div>
+          <button onClick={onClose} className="salus-btn" style={{
+            background: 'transparent', border: 'none', padding: 4,
+            color: '#a59478', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
+          }}>Close</button>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <FormField label="Name">
+            <input value={name} onChange={e => setName(e.target.value)} style={styles.loginInput} placeholder="Hand wash" />
+          </FormField>
+
+          <FormField label="Category">
+            <select value={category} onChange={e => setCategory(e.target.value)} style={styles.loginInput}>
+              {Object.entries(STOCK_CATEGORIES).map(([k, v]) => (
+                <option key={k} value={k}>{v.label}</option>
+              ))}
+            </select>
+          </FormField>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <FormField label="Current quantity">
+              <input type="number" min="0" value={currentQty} onChange={e => setCurrentQty(e.target.value)} style={styles.loginInput} />
+            </FormField>
+            <FormField label="Unit">
+              <input value={unit} onChange={e => setUnit(e.target.value)} style={styles.loginInput} placeholder="bottle" />
+            </FormField>
+          </div>
+
+          <FormField label="Low-stock threshold">
+            <input type="number" min="0" value={lowThreshold} onChange={e => setLowThreshold(e.target.value)} style={styles.loginInput} />
+            <div style={{ fontSize: 11, color: '#a59478', marginTop: 4 }}>
+              Marked "running low" when quantity is at or below this number.
+            </div>
+          </FormField>
+
+          <FormField label="Reorder link (optional)">
+            <input value={reorderUrl} onChange={e => setReorderUrl(e.target.value)} style={styles.loginInput} placeholder="https://amazon.co.uk/..." />
+          </FormField>
+
+          <FormField label="Notes (optional)">
+            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} style={{ ...styles.loginInput, resize: 'vertical' }} placeholder="Brand preference, supplier, etc." />
+          </FormField>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
+          <button onClick={save} disabled={busy} className="salus-btn" style={{ ...styles.btnPrimary, flex: 1, justifyContent: 'center' }}>
+            {busy ? 'Saving…' : (isNew ? 'Add item' : 'Save')}
+          </button>
+          {!isNew && (
+            <button onClick={archive} disabled={busy} className="salus-btn" style={styles.btnDanger}>
+              Archive
+            </button>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function FormField({ label, children }) {
+  return (
+    <div>
+      <div style={{ fontSize: 10, fontWeight: 500, color: '#7a8270', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 6 }}>
+        {label}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 function StudioBookingsView({ data, currentUser, isManager, onCreate, onOpenBooking }) {
   const [filter, setFilter] = useState('upcoming');
   const todayIso = toIsoDate(new Date());
