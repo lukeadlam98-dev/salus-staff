@@ -4,7 +4,8 @@ import {
   Send, ArrowLeftRight, Check, X, Clock, Bell, RotateCcw, Settings, Mail, LogOut,
   ChevronLeft, ChevronRight, TrendingUp, Award, Activity, Trash2,
   Sparkles, Play, Heart, Flame, Bookmark, MoreHorizontal, Music, Lightbulb,
-  Inbox, Shield, RefreshCw, MapPin,
+  Inbox, Shield, RefreshCw, MapPin, Target, Phone, AtSign, Briefcase,
+  RotateCcw as CoverIcon, ListChecks, Quote, Building2, MessageCircle,
   Home as HomeIcon, FileText, User as UserIcon, Settings as SettingsIcon
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
@@ -538,8 +539,8 @@ export default function SalusStaff() {
   // ─── Loading screens ───────────────────────────────────────────────────────
   if (!authChecked) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f1e8', fontFamily: 'Geist, sans-serif' }}>
-        <div style={{ color: '#5c4a38', fontFamily: '"Fraunces", serif', fontSize: 18, letterSpacing: 0.5 }}>Loading Salus Staff…</div>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f1e8', fontFamily: "'Inter', sans-serif" }}>
+        <div style={{ color: '#5c4a38', fontFamily: '"Playfair Display", serif', fontSize: 18, letterSpacing: 0.5 }}>Loading Salus Staff…</div>
       </div>
     );
   }
@@ -558,8 +559,8 @@ export default function SalusStaff() {
 
   if (loading) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f1e8', fontFamily: 'Geist, sans-serif' }}>
-        <div style={{ color: '#5c4a38', fontFamily: '"Fraunces", serif', fontSize: 18, letterSpacing: 0.5 }}>Loading your team…</div>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f1e8', fontFamily: "'Inter', sans-serif" }}>
+        <div style={{ color: '#5c4a38', fontFamily: '"Playfair Display", serif', fontSize: 18, letterSpacing: 0.5 }}>Loading your team…</div>
       </div>
     );
   }
@@ -569,9 +570,9 @@ export default function SalusStaff() {
   // No profile row for this auth user — guide them
   if (!data.users.find(u => u.id === currentUserId)) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f1e8', fontFamily: 'Geist, sans-serif', padding: 24 }}>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f1e8', fontFamily: "'Inter', sans-serif", padding: 24 }}>
         <div style={{ maxWidth: 440, background: '#fffdf7', border: '1px solid #e8e0cc', borderRadius: 16, padding: 32, textAlign: 'center' }}>
-          <h2 style={{ fontFamily: '"Fraunces", serif', fontSize: 22, marginTop: 0, color: '#1a2620' }}>Account isn't fully set up yet</h2>
+          <h2 style={{ fontFamily: '"Playfair Display", serif', fontSize: 22, marginTop: 0, color: '#1a2620' }}>Account isn't fully set up yet</h2>
           <p style={{ fontSize: 14, color: '#5a6258', lineHeight: 1.5 }}>
             Your login works, but there's no team profile attached to it.
             The manager needs to add a profile row for your account in Supabase.
@@ -1441,7 +1442,7 @@ export default function SalusStaff() {
   return (
     <div style={styles.app}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Geist:wght@300;400;500;600;700&display=swap');
+        /* Fonts loaded via index.html */
         * { box-sizing: border-box; }
         body { margin: 0; background: #f5f1e8; }
         .salus-btn { transition: all 0.15s ease; cursor: pointer; }
@@ -1521,6 +1522,7 @@ export default function SalusStaff() {
             data={data}
             currentUser={currentUser}
             isManager={isManager}
+            onReload={reloadData}
             onClassClick={(classId) => {
               const cls = data.classes.find(c => c.id === classId);
               const req = data.coverRequests.find(r => r.classId === classId && (r.status === 'open' || r.status === 'pending'));
@@ -2226,14 +2228,14 @@ function RolePickerScreen({ currentUser, onPick, onSignOut }) {
             onClick={() => setIsCoach(v => !v)}
             title="Coach"
             desc="I teach classes in the studio (Reformer, Hyrox, etc.)"
-            icon="🧘"
+            icon={<Activity size={20} color="#7a8c5c" />}
           />
           <Option
             active={isFoh}
             onClick={() => setIsFoh(v => !v)}
             title="Front of House"
             desc="I work at reception, checking members in"
-            icon="🪴"
+            icon={<UserIcon size={20} color="#c6926a" />}
           />
         </div>
 
@@ -3185,7 +3187,7 @@ function FlowsFeed({ data, currentUser, isManager, onCreate, onOpenPost, onToggl
       <div style={styles.flowsFilterRow}>
         {[
           { key: 'all',      label: 'All' },
-          { key: 'flow',     label: '✨ Flows' },
+          { key: 'flow',     label: 'Flows' },
           { key: 'video',    label: '▶ Videos' },
           { key: 'playlist', label: '♪ Playlists' },
           { key: 'tip',      label: '💡 Tips' },
@@ -3206,7 +3208,7 @@ function FlowsFeed({ data, currentUser, isManager, onCreate, onOpenPost, onToggl
 
       {posts.length === 0 ? (
         <div style={styles.flowsEmpty}>
-          <div style={styles.flowsEmptyIcon}>✨</div>
+          
           <div style={styles.flowsEmptyTitle}>Nothing here yet</div>
           <div style={styles.flowsEmptySub}>
             Be the first to share a flow, a video, or a quick tip with the team.
@@ -3975,7 +3977,7 @@ function AdminInboxSection({ emailIntegration, onConnectGmail, data, currentUser
       {/* Filter chips */}
       <div style={styles.adminTabRow}>
         <FilterChip
-          label={`🔥 Urgent · ${urgentCount}`}
+          label={`Urgent · ${urgentCount}`}
           active={filter === 'urgent'}
           onClick={() => setFilter('urgent')}
           accent={urgentCount > 0 ? '#c8442a' : null}
@@ -3999,7 +4001,7 @@ function AdminInboxSection({ emailIntegration, onConnectGmail, data, currentUser
         <div style={styles.emptyCard}>
           <Inbox size={24} color="#a59478" />
           <div style={styles.emptyBody}>
-            {filter === 'urgent' ? 'No urgent items right now. 🎉' :
+            {filter === 'urgent' ? 'No urgent items right now.' :
              filter === 'open' ? 'Inbox zero. All caught up.' :
              `No emails in this category.`}
           </div>
@@ -4199,13 +4201,13 @@ function NudgeModal({ msg, users, currentUserId, onCreateTask, onClose }) {
     try {
       const taskTitle = `Reply: ${msg.email_subject || `email from ${fromName}`}`.slice(0, 100);
       const desc = [
-        `📧 Email from: ${fromName}`,
+        `Email from: ${fromName}`,
         msg.email_subject ? `Subject: ${msg.email_subject}` : '',
         '',
         msg.summary ? `Summary: ${msg.summary}` : '',
         msg.suggested_action ? `Suggested: ${msg.suggested_action}` : '',
         '',
-        note ? `Note from Luke: ${note}` : '',
+        note ? `Note: ${note}` : '',
       ].filter(Boolean).join('\n');
 
       const ok = await onCreateTask({
@@ -4245,7 +4247,7 @@ function NudgeModal({ msg, users, currentUserId, onCreateTask, onClose }) {
         {/* Handle bar */}
         <div style={{ width: 36, height: 4, background: '#efe7d2', borderRadius: 999, margin: '0 auto 16px' }} />
 
-        <div style={{ fontFamily: '"Fraunces", serif', fontSize: 20, color: '#1a2620', marginBottom: 4 }}>
+        <div style={{ fontFamily: '"Playfair Display", serif', fontSize: 20, color: '#1a2620', marginBottom: 4 }}>
           Nudge a teammate
         </div>
         <div style={{ fontSize: 12, color: '#7a8270', marginBottom: 16 }}>
@@ -4477,7 +4479,7 @@ function AdminReportsSection({ emailIntegration, onConnectGmail }) {
         <button onClick={goPrev} className="salus-btn" style={styles.btnGhost}>
           <ChevronLeft size={14} />
         </button>
-        <div style={{ flex: 1, textAlign: 'center', fontFamily: '"Fraunces", serif', fontSize: 18, color: '#1a2620' }}>
+        <div style={{ flex: 1, textAlign: 'center', fontFamily: '"Playfair Display", serif', fontSize: 18, color: '#1a2620' }}>
           {MONTH_NAMES[month]} {year}
         </div>
         <button onClick={goNext} className="salus-btn" style={styles.btnGhost}>
@@ -4735,7 +4737,7 @@ function StudioBookingsView({ data, currentUser, isManager, onCreate, onOpenBook
 
       {bookings.length === 0 ? (
         <div style={styles.flowsEmpty}>
-          <div style={styles.flowsEmptyIcon}>📅</div>
+          
           <div style={styles.flowsEmptyTitle}>
             {filter === 'upcoming' ? 'Nothing booked yet' :
              filter === 'past'     ? 'No past bookings' :
@@ -4886,7 +4888,7 @@ function CreateBookingModal({ existing, currentUser, isManager, onClose, onCreat
                           ? { background: BOOKING_TYPES.external_event.color, color: '#fff', borderColor: BOOKING_TYPES.external_event.color }
                           : {}),
                       }}>
-                      🏷️ Paid hire / event
+                      Paid hire / event
                     </button>
                   </div>
                 </>
@@ -4900,7 +4902,7 @@ function CreateBookingModal({ existing, currentUser, isManager, onClose, onCreat
                       ? { background: BOOKING_TYPES.coach_1on1.color, color: '#fff', borderColor: BOOKING_TYPES.coach_1on1.color }
                       : {}),
                   }}>
-                  🤝 1:1 session
+                  1:1 session
                 </button>
                 <button onClick={() => setBookingType('coach_class')} className="salus-btn"
                   style={{
@@ -4909,7 +4911,7 @@ function CreateBookingModal({ existing, currentUser, isManager, onClose, onCreat
                       ? { background: BOOKING_TYPES.coach_class.color, color: '#fff', borderColor: BOOKING_TYPES.coach_class.color }
                       : {}),
                   }}>
-                  📅 Extra class
+                  Extra class
                 </button>
                 <button onClick={() => setBookingType('coach_event')} className="salus-btn"
                   style={{
@@ -4918,7 +4920,7 @@ function CreateBookingModal({ existing, currentUser, isManager, onClose, onCreat
                       ? { background: BOOKING_TYPES.coach_event.color, color: '#fff', borderColor: BOOKING_TYPES.coach_event.color }
                       : {}),
                   }}>
-                  🎉 Workshop / event
+                  Workshop / event
                 </button>
               </div>
             </>
@@ -5138,7 +5140,7 @@ function BookingDetailModal({ booking, currentUser, isManager, onClose, onEdit, 
             rel="noopener noreferrer"
             style={styles.gcalLink}
           >
-            📅 Add to Google Calendar
+            Add to Google Calendar
           </a>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
@@ -5240,7 +5242,7 @@ function DmThreadModal({ otherUser, data, currentUser, onClose, onSend, onMarkRe
         <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: 14, background: '#f5f1e8' }}>
           {thread.length === 0 ? (
             <div style={{ textAlign: 'center', padding: 30, color: '#7a8270', fontSize: 13 }}>
-              No messages yet. Start the conversation 👋
+              No messages yet. Start the conversation
             </div>
           ) : (
             thread.map(msg => {
@@ -5420,8 +5422,7 @@ function NotificationsDrawer({ data, currentUser, isManager, onClose, onGoTo, on
         </div>
         {items.length === 0 ? (
           <div style={styles.notifsEmpty}>
-            <div style={{ fontSize: 32 }}>🌿</div>
-            <div style={{ fontSize: 14, color: '#5c4a38', marginTop: 8 }}>All caught up</div>
+            <div style={{ fontFamily: '"Playfair Display", serif', fontSize: 22, color: '#5c4a38', fontWeight: 500 }}>All caught up</div>
             <div style={{ fontSize: 11, color: '#7a8270', marginTop: 4 }}>Nothing needs your attention right now.</div>
           </div>
         ) : (
@@ -5487,7 +5488,7 @@ function LoginScreen({ error, onLogin, onSignup, onClearError }) {
   return (
     <div style={styles.loginWrap}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Geist:wght@300;400;500;600;700&display=swap');
+        /* Fonts loaded via index.html */
         body { margin: 0; background: #f5f1e8; }
       `}</style>
 
@@ -5741,7 +5742,7 @@ function MonthView({ classes, coverRequests, currentUser, onDayClick }) {
 // HOME — cover-first dashboard, the new app landing screen
 // ──────────────────────────────────────────────────────────────────────────────
 
-function Home({ data, currentUser, isManager, onClassClick, onRequestCover, onHireStudio, onClaim, onExpressInterest, onViewAllCover, onViewChat, onCreateTask, onOpenTask, onOpenAllTasks, onOpenTour, onCreateMaintenance, onOpenMaintenance, onCreateFeedback, onOpenFeedback }) {
+function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestCover, onHireStudio, onClaim, onExpressInterest, onViewAllCover, onViewChat, onCreateTask, onOpenTask, onOpenAllTasks, onOpenTour, onCreateMaintenance, onOpenMaintenance, onCreateFeedback, onOpenFeedback }) {
   const now = new Date();
   const hour = now.getHours();
   const greeting = hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening';
@@ -5959,6 +5960,7 @@ function Home({ data, currentUser, isManager, onClassClick, onRequestCover, onHi
           currentWidgets={widgets}
           isManager={isManager}
           currentUser={currentUser}
+          onReload={onReload}
           onClose={() => setShowCustomize(false)}
         />
       )}
@@ -6010,7 +6012,7 @@ function TotalHoursWidget({ data, currentUser }) {
             This week's hours
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
-            <div style={{ fontFamily: '"Fraunces", serif', fontSize: 28, color: '#1a2620' }}>
+            <div style={{ fontFamily: '"Playfair Display", serif', fontSize: 28, color: '#1a2620' }}>
               {total.toFixed(1)}
             </div>
             <div style={{ fontSize: 13, color: '#7a8270' }}>hours</div>
@@ -6056,7 +6058,7 @@ function QuoteWidget() {
       <div style={{ fontSize: 11, color: '#a59478', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
         Quote of the day
       </div>
-      <div style={{ fontFamily: '"Fraunces", serif', fontSize: 16, color: '#1a2620', lineHeight: 1.4, fontStyle: 'italic' }}>
+      <div style={{ fontFamily: '"Playfair Display", serif', fontSize: 16, color: '#1a2620', lineHeight: 1.4, fontStyle: 'italic' }}>
         "{q.text}"
       </div>
       <div style={{ fontSize: 11, color: '#7a8270', marginTop: 8 }}>— {q.author}</div>
@@ -6121,61 +6123,69 @@ function ChatPreviewWidget({ data, currentUser, onViewChat }) {
 
 // ─── Widget registry — used by the customize modal ───
 const ALL_WIDGETS = [
-  { key: 'cover',         label: 'Cover requests',       icon: '🔄', desc: 'Classes/shifts needing cover' },
-  { key: 'upcoming',      label: 'Your upcoming classes', icon: '📅', desc: 'Your next teaching slots' },
-  { key: 'tours',         label: 'Tours',                icon: '🚪', desc: 'Today and upcoming tours from Google Calendar' },
-  { key: 'tasks',         label: 'Tasks',                icon: '✅', desc: 'Your task list' },
-  { key: 'total_hours',   label: 'Total hours this week', icon: '⏱️', desc: 'Your scheduled hours (classes + FOH)' },
-  { key: 'request_cover', label: 'Request cover',        icon: '➕', desc: 'Quick button to post a cover request' },
-  { key: 'hire_studio',   label: 'Hire a studio',        icon: '🏛️', desc: 'Quick button to book the studio' },
-  { key: 'quote',         label: 'Quote of the day',     icon: '💭', desc: 'A different inspiring quote each day' },
-  { key: 'chat_preview',  label: 'Team chat preview',    icon: '💬', desc: 'Latest 3 messages from team chat' },
+  { key: 'cover',         label: 'Cover requests',        Icon: CoverIcon,     desc: 'Classes and shifts that need cover' },
+  { key: 'upcoming',      label: 'Your upcoming classes', Icon: Calendar,      desc: 'Your next teaching slots' },
+  { key: 'tours',         label: 'Tours',                 Icon: MapPin,        desc: 'Upcoming tours from Google Calendar' },
+  { key: 'tasks',         label: 'Tasks',                 Icon: ListChecks,    desc: 'Your task list' },
+  { key: 'total_hours',   label: 'Hours this week',       Icon: Clock,         desc: 'Your scheduled hours (classes plus FOH)' },
+  { key: 'request_cover', label: 'Request cover',         Icon: Plus,          desc: 'Quick button to post a cover request' },
+  { key: 'hire_studio',   label: 'Hire a studio',         Icon: Building2,     desc: 'Quick button to book the studio' },
+  { key: 'quote',         label: 'Quote of the day',      Icon: Quote,         desc: 'A different quote each day' },
+  { key: 'chat_preview',  label: 'Team chat preview',     Icon: MessageCircle, desc: 'Latest messages from team chat' },
 ];
 
 // ─── Customize Home modal ────────────────────────────────────────────────
-function CustomizeHomeModal({ currentWidgets, isManager, currentUser, onClose }) {
-  const [selected, setSelected] = useState(currentWidgets);
-  const [saving, setSaving] = useState(false);
+function CustomizeHomeModal({ currentWidgets, isManager, currentUser, onReload, onClose }) {
+  // Start from server state; every change auto-saves so the home updates immediately.
+  const [selected, setSelected] = useState(() => Array.isArray(currentWidgets) ? [...currentWidgets] : []);
+  const [savingKey, setSavingKey] = useState(null);
 
-  const toggle = (key) => {
-    setSelected(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
-  };
-  const moveUp = (key) => {
-    setSelected(prev => {
-      const i = prev.indexOf(key);
-      if (i <= 0) return prev;
-      const copy = [...prev];
-      [copy[i - 1], copy[i]] = [copy[i], copy[i - 1]];
-      return copy;
-    });
-  };
-  const moveDown = (key) => {
-    setSelected(prev => {
-      const i = prev.indexOf(key);
-      if (i < 0 || i >= prev.length - 1) return prev;
-      const copy = [...prev];
-      [copy[i + 1], copy[i]] = [copy[i], copy[i + 1]];
-      return copy;
-    });
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
+  const persist = async (nextSelected) => {
     try {
       const { error } = await supabase
         .from('profiles')
-        .update({ home_widgets: selected })
+        .update({ home_widgets: nextSelected })
         .eq('id', currentUser.id);
       if (error) throw error;
-      onClose();
+      // Force a reload so the Home page picks up the new widgets immediately —
+      // realtime can lag a beat.
+      if (onReload) await onReload(true);
     } catch (e) {
-      alert('Failed to save: ' + (e.message || e));
-    } finally {
-      setSaving(false);
+      alert('Could not save: ' + (e.message || e));
     }
   };
 
-  // Active widgets in user's order + inactive widgets at the bottom
+  const add = async (key) => {
+    setSavingKey(key);
+    const next = [...selected, key];
+    setSelected(next);
+    await persist(next);
+    setSavingKey(null);
+  };
+  const remove = async (key) => {
+    setSavingKey(key);
+    const next = selected.filter(k => k !== key);
+    setSelected(next);
+    await persist(next);
+    setSavingKey(null);
+  };
+  const moveUp = async (key) => {
+    const i = selected.indexOf(key);
+    if (i <= 0) return;
+    const next = [...selected];
+    [next[i - 1], next[i]] = [next[i], next[i - 1]];
+    setSelected(next);
+    await persist(next);
+  };
+  const moveDown = async (key) => {
+    const i = selected.indexOf(key);
+    if (i < 0 || i >= selected.length - 1) return;
+    const next = [...selected];
+    [next[i + 1], next[i]] = [next[i], next[i + 1]];
+    setSelected(next);
+    await persist(next);
+  };
+
   const inactive = ALL_WIDGETS.filter(w => !selected.includes(w.key));
 
   return (
@@ -6191,39 +6201,40 @@ function CustomizeHomeModal({ currentWidgets, isManager, currentUser, onClose })
       }}>
         <div style={{ width: 36, height: 4, background: '#efe7d2', borderRadius: 999, margin: '0 auto 16px' }} />
 
-        <div style={{ fontFamily: '"Fraunces", serif', fontSize: 20, color: '#1a2620', marginBottom: 4 }}>
+        <div style={{ fontFamily: '"Playfair Display", serif', fontSize: 22, color: '#1a2620', marginBottom: 4, fontWeight: 500 }}>
           Customize home
         </div>
-        <div style={{ fontSize: 12, color: '#7a8270', marginBottom: 16 }}>
-          Pick the widgets you want on your home page. Drag-order with ↑↓ arrows.
+        <div style={{ fontSize: 12, color: '#7a8270', marginBottom: 16, fontWeight: 300 }}>
+          Pick what you want to see. Changes save automatically.
         </div>
 
-        {/* Active widgets (in order) */}
+        {/* Active widgets in order */}
         {selected.length > 0 && (
           <>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
-              Showing on your home
+            <div style={{ fontSize: 10, fontWeight: 600, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 }}>
+              On your home
             </div>
-            <div style={{ marginBottom: 16 }}>
+            <div style={{ marginBottom: 20, background: '#fef7e8', borderRadius: 10, overflow: 'hidden' }}>
               {selected.map((key, idx) => {
                 const w = ALL_WIDGETS.find(x => x.key === key);
                 if (!w) return null;
+                const isBusy = savingKey === key;
                 return (
                   <div key={key} style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    padding: '10px 4px', borderBottom: idx < selected.length - 1 ? '1px solid #efe7d2' : 'none',
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '12px 10px',
+                    borderBottom: idx < selected.length - 1 ? '1px solid #efe7d2' : 'none',
+                    opacity: isBusy ? 0.5 : 1,
                   }}>
-                    <span style={{ fontSize: 18 }}>{w.icon}</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, color: '#1a2620', fontWeight: 500 }}>{w.label}</div>
-                    </div>
-                    <button onClick={() => moveUp(key)} disabled={idx === 0} className="salus-btn"
-                      style={{ padding: 6, opacity: idx === 0 ? 0.3 : 1, color: '#7a8270' }}>↑</button>
-                    <button onClick={() => moveDown(key)} disabled={idx === selected.length - 1} className="salus-btn"
-                      style={{ padding: 6, opacity: idx === selected.length - 1 ? 0.3 : 1, color: '#7a8270' }}>↓</button>
-                    <button onClick={() => toggle(key)} className="salus-btn"
-                      style={{ padding: '4px 8px', borderRadius: 6, background: '#fef0ec', color: '#c8442a', fontSize: 11 }}>
-                      Hide
+                    <w.Icon size={18} color="#5c4a38" />
+                    <div style={{ flex: 1, fontSize: 13, color: '#1a2620' }}>{w.label}</div>
+                    <button onClick={() => moveUp(key)} disabled={idx === 0 || isBusy} className="salus-btn"
+                      style={{ padding: 6, opacity: idx === 0 ? 0.25 : 1, color: '#7a8270', fontSize: 14 }}>↑</button>
+                    <button onClick={() => moveDown(key)} disabled={idx === selected.length - 1 || isBusy} className="salus-btn"
+                      style={{ padding: 6, opacity: idx === selected.length - 1 ? 0.25 : 1, color: '#7a8270', fontSize: 14 }}>↓</button>
+                    <button onClick={() => remove(key)} disabled={isBusy} className="salus-btn"
+                      style={{ padding: '4px 10px', borderRadius: 6, background: 'transparent', color: '#c8442a', fontSize: 11, fontWeight: 500 }}>
+                      Remove
                     </button>
                   </div>
                 );
@@ -6232,46 +6243,49 @@ function CustomizeHomeModal({ currentWidgets, isManager, currentUser, onClose })
           </>
         )}
 
-        {/* Inactive widgets */}
+        {/* Available to add */}
         {inactive.length > 0 && (
           <>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
-              Available widgets
+            <div style={{ fontSize: 10, fontWeight: 600, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 }}>
+              Add a widget
             </div>
-            <div style={{ marginBottom: 16 }}>
-              {inactive.map((w, idx) => (
-                <div key={w.key} style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '10px 4px', borderBottom: idx < inactive.length - 1 ? '1px solid #efe7d2' : 'none',
-                }}>
-                  <span style={{ fontSize: 18 }}>{w.icon}</span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, color: '#1a2620', fontWeight: 500 }}>{w.label}</div>
-                    <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>{w.desc}</div>
+            <div style={{ marginBottom: 20 }}>
+              {inactive.map((w, idx) => {
+                const isBusy = savingKey === w.key;
+                return (
+                  <div key={w.key} style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '12px 10px',
+                    borderBottom: idx < inactive.length - 1 ? '1px solid #efe7d2' : 'none',
+                    opacity: isBusy ? 0.5 : 1,
+                  }}>
+                    <w.Icon size={18} color="#7a8270" />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, color: '#1a2620' }}>{w.label}</div>
+                      <div style={{ fontSize: 11, color: '#7a8270', marginTop: 2, fontWeight: 300 }}>{w.desc}</div>
+                    </div>
+                    <button onClick={() => add(w.key)} disabled={isBusy} className="salus-btn"
+                      style={{
+                        padding: '6px 14px', borderRadius: 999,
+                        background: '#5c4a38', color: '#fffdf7',
+                        fontSize: 12, fontWeight: 500,
+                      }}>
+                      {isBusy ? 'Adding…' : 'Add'}
+                    </button>
                   </div>
-                  <button onClick={() => toggle(w.key)} className="salus-btn"
-                    style={{ padding: '4px 10px', borderRadius: 6, background: '#e3ecd8', color: '#5b7245', fontSize: 11, fontWeight: 600 }}>
-                    + Add
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </>
         )}
 
-        {/* Actions */}
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={onClose} className="salus-btn" style={{
-            flex: 1, padding: 12, borderRadius: 999,
-            background: '#fffdf7', border: '1px solid #efe7d2', color: '#5c4a38',
-            fontSize: 14, fontWeight: 600,
-          }}>Cancel</button>
-          <button onClick={handleSave} disabled={saving} className="salus-btn" style={{
-            flex: 1, padding: 12, borderRadius: 999,
-            background: '#5c4a38', color: '#fffdf7',
-            fontSize: 14, fontWeight: 600, opacity: saving ? 0.6 : 1,
-          }}>{saving ? 'Saving…' : 'Save'}</button>
-        </div>
+        <button onClick={onClose} className="salus-btn" style={{
+          width: '100%', padding: 14, borderRadius: 999,
+          background: '#5c4a38', color: '#fffdf7',
+          fontSize: 14, fontWeight: 500,
+        }}>
+          Done
+        </button>
       </div>
     </div>
   );
@@ -6626,7 +6640,7 @@ function ShiftDetailModal({ shift, data, currentUser, isManager, onClose, onAssi
             {assignedStaff ? `Assigned to ${assignedStaff.name}` : 'Currently unassigned'}
           </div>
           <a href={calUrl} target="_blank" rel="noopener noreferrer" style={styles.gcalLink}>
-            📅 Add to Google Calendar
+            Add to Google Calendar
           </a>
         </div>
 
@@ -7015,7 +7029,7 @@ function WeekViewBody({ items, allItems, weekOffset, setWeekOffset, getDate, get
       {visible.length === 0 && (
         <div style={{ padding: 40, textAlign: 'center', color: '#7a8270' }}>
           {filter === 'needsCover'
-            ? '🎉 Nothing needs cover this week.'
+            ? 'Nothing needs cover this week.'
             : filter === 'mine'
               ? `You have no ${totalLabel} this week.`
               : `No ${totalLabel} scheduled for this week.`}
@@ -7187,7 +7201,7 @@ function ScheduleStatsRow({ coverCount, totalCount, totalLabel }) {
         <div style={{
           fontSize: 32, fontWeight: 700, lineHeight: 1,
           color: coverCount > 0 ? '#c8442a' : '#5c8a5a',
-          fontFamily: '"Fraunces", Georgia, serif',
+          fontFamily: '"Playfair Display", Georgia, serif',
         }}>
           {coverCount}
         </div>
@@ -7982,8 +7996,8 @@ function DmsListView({ threads, data, currentUser, onOpenDm }) {
   if (threads.length === 0) {
     return (
       <div style={{ padding: '40px 24px', textAlign: 'center' }}>
-        <div style={{ fontSize: 36 }}>✉️</div>
-        <div style={{ fontFamily: '"Fraunces", serif', fontSize: 18, color: '#5c4a38', marginTop: 8 }}>
+        <Mail size={36} color="#a59478" style={{ margin: '0 auto' }} />
+        <div style={{ fontFamily: '"Playfair Display", serif', fontSize: 18, color: '#5c4a38', marginTop: 8 }}>
           No private messages yet
         </div>
         <div style={{ fontSize: 12, color: '#7a8270', marginTop: 6, lineHeight: 1.5 }}>
@@ -8521,7 +8535,7 @@ function ClassDetailModal({ classObj, data, currentUser, isManager, onClose, onR
               rel="noopener noreferrer"
               style={styles.gcalLink}
             >
-              📅 Add to Google Calendar
+              Add to Google Calendar
             </a>
           </div>
         )}
@@ -10324,7 +10338,7 @@ function DayDetailModal({ isoDate, data, currentUser, isManager, onClose, onClas
                 }}
               >
                 <div style={styles.dayDetailRowTime}>
-                  <div style={{ fontFamily: '"Fraunces", serif', fontSize: 17, fontWeight: 600, color: '#1a2620' }}>{cls.time}</div>
+                  <div style={{ fontFamily: '"Playfair Display", serif', fontSize: 17, fontWeight: 600, color: '#1a2620' }}>{cls.time}</div>
                   <div style={{ fontSize: 10, color: '#a59478', marginTop: 1 }}>{cls.dur}m</div>
                 </div>
                 <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
@@ -10661,8 +10675,8 @@ function TourCard({ tour, onOpen }) {
         <div style={styles.taskCardMeta}>
           {tour.status === 'completed' && <span style={{ color: '#5c8a5a' }}>✓ Done · </span>}
           {tour.status === 'no_show' && <span style={{ color: '#c8442a' }}>✗ No-show · </span>}
-          {tour.guestPhone && <span>📱 {tour.guestPhone}</span>}
-          {tour.guestEmail && !tour.guestPhone && <span>✉ {tour.guestEmail}</span>}
+          {tour.guestPhone && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Phone size={11} /> {tour.guestPhone}</span>}
+          {tour.guestEmail && !tour.guestPhone && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><AtSign size={11} /> {tour.guestEmail}</span>}
           {!tour.guestPhone && !tour.guestEmail && <span>Tour</span>}
         </div>
       </div>
@@ -10713,13 +10727,13 @@ function TourDetailModal({ tour, currentUser, onClose, onUpdate }) {
             <div style={{ marginBottom: 14 }}>
               <div style={styles.label}>Contact</div>
               {tour.guestPhone && (
-                <a href={`tel:${tour.guestPhone}`} style={{ display: 'block', fontSize: 14, color: '#5c4a38', textDecoration: 'none', marginTop: 2 }}>
-                  📱 {tour.guestPhone}
+                <a href={`tel:${tour.guestPhone}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 14, color: '#5c4a38', textDecoration: 'none', marginTop: 2 }}>
+                  <Phone size={13} /> {tour.guestPhone}
                 </a>
               )}
               {tour.guestEmail && (
-                <a href={`mailto:${tour.guestEmail}`} style={{ display: 'block', fontSize: 14, color: '#5c4a38', textDecoration: 'none', marginTop: 4 }}>
-                  ✉ {tour.guestEmail}
+                <a href={`mailto:${tour.guestEmail}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 14, color: '#5c4a38', textDecoration: 'none', marginTop: 4 }}>
+                  <AtSign size={13} /> {tour.guestEmail}
                 </a>
               )}
             </div>
@@ -10895,7 +10909,7 @@ function TaskCard({ task, data, currentUser, onOpen }) {
       <div style={{ flex: 1, textAlign: 'left' }}>
         <div style={styles.taskCardTitle}>
           {task.priority === 'urgent' && <span style={styles.taskUrgentDot}>●</span>}
-          {isProject && <span style={{ marginRight: 5 }}>🎯</span>}
+          {isProject && <Target size={11} style={{ marginRight: 5, verticalAlign: '-1px', color: '#7a8c5c' }} />}
           {task.title}
         </div>
         <div style={styles.taskCardMeta}>
@@ -10906,7 +10920,9 @@ function TaskCard({ task, data, currentUser, onOpen }) {
             </span>
           )}
           {commentCount > 0 && (
-            <span style={{ color: '#7a8270' }}>· 💬 {commentCount}</span>
+            <span style={{ color: '#7a8270', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+              · <MessageSquare size={10} /> {commentCount}
+            </span>
           )}
           {hasSubtasks && (
             <span style={{ color: '#7a8270' }}>· {subDone}/{subtasks.length}</span>
@@ -10998,8 +11014,9 @@ function CreateTaskModal({ data, currentUser, onClose, onCreate }) {
                 ...styles.audiencePill,
                 flex: 1,
                 ...(taskKind === 'daily' ? styles.audiencePillActive : {}),
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
               }}>
-              📋 Daily / routine
+              <ListChecks size={13} /> Daily / routine
             </button>
             <button onClick={() => setTaskKind('project')} className="salus-btn"
               style={{
@@ -11008,8 +11025,9 @@ function CreateTaskModal({ data, currentUser, onClose, onCreate }) {
                 ...(taskKind === 'project'
                   ? { background: '#7a8c5c', color: '#fff', borderColor: '#7a8c5c' }
                   : {}),
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
               }}>
-              🎯 Project / one-off
+              <Target size={13} /> Project / one-off
             </button>
           </div>
           <div style={{ fontSize: 11, color: '#7a8270', marginBottom: 14, lineHeight: 1.4 }}>
@@ -11295,8 +11313,8 @@ function TaskDetailModal({ task, data, currentUser, isManager, onClose, onMarkDo
           <button onClick={onClose} className="salus-btn" style={styles.threadCloseBtn}>
             <X size={20} />
           </button>
-          <div style={styles.threadHeaderTitle}>
-            {isProject ? '🎯 Project task' : '📋 Task'}
+          <div style={{ ...styles.threadHeaderTitle, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            {isProject ? <><Target size={15} /> Project task</> : <><ListChecks size={15} /> Task</>}
           </div>
           <div style={{ width: 36 }} />
         </div>
@@ -11978,7 +11996,7 @@ const styles = {
   app: {
     height: '100%',
     background: '#f5f1e8',
-    fontFamily: '"Geist", -apple-system, sans-serif',
+    fontFamily: "'Inter', -apple-system, sans-serif",
     color: '#1a2620',
     display: 'flex',
     flexDirection: 'column',
@@ -11999,7 +12017,7 @@ const styles = {
     padding: '8px 16px', textAlign: 'center',
   },
   quoteText: {
-    fontFamily: '"Fraunces", serif', fontSize: 13, fontStyle: 'italic',
+    fontFamily: '"Playfair Display", serif', fontSize: 13, fontStyle: 'italic',
     color: '#5c4a38', lineHeight: 1.4, maxWidth: 700, margin: '0 auto',
   },
   quoteAttr: {
@@ -12066,7 +12084,7 @@ const styles = {
   // ─── HOME (cover-first dashboard) ───
   homeContainer: { padding: '0 14px 80px' },
   homeGreeting: { padding: '12px 4px 8px' },
-  homeH1: { fontFamily: '"Fraunces", serif', fontSize: 26, fontWeight: 500, color: '#1a2620', margin: 0 },
+  homeH1: { fontFamily: '"Playfair Display", serif', fontSize: 26, fontWeight: 500, color: '#1a2620', margin: 0 },
   homeGreetSub: { fontSize: 13, color: '#7a8270', marginTop: 2, margin: 0 },
   homeSection: { marginTop: 16 },
   homeSectionHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10, padding: '0 4px' },
@@ -12117,7 +12135,7 @@ const styles = {
     alignItems: 'center', gap: 2,
   },
   weekNavRange: {
-    fontSize: 15, fontWeight: 600, color: '#1a2620', fontFamily: '"Fraunces", serif',
+    fontSize: 15, fontWeight: 600, color: '#1a2620', fontFamily: '"Playfair Display", serif',
   },
   weekNavTodayBtn: {
     fontSize: 10, color: '#7a8270', background: 'transparent', border: 'none',
@@ -12132,7 +12150,7 @@ const styles = {
   coverHomeWhen: { display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 10px', background: '#fef0ea', borderRadius: 10, minWidth: 56, flexShrink: 0 },
   coverHomeWhenMuted: { background: '#fdfbf5' },
   coverHomeWhenDay: { fontSize: 9, letterSpacing: 1.2, fontWeight: 700, textTransform: 'uppercase' },
-  coverHomeWhenTime: { fontFamily: '"Fraunces", serif', fontSize: 17, color: '#1a2620', marginTop: 2, fontWeight: 600 },
+  coverHomeWhenTime: { fontFamily: '"Playfair Display", serif', fontSize: 17, color: '#1a2620', marginTop: 2, fontWeight: 600 },
   coverHomeWhenRel: { fontSize: 9, marginTop: 2, fontWeight: 600 },
   coverHomeTitle: { fontSize: 15, fontWeight: 600, color: '#1a2620', marginBottom: 4 },
   coverHomeCoach: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#7a8270' },
@@ -12215,7 +12233,7 @@ const styles = {
     background: '#fffdf7', borderRadius: 14, padding: 14, border: '1px solid #efe7d2',
   },
   meStatCell: { textAlign: 'center', padding: '8px 4px' },
-  meStatNum: { fontFamily: '"Fraunces", serif', fontSize: 24, fontWeight: 500, color: '#1a2620' },
+  meStatNum: { fontFamily: '"Playfair Display", serif', fontSize: 24, fontWeight: 500, color: '#1a2620' },
   meStatLabel: { fontSize: 10, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 0.8, marginTop: 4, fontWeight: 600 },
   meActionsList: { background: '#fffdf7', borderRadius: 14, border: '1px solid #efe7d2', overflow: 'hidden' },
   meActionRow: {
@@ -12287,7 +12305,7 @@ const styles = {
     textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4,
   },
   threadClassTitle: {
-    fontFamily: '"Fraunces", serif', fontSize: 22, fontWeight: 500,
+    fontFamily: '"Playfair Display", serif', fontSize: 22, fontWeight: 500,
     color: '#1a2620', marginBottom: 2,
   },
   threadClassMeta: {
@@ -12383,7 +12401,7 @@ const styles = {
     textTransform: 'uppercase', letterSpacing: 0.8,
   },
   dayDetailTitle: {
-    fontFamily: '"Fraunces", serif', fontSize: 24, fontWeight: 500,
+    fontFamily: '"Playfair Display", serif', fontSize: 24, fontWeight: 500,
     color: '#1a2620', marginTop: 4,
   },
   dayDetailMeta: {
@@ -12679,7 +12697,7 @@ const styles = {
   rolePickerWrap: {
     minHeight: '100vh', background: '#f5f1e8',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    padding: 20, fontFamily: 'Geist, sans-serif',
+    padding: 20, fontFamily: "'Inter', sans-serif",
   },
   rolePickerCard: {
     width: '100%', maxWidth: 440,
@@ -12693,7 +12711,7 @@ const styles = {
     textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 8,
   },
   rolePickerTitle: {
-    fontFamily: '"Fraunces", Georgia, serif', fontSize: 24, lineHeight: 1.25,
+    fontFamily: '"Playfair Display", Georgia, serif', fontSize: 24, lineHeight: 1.25,
     color: '#5c4a38', margin: 0,
   },
   rolePickerSubtitle: {
@@ -12827,7 +12845,7 @@ const styles = {
   },
   statsEyebrow: { fontSize: 10, color: '#7a8270', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' },
   statsBigNumber: {
-    fontFamily: '"Fraunces", Georgia, serif', fontSize: 32, color: '#5c4a38',
+    fontFamily: '"Playfair Display", Georgia, serif', fontSize: 32, color: '#5c4a38',
     marginTop: 4, lineHeight: 1,
   },
   statsSubLine: { fontSize: 12, color: '#7a8270', marginTop: 6 },
@@ -12835,7 +12853,7 @@ const styles = {
     background: '#fef0ea', border: '1px solid #f3c8b5',
     borderRadius: 12, padding: '10px 12px', textAlign: 'center', minWidth: 78,
   },
-  statsStreakNum: { fontFamily: '"Fraunces", serif', fontSize: 26, color: '#c8442a', lineHeight: 1 },
+  statsStreakNum: { fontFamily: '"Playfair Display", serif', fontSize: 26, color: '#c8442a', lineHeight: 1 },
   statsStreakLabel: { fontSize: 9, color: '#7a8270', marginTop: 6, lineHeight: 1.3, fontWeight: 600 },
   statsTilesRow: { display: 'flex', gap: 6, marginTop: 8 },
   statsMiniTile: {
@@ -12890,7 +12908,7 @@ const styles = {
     textTransform: 'uppercase', letterSpacing: 1.2,
   },
   flowsTitle: {
-    fontFamily: '"Fraunces", Georgia, serif',
+    fontFamily: '"Playfair Display", Georgia, serif',
     fontSize: 32, color: '#5c4a38', lineHeight: 1, marginTop: 4,
   },
   flowsSubtitle: { fontSize: 12, color: '#7a8270', marginTop: 6, fontStyle: 'italic' },
@@ -12921,7 +12939,7 @@ const styles = {
     textAlign: 'center',
   },
   flowsEmptyIcon: { fontSize: 38, marginBottom: 8 },
-  flowsEmptyTitle: { fontFamily: '"Fraunces", serif', fontSize: 18, color: '#5c4a38' },
+  flowsEmptyTitle: { fontFamily: '"Playfair Display", serif', fontSize: 18, color: '#5c4a38' },
   flowsEmptySub: { fontSize: 12, color: '#7a8270', marginTop: 6, lineHeight: 1.4 },
   flowsEmptyBtn: {
     marginTop: 14, padding: '10px 16px', borderRadius: 999,
@@ -12944,7 +12962,7 @@ const styles = {
     borderRadius: 999, textTransform: 'uppercase', letterSpacing: 0.6,
   },
   postTitle: {
-    fontFamily: '"Fraunces", Georgia, serif', fontSize: 17,
+    fontFamily: '"Playfair Display", Georgia, serif', fontSize: 17,
     color: '#1a2620', lineHeight: 1.25,
   },
   postDesc: {
@@ -12989,7 +13007,7 @@ const styles = {
     fontFamily: 'inherit', marginLeft: 'auto',
   },
   postDetailTitle: {
-    fontFamily: '"Fraunces", Georgia, serif', fontSize: 22,
+    fontFamily: '"Playfair Display", Georgia, serif', fontSize: 22,
     color: '#1a2620', lineHeight: 1.25, margin: '4px 0 10px',
   },
   postDetailDesc: {
@@ -13101,7 +13119,7 @@ const styles = {
     marginBottom: 12, padding: '0 4px',
   },
   adminSectionTitle: {
-    fontFamily: '"Fraunces", serif', fontSize: 18, color: '#1a2620',
+    fontFamily: '"Playfair Display", serif', fontSize: 18, color: '#1a2620',
   },
   adminSectionSubtitle: {
     fontSize: 11, color: '#7a8270', marginTop: 2,
@@ -13189,7 +13207,7 @@ const styles = {
   },
   tourCardTimeMain: {
     fontSize: 14, fontWeight: 700, color: '#5c4a38',
-    fontFamily: '"Fraunces", Georgia, serif',
+    fontFamily: '"Playfair Display", Georgia, serif',
   },
 
   // ─── STUDIO BOOKINGS ───
@@ -13204,7 +13222,7 @@ const styles = {
     textTransform: 'uppercase', letterSpacing: 1.2,
   },
   bookingsTitle: {
-    fontFamily: '"Fraunces", Georgia, serif',
+    fontFamily: '"Playfair Display", Georgia, serif',
     fontSize: 28, color: '#5c4a38', lineHeight: 1, marginTop: 4,
   },
   bookingsSubtitle: { fontSize: 12, color: '#7a8270', marginTop: 6, fontStyle: 'italic' },
@@ -13229,7 +13247,7 @@ const styles = {
     padding: '14px 16px', borderBottom: '1px solid #ebe3cf',
   },
   notifsTitle: {
-    fontFamily: '"Fraunces", serif', fontSize: 20, color: '#5c4a38',
+    fontFamily: '"Playfair Display", serif', fontSize: 20, color: '#5c4a38',
   },
   notifsEmpty: {
     padding: '60px 30px', textAlign: 'center',
@@ -13346,7 +13364,7 @@ const styles = {
     objectFit: 'contain', padding: 4,
     filter: 'brightness(0)',
   },
-  logoText: { fontFamily: '"Fraunces", serif', fontSize: 20, fontWeight: 500, lineHeight: 1.1, color: '#1a2620' },
+  logoText: { fontFamily: '"Playfair Display", serif', fontSize: 20, fontWeight: 500, lineHeight: 1.1, color: '#1a2620' },
   logoSub: { fontSize: 10, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 1.2, marginTop: 4 },
   alertBadge: {
     display: 'flex', alignItems: 'center', gap: 6,
@@ -13408,11 +13426,11 @@ const styles = {
     marginBottom: 20, gap: 16, flexWrap: 'wrap',
   },
   h2: {
-    fontFamily: '"Fraunces", serif', fontSize: 30, fontWeight: 500,
+    fontFamily: '"Playfair Display", serif', fontSize: 30, fontWeight: 500,
     margin: 0, color: '#1a2620', lineHeight: 1.15, letterSpacing: -0.3,
   },
   h3: {
-    fontFamily: '"Fraunces", serif', fontSize: 18, fontWeight: 500,
+    fontFamily: '"Playfair Display", serif', fontSize: 18, fontWeight: 500,
     margin: '20px 0 12px', color: '#1a2620',
   },
   subtitle: { fontSize: 13, color: '#7a8270', marginTop: 6 },
@@ -13469,7 +13487,7 @@ const styles = {
     display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
     paddingBottom: 10, borderBottom: '1px solid #e8e0cc', marginBottom: 10,
   },
-  dayName: { fontFamily: '"Fraunces", serif', fontSize: 15, fontWeight: 500, color: '#1a2620' },
+  dayName: { fontFamily: '"Playfair Display", serif', fontSize: 15, fontWeight: 500, color: '#1a2620' },
   dayCount: {
     fontSize: 10, color: '#7a8270', background: '#f0eee4',
     padding: '3px 8px', borderRadius: 10, fontWeight: 500,
@@ -13534,7 +13552,7 @@ const styles = {
   },
   coverCardDay: { fontSize: 11, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: 500 },
   coverCardType: {
-    fontFamily: '"Fraunces", serif', fontSize: 22, fontWeight: 500,
+    fontFamily: '"Playfair Display", serif', fontSize: 22, fontWeight: 500,
     marginTop: 4, color: '#1a2620', letterSpacing: -0.3,
   },
   coverCardMeta: { display: 'flex', alignItems: 'center', gap: 10 },
@@ -13556,7 +13574,7 @@ const styles = {
     textAlign: 'center', border: '1px solid #e8e0cc',
   },
   emptyTitle: {
-    fontFamily: '"Fraunces", serif', fontSize: 20, fontWeight: 500,
+    fontFamily: '"Playfair Display", serif', fontSize: 20, fontWeight: 500,
     marginTop: 14, color: '#1a2620',
   },
   emptyText: { fontSize: 13, color: '#7a8270', marginTop: 8 },
@@ -13573,7 +13591,7 @@ const styles = {
     display: 'flex', alignItems: 'center', gap: 12,
   },
   chatTitle: {
-    fontFamily: '"Fraunces", serif', fontSize: 20, fontWeight: 500,
+    fontFamily: '"Playfair Display", serif', fontSize: 20, fontWeight: 500,
     color: '#1a2620', margin: 0, letterSpacing: -0.2, lineHeight: 1.2,
   },
   chatSubtitle: {
@@ -13677,7 +13695,7 @@ const styles = {
     marginBottom: 14,
   },
   statValue: {
-    fontFamily: '"Fraunces", serif', fontSize: 34, fontWeight: 500,
+    fontFamily: '"Playfair Display", serif', fontSize: 34, fontWeight: 500,
     lineHeight: 1, color: '#1a2620', letterSpacing: -0.5,
   },
   statLabel: { fontSize: 12, color: '#7a8270', marginTop: 6 },
@@ -13713,7 +13731,7 @@ const styles = {
   },
   alertPanelHeader: {
     display: 'flex', alignItems: 'center', gap: 8,
-    fontFamily: '"Fraunces", serif', fontSize: 17, fontWeight: 500,
+    fontFamily: '"Playfair Display", serif', fontSize: 17, fontWeight: 500,
     marginBottom: 14, color: '#1a2620',
   },
   alertRow: {
@@ -13860,7 +13878,7 @@ const styles = {
   // Login screen
   loginWrap: {
     minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-    background: '#f5f1e8', padding: 24, fontFamily: '"Geist", -apple-system, sans-serif',
+    background: '#f5f1e8', padding: 24, fontFamily: "'Inter', -apple-system, sans-serif",
   },
   loginCard: {
     background: '#fffdf7', borderRadius: 16, padding: '40px 36px',
@@ -13883,7 +13901,7 @@ const styles = {
     filter: 'brightness(0)',
   },
   loginTitle: {
-    fontFamily: '"Fraunces", serif', fontSize: 28, fontWeight: 500,
+    fontFamily: '"Playfair Display", serif', fontSize: 28, fontWeight: 500,
     color: '#1a2620', textAlign: 'center', marginBottom: 6, letterSpacing: -0.3,
   },
   loginSub: {
@@ -14043,7 +14061,7 @@ const styles = {
   },
   statusBarContent: { flex: 1, minWidth: 200 },
   statusBarTitle: {
-    fontFamily: '"Fraunces", serif', fontSize: 16, fontWeight: 500,
+    fontFamily: '"Playfair Display", serif', fontSize: 16, fontWeight: 500,
     color: '#1a2620', lineHeight: 1.3, letterSpacing: -0.1,
   },
   statusBarSub: {
@@ -14077,7 +14095,7 @@ const styles = {
     letterSpacing: 0.6, color: 'inherit', opacity: 0.7,
   },
   dayPillDate: {
-    fontFamily: '"Fraunces", serif', fontSize: 20, fontWeight: 500,
+    fontFamily: '"Playfair Display", serif', fontSize: 20, fontWeight: 500,
     color: 'inherit', marginTop: 2, lineHeight: 1,
   },
   dayPillDot: {
@@ -14087,7 +14105,7 @@ const styles = {
     marginBottom: 12,
   },
   mobileDayHeaderDay: {
-    fontFamily: '"Fraunces", serif', fontSize: 20, fontWeight: 500,
+    fontFamily: '"Playfair Display", serif', fontSize: 20, fontWeight: 500,
     color: '#1a2620', letterSpacing: -0.2,
   },
   mobileDayList: {
