@@ -41,6 +41,24 @@ export default async function handler(req, res) {
     // 2. Parse events
     const events = parseICal(text);
 
+    // Debug mode: return diagnostic info instead of upserting
+    if (req.query?.debug === '1') {
+      const samples = events.slice(0, 5).map(ev => ({
+        UID: ev.UID,
+        SUMMARY: unescape(ev.SUMMARY || ''),
+        DTSTART: ev.DTSTART,
+        DTSTART_PARAMS: ev._DTSTART_PARAMS,
+        DTEND: ev.DTEND,
+      }));
+      return res.status(200).json({
+        feed_length_chars: text.length,
+        total_events_in_feed: events.length,
+        first_5_events: samples,
+        filter_keyword: process.env.TOURS_TITLE_FILTER || 'tour',
+        date_range_now: new Date().toISOString(),
+      });
+    }
+
     // 3. Filter: only future events (within next 90 days) + past 7 days (so FOH can update notes after)
     const now = Date.now();
     const past = now - 7 * 86400 * 1000;
