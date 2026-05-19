@@ -536,13 +536,9 @@ export default function SalusStaff() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ─── Loading screens ───────────────────────────────────────────────────────
+  // ─── Loading screens — animated logo ────────────────────────────────────
   if (!authChecked) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f1e8', fontFamily: "'Inter', sans-serif" }}>
-        <div style={{ color: '#5c4a38', fontFamily: '"Playfair Display", serif', fontSize: 18, letterSpacing: 0.5 }}>Loading Salus Staff…</div>
-      </div>
-    );
+    return <LoadingLogo />;
   }
 
   // Not logged in → show login screen
@@ -558,11 +554,7 @@ export default function SalusStaff() {
   }
 
   if (loading) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f1e8', fontFamily: "'Inter', sans-serif" }}>
-        <div style={{ color: '#5c4a38', fontFamily: '"Playfair Display", serif', fontSize: 18, letterSpacing: 0.5 }}>Loading your team…</div>
-      </div>
-    );
+    return <LoadingLogo />;
   }
 
   const currentUserId = session.user?.id;
@@ -5939,7 +5931,7 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
       {/* Brand photo strip — quiet visual anchor */}
       <div style={{
         height: 140, borderRadius: 20, overflow: 'hidden', marginBottom: 4, position: 'relative',
-        backgroundImage: `url(/brand/${hour < 12 ? 'reformer' : hour < 18 ? 'cardio' : 'ice'}.jpg)`,
+        backgroundImage: 'url(/brand/cardio.jpg)',
         backgroundSize: 'cover', backgroundPosition: 'center',
         boxShadow: '0 1px 0 rgba(92, 74, 56, 0.06)',
       }} />
@@ -6412,6 +6404,49 @@ function CustomizeHomeModal({ currentWidgets, isManager, currentUser, onReload, 
   );
 }
 
+// ─── LoadingLogo — animated brand logo for loading states ───
+// Slow breathing pulse animation — feels on-brand for wellness (like breath cycles).
+function LoadingLogo() {
+  return (
+    <div style={{
+      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: '#f5f1e8', fontFamily: "'Inter', sans-serif",
+      flexDirection: 'column', gap: 24,
+    }}>
+      <style>{`
+        @keyframes salus-breathe {
+          0%, 100% { transform: scale(1); opacity: 0.55; }
+          50% { transform: scale(1.08); opacity: 1; }
+        }
+        @keyframes salus-rotate {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+      <div style={{
+        width: 64, height: 64,
+        animation: 'salus-breathe 2.6s ease-in-out infinite',
+      }}>
+        <img
+          src="https://cdn.prod.website-files.com/66803175747777a7dd2956e8/668c04b49ff0954ea73d39ef_download-compresskaru.com.png"
+          alt="Salus House"
+          style={{
+            width: '100%', height: '100%',
+            objectFit: 'contain',
+            filter: 'brightness(0) invert(0.25)', // dark forest tone
+          }}
+        />
+      </div>
+      <div style={{
+        fontSize: 10, fontWeight: 500, color: '#a59478',
+        letterSpacing: 3, textTransform: 'uppercase',
+      }}>
+        Salus House
+      </div>
+    </div>
+  );
+}
+
 // ─── PageHeader — reusable editorial header with optional photo ───
 // Used at the top of major sections (Schedule, Admin sub-sections, etc).
 function PageHeader({ eyebrow, title, subtitle, photo }) {
@@ -6460,7 +6495,7 @@ function HomeTile({ title, count, summary, open, onToggle, urgent, onViewAll, ch
             {count > 0 && (
               <span style={{
                 ...styles.tileCount,
-                background: urgent ? '#c8442a' : '#a59478',
+                color: urgent ? '#c8442a' : '#1a2620',
               }}>
                 {count}
               </span>
@@ -12284,7 +12319,7 @@ const styles = {
   homeSection: { marginTop: 28 },
   homeSectionHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14, padding: '0 2px' },
   homeSectionTitle: { fontSize: 10, fontWeight: 600, color: '#7a8270', letterSpacing: 2, textTransform: 'uppercase', display: 'flex', alignItems: 'center' },
-  homeSectionCount: { background: 'transparent', color: '#c8442a', padding: '0 0 0 8px', fontSize: 11, fontWeight: 600, letterSpacing: 0 },
+  homeSectionCount: { background: 'transparent', color: '#c8442a', padding: '0 0 0 10px', fontSize: 13, fontWeight: 600, letterSpacing: 0, fontFamily: '"Playfair Display", serif' },
   homeSectionLink: { fontSize: 11, color: '#a59478', background: 'none', border: 'none', fontFamily: 'inherit', cursor: 'pointer', padding: 4, letterSpacing: '0.05em' },
   homeEmptyCover: { padding: '32px 20px', background: 'transparent', textAlign: 'center' },
 
@@ -12302,9 +12337,10 @@ const styles = {
   tileHeaderTitleRow: { display: 'flex', alignItems: 'center', gap: 10 },
   tileTitle: { fontFamily: '"Playfair Display", serif', fontSize: 17, fontWeight: 500, color: '#1a2620', letterSpacing: '-0.005em' },
   tileCount: {
-    color: '#a59478', fontSize: 11, fontWeight: 500,
+    color: '#1a2620', fontSize: 14, fontWeight: 500,
     padding: 0, minWidth: 'auto', textAlign: 'left',
     background: 'transparent', letterSpacing: '0.02em',
+    fontFamily: '"Playfair Display", serif',
   },
   tileSummary: { fontSize: 12, color: '#7a8270', marginTop: 3 },
   tileBody: { padding: '0 12px 12px' },
