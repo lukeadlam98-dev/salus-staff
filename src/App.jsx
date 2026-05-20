@@ -7424,105 +7424,164 @@ function CustomizeHomeModal({ currentWidgets, isManager, currentUser, onReload, 
   const inactive = ALL_WIDGETS.filter(w => !selected.includes(w.key));
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 60,
-      background: 'rgba(26, 38, 32, 0.55)',
-      display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-    }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="salus-modal-content" style={{
-        width: '100%', maxWidth: 460,
-        background: '#fffdf7', borderRadius: '16px 16px 0 0',
-        padding: 20, maxHeight: '85vh', overflowY: 'auto',
+    <>
+      {/* Backdrop */}
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, zIndex: 200,
+        background: 'rgba(26, 38, 32, 0.55)',
+        touchAction: 'none',
+      }} />
+
+      {/* Full-height sheet */}
+      <div style={{
+        position: 'fixed', left: 0, right: 0,
+        top: 'env(safe-area-inset-top, 0px)', bottom: 0,
+        background: '#fffdf7', borderRadius: '24px 24px 0 0',
+        zIndex: 201,
+        display: 'flex', flexDirection: 'column',
+        boxShadow: '0 -10px 40px rgba(26, 38, 32, 0.2)',
       }}>
-        <div style={{ width: 36, height: 4, background: '#efe7d2', borderRadius: 999, margin: '0 auto 16px' }} />
-
-        <div style={{ fontFamily: '"Playfair Display", serif', fontSize: 22, color: '#1a2620', marginBottom: 4, fontWeight: 500 }}>
-          Customize home
-        </div>
-        <div style={{ fontSize: 12, color: '#7a8270', marginBottom: 16, fontWeight: 300 }}>
-          Pick what you want to see. Changes save automatically.
-        </div>
-
-        {/* Active widgets in order */}
-        {selected.length > 0 && (
-          <>
-            <div style={{ fontSize: 10, fontWeight: 600, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 }}>
-              On your home
-            </div>
-            <div style={{ marginBottom: 20, background: '#fef7e8', borderRadius: 10, overflow: 'hidden' }}>
-              {selected.map((key, idx) => {
-                const w = ALL_WIDGETS.find(x => x.key === key);
-                if (!w) return null;
-                const isBusy = savingKey === key;
-                return (
-                  <div key={key} style={{
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    padding: '12px 10px',
-                    borderBottom: idx < selected.length - 1 ? '1px solid #efe7d2' : 'none',
-                    opacity: isBusy ? 0.5 : 1,
-                  }}>
-                    <w.Icon size={18} color="#5c4a38" />
-                    <div style={{ flex: 1, fontSize: 13, color: '#1a2620' }}>{w.label}</div>
-                    <button onClick={() => moveUp(key)} disabled={idx === 0 || isBusy} className="salus-btn"
-                      style={{ padding: 6, opacity: idx === 0 ? 0.25 : 1, color: '#7a8270', fontSize: 14 }}>↑</button>
-                    <button onClick={() => moveDown(key)} disabled={idx === selected.length - 1 || isBusy} className="salus-btn"
-                      style={{ padding: 6, opacity: idx === selected.length - 1 ? 0.25 : 1, color: '#7a8270', fontSize: 14 }}>↓</button>
-                    <button onClick={() => remove(key)} disabled={isBusy} className="salus-btn"
-                      style={{ padding: '4px 10px', borderRadius: 6, background: 'transparent', color: '#c8442a', fontSize: 11, fontWeight: 500 }}>
-                      Remove
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-
-        {/* Available to add */}
-        {inactive.length > 0 && (
-          <>
-            <div style={{ fontSize: 10, fontWeight: 600, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 }}>
-              Add a widget
-            </div>
-            <div style={{ marginBottom: 20 }}>
-              {inactive.map((w, idx) => {
-                const isBusy = savingKey === w.key;
-                return (
-                  <div key={w.key} style={{
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    padding: '12px 10px',
-                    borderBottom: idx < inactive.length - 1 ? '1px solid #efe7d2' : 'none',
-                    opacity: isBusy ? 0.5 : 1,
-                  }}>
-                    <w.Icon size={18} color="#7a8270" />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, color: '#1a2620' }}>{w.label}</div>
-                      <div style={{ fontSize: 11, color: '#7a8270', marginTop: 2, fontWeight: 300 }}>{w.desc}</div>
-                    </div>
-                    <button onClick={() => add(w.key)} disabled={isBusy} className="salus-btn"
-                      style={{
-                        padding: '6px 14px', borderRadius: 999,
-                        background: '#5c4a38', color: '#fffdf7',
-                        fontSize: 12, fontWeight: 500,
-                      }}>
-                      {isBusy ? 'Adding…' : 'Add'}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-
-        <button onClick={onClose} className="salus-btn" style={{
-          width: '100%', padding: 14, borderRadius: 999,
-          background: '#5c4a38', color: '#fffdf7',
-          fontSize: 14, fontWeight: 500,
+        {/* Header — fixed at top */}
+        <div style={{
+          padding: '18px 22px 14px',
+          borderBottom: '1px solid #efe7d2',
+          flexShrink: 0,
         }}>
-          Done
-        </button>
+          <div style={{ width: 36, height: 4, background: '#efe7d2', borderRadius: 999, margin: '0 auto 14px' }} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 4 }}>
+                Settings
+              </div>
+              <div style={{
+                fontFamily: '"Playfair Display", serif',
+                fontSize: 22, fontWeight: 400, color: '#1a2620', letterSpacing: '-0.005em',
+              }}>
+                Customize home
+              </div>
+              <div style={{ fontSize: 12, color: '#7a8270', marginTop: 4 }}>
+                Pick what you want to see. Saves automatically.
+              </div>
+            </div>
+            <button onClick={onClose} className="salus-btn" style={{
+              background: 'transparent', border: 'none', padding: '8px 4px 8px 12px',
+              color: '#a59478', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
+              flexShrink: 0,
+            }}>Close</button>
+          </div>
+        </div>
+
+        {/* Body — only this scrolls */}
+        <div style={{
+          flex: 1,
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          overscrollBehavior: 'contain',
+          padding: '18px 22px 22px',
+        }}>
+          {/* Active widgets in order */}
+          {selected.length > 0 && (
+            <>
+              <div style={{ fontSize: 10, fontWeight: 600, color: '#a59478', textTransform: 'uppercase', letterSpacing: 2, marginBottom: 12 }}>
+                On your home
+              </div>
+              <div style={{ marginBottom: 28 }}>
+                {selected.map((key, idx) => {
+                  const w = ALL_WIDGETS.find(x => x.key === key);
+                  if (!w) return null;
+                  const isBusy = savingKey === key;
+                  return (
+                    <div key={key} style={{
+                      display: 'flex', alignItems: 'center', gap: 12,
+                      padding: '14px 0',
+                      borderBottom: idx < selected.length - 1 ? '1px solid #efe7d2' : 'none',
+                      opacity: isBusy ? 0.5 : 1,
+                    }}>
+                      <w.Icon size={18} color="#5c4a38" />
+                      <div style={{ flex: 1, minWidth: 0, fontSize: 14, color: '#1a2620', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {w.label}
+                      </div>
+                      <button onClick={() => moveUp(key)} disabled={idx === 0 || isBusy} className="salus-btn"
+                        style={{ width: 36, height: 36, borderRadius: '50%', background: 'transparent', border: 'none', opacity: idx === 0 ? 0.25 : 1, color: '#7a8270', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }} aria-label="Move up">↑</button>
+                      <button onClick={() => moveDown(key)} disabled={idx === selected.length - 1 || isBusy} className="salus-btn"
+                        style={{ width: 36, height: 36, borderRadius: '50%', background: 'transparent', border: 'none', opacity: idx === selected.length - 1 ? 0.25 : 1, color: '#7a8270', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }} aria-label="Move down">↓</button>
+                      <button onClick={() => remove(key)} disabled={isBusy} className="salus-btn"
+                        style={{ background: 'transparent', border: 'none', padding: '6px 4px', color: '#c8442a', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                        Remove
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {/* Available to add */}
+          {inactive.length > 0 && (
+            <>
+              <div style={{ fontSize: 10, fontWeight: 600, color: '#a59478', textTransform: 'uppercase', letterSpacing: 2, marginBottom: 12 }}>
+                Add a widget
+              </div>
+              <div>
+                {inactive.map((w, idx) => {
+                  const isBusy = savingKey === w.key;
+                  return (
+                    <div key={w.key} style={{
+                      display: 'flex', alignItems: 'center', gap: 12,
+                      padding: '14px 0',
+                      borderBottom: idx < inactive.length - 1 ? '1px solid #efe7d2' : 'none',
+                      opacity: isBusy ? 0.5 : 1,
+                    }}>
+                      <w.Icon size={18} color="#a59478" />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 14, color: '#1a2620', letterSpacing: '-0.005em' }}>{w.label}</div>
+                        <div style={{ fontSize: 11, color: '#a59478', marginTop: 2 }}>{w.desc}</div>
+                      </div>
+                      <button onClick={() => add(w.key)} disabled={isBusy} className="salus-btn"
+                        style={{
+                          padding: '8px 16px', borderRadius: 999,
+                          background: '#1a2620', color: '#fffdf7', border: 'none',
+                          fontSize: 12, fontWeight: 500, letterSpacing: '0.04em',
+                          flexShrink: 0,
+                        }}>
+                        {isBusy ? 'Adding…' : 'Add'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {selected.length === 0 && inactive.length === 0 && (
+            <div style={{ padding: '40px 0', textAlign: 'center' }}>
+              <div style={{
+                fontFamily: '"Playfair Display", serif', fontSize: 16, color: '#5c4a38',
+                fontStyle: 'italic',
+              }}>
+                No widgets available.
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Sticky footer */}
+        <div style={{
+          padding: '14px 22px',
+          paddingBottom: 'calc(14px + env(safe-area-inset-bottom))',
+          borderTop: '1px solid #efe7d2',
+          background: '#fffdf7',
+          flexShrink: 0,
+        }}>
+          <button onClick={onClose} className="salus-btn" style={{
+            ...styles.btnPrimary, width: '100%', justifyContent: 'center',
+            padding: '14px 22px', fontSize: 14,
+          }}>
+            Done
+          </button>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
