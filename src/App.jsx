@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Calendar, MessageSquare, Users, BarChart3, AlertCircle, AlertOctagon, Plus,
   Send, ArrowLeftRight, Check, X, Clock, Bell, RotateCcw, Settings, Mail, LogOut,
@@ -106,6 +107,49 @@ const STUDIOS = {
   reformer: { label: 'Reformer Studio', short: 'Reformer' },
   hybrid:   { label: 'Hybrid',          short: 'Hybrid' },
 };
+
+// ─── DESIGN SYSTEM — single source of truth for typography & colors ──────
+const COLOR = {
+  forest:   '#1a2620',  // primary text, primary buttons
+  brown:    '#5c4a38',  // secondary text, decorative
+  amber:    '#c6926a',  // accent (hires, warm)
+  sage:     '#7a8c5c',  // accent (mine, internal)
+  coral:    '#c8442a',  // urgency only — cover needed, errors
+  cream:    '#fffdf7',  // primary background
+  sand:     '#f5f1e8',  // app background, recessed surfaces
+  bone:     '#efe7d2',  // dividers, subtle borders
+  shell:    '#d4cdb8',  // stronger dividers
+  taupe:    '#a59478',  // tertiary text, meta
+  moss:     '#7a8270',  // body grey
+  serif:    '"Playfair Display", Georgia, serif',
+  sans:     "'Inter', -apple-system, sans-serif",
+};
+
+const TYPE = {
+  // Page heros — top of major sections
+  pageTitle:    { fontFamily: COLOR.serif, fontSize: 30, fontWeight: 400, color: COLOR.forest, letterSpacing: '-0.015em', lineHeight: 1.1 },
+  pageTitleSm:  { fontFamily: COLOR.serif, fontSize: 22, fontWeight: 400, color: COLOR.forest, letterSpacing: '-0.005em', lineHeight: 1.2 },
+  // Modal heros
+  modalTitle:   { fontFamily: COLOR.serif, fontSize: 22, fontWeight: 400, color: COLOR.forest, letterSpacing: '-0.005em', lineHeight: 1.2 },
+  // Card / list-item titles
+  cardTitle:    { fontFamily: COLOR.serif, fontSize: 18, fontWeight: 400, color: COLOR.forest, letterSpacing: '-0.005em' },
+  itemTitle:    { fontFamily: COLOR.serif, fontSize: 15, fontWeight: 500, color: COLOR.forest, letterSpacing: '-0.005em' },
+  // Section dividers
+  sectionLabel: { fontFamily: COLOR.serif, fontSize: 14, fontStyle: 'italic', color: COLOR.brown, letterSpacing: '0.005em' },
+  // Eyebrow — small caps above titles
+  eyebrow:      { fontSize: 10, fontWeight: 500, color: COLOR.taupe, letterSpacing: 2.5, textTransform: 'uppercase' },
+  // Body / meta
+  body:         { fontSize: 14, color: COLOR.forest },
+  bodySub:      { fontSize: 13, color: COLOR.moss },
+  meta:         { fontSize: 12, color: COLOR.moss },
+  metaSmall:    { fontSize: 11, color: COLOR.taupe, letterSpacing: '0.02em' },
+  // Caps inline labels (e.g. tabs)
+  capsLabel:    { fontSize: 11, fontWeight: 500, color: COLOR.taupe, letterSpacing: '0.08em', textTransform: 'uppercase' },
+  capsLabelActive: { fontSize: 11, fontWeight: 600, color: COLOR.forest, letterSpacing: '0.08em', textTransform: 'uppercase' },
+  // Empty state — italic Playfair
+  emptyState:   { fontFamily: COLOR.serif, fontSize: 16, fontStyle: 'italic', color: COLOR.brown, letterSpacing: '-0.005em' },
+};
+
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const DATES = ['2026-05-18', '2026-05-19', '2026-05-20', '2026-05-21', '2026-05-22', '2026-05-23', '2026-05-24'];
@@ -4457,60 +4501,35 @@ function DraftReplyModal({ msg, onClose, onMarkHandled }) {
     generateDraft();
   };
 
-  return (
+  return createPortal(
     <>
       <div onClick={onClose} style={{
         position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.55)',
-        zIndex: 200,
+        zIndex: 9998,
       }} />
       <div style={{
-        position: 'fixed', left: 0, right: 0, top: 'env(safe-area-inset-top, 0px)', bottom: 0,
-        background: '#fffdf7', borderRadius: '24px 24px 0 0',
-        zIndex: 201,
+        position: 'fixed', left: 0, right: 0, top: 0, bottom: 0,
+        background: COLOR.cream,
+        zIndex: 9999,
         display: 'flex', flexDirection: 'column',
-        boxShadow: '0 -10px 40px rgba(26, 38, 32, 0.2)',
       }}>
-        {/* Header — fixed at top */}
-        <div style={{
-          padding: '18px 22px 14px',
-          borderBottom: '1px solid #efe7d2',
-          flexShrink: 0,
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 4 }}>
-                Draft reply
-              </div>
-              <div style={{
-                fontFamily: '"Playfair Display", serif',
-                fontSize: 20, fontWeight: 400, color: '#1a2620', letterSpacing: '-0.005em',
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}>
-                To {replyTo}
-              </div>
-              <div style={{ fontSize: 12, color: '#7a8270', marginTop: 4, fontStyle: 'italic',
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {subject}
-              </div>
-            </div>
-            <CloseButton onClick={onClose} />
-          </div>
-        </div>
+        <ModalHeader
+          eyebrow="Draft reply"
+          title={`To ${replyTo}`}
+          subtitle={subject}
+          onClose={onClose}
+        />
 
         {/* Body — scrollable */}
         <div style={{
           flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch',
+          overscrollBehavior: 'contain',
           padding: '18px 22px',
         }}>
           {loading && (
-            <div style={{ padding: '40px 0', textAlign: 'center' }}>
-              <div style={{
-                fontFamily: '"Playfair Display", serif', fontSize: 16, color: '#5c4a38',
-                fontStyle: 'italic',
-              }}>
-                {regenerating ? 'Rewriting…' : 'Drafting your reply…'}
-              </div>
-            </div>
+            <EmptyState>
+              {regenerating ? 'Rewriting…' : 'Drafting your reply…'}
+            </EmptyState>
           )}
 
           {error && !loading && (
@@ -4587,7 +4606,7 @@ function DraftReplyModal({ msg, onClose, onMarkHandled }) {
         )}
       </div>
     </>
-  );
+  , document.body);
 }
 
 // ─── Nudge modal — creates a task for a teammate to handle this email ───
@@ -4645,7 +4664,7 @@ function NudgeModal({ msg, users, currentUserId, onCreateTask, onClose }) {
     }
   };
 
-  return (
+  return createPortal(
     <div style={{
       position: 'fixed', inset: 0, zIndex: 60,
       background: 'rgba(26, 38, 32, 0.55)',
@@ -4749,7 +4768,7 @@ function NudgeModal({ msg, users, currentUserId, onCreateTask, onClose }) {
         </div>
       </div>
     </div>
-  );
+  , document.body);
 }
 
 // Helpers for inbox display
@@ -5380,7 +5399,7 @@ function AdminStockSection({ data, currentUser, isManager, onReload }) {
 
 // ─── Store card view modal — full-screen barcode for till ───
 function StoreCardViewModal({ card, onClose }) {
-  return (
+  return createPortal(
     <div onClick={onClose} style={{
       position: 'fixed', inset: 0, background: '#1a2620',
       zIndex: 300, display: 'flex', flexDirection: 'column',
@@ -5431,7 +5450,7 @@ function StoreCardViewModal({ card, onClose }) {
         </div>
       )}
     </div>
-  );
+  , document.body);
 }
 
 // ─── Store card edit modal — upload to Supabase Storage ───
@@ -5518,109 +5537,102 @@ function StoreCardEditModal({ card, currentUserId, onClose, onSaved }) {
     }
   };
 
-  return (
+  return createPortal(
     <>
       <div onClick={onClose} style={{
-        position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.55)', zIndex: 200,
+        position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.55)', zIndex: 9998,
+        touchAction: 'none',
       }} />
       <div style={{
-        position: 'fixed', left: 0, right: 0, bottom: 0,
-        background: '#fffdf7', borderRadius: '20px 20px 0 0',
-        zIndex: 201, padding: '20px 22px 28px',
-        paddingBottom: 'calc(28px + env(safe-area-inset-bottom))',
-        maxHeight: '92vh', overflowY: 'auto',
-        boxShadow: '0 -10px 40px rgba(26, 38, 32, 0.2)',
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        background: COLOR.cream, zIndex: 9999,
+        display: 'flex', flexDirection: 'column',
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
-          <div>
-            <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 4 }}>
-              {isNew ? 'New card' : 'Edit card'}
-            </div>
-            <div style={{
-              fontFamily: '"Playfair Display", serif',
-              fontSize: 22, fontWeight: 400, color: '#1a2620', letterSpacing: '-0.005em',
-            }}>
-              {isNew ? 'Add a store card' : card.name}
-            </div>
-          </div>
-          <CloseButton onClick={onClose} />
-        </div>
+        <ModalHeader
+          eyebrow={isNew ? 'New card' : 'Edit card'}
+          title={isNew ? 'Add a store card' : card.name}
+          onClose={onClose}
+        />
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <FormField label="Card name">
-            <input value={name} onChange={e => setName(e.target.value)} style={styles.loginInput} placeholder="Bookers Wholesale" />
-          </FormField>
+        <ModalBody>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <FormField label="Card name">
+              <input value={name} onChange={e => setName(e.target.value)} style={styles.loginInput} placeholder="Bookers Wholesale" />
+            </FormField>
 
-          <FormField label="Notes (optional)">
-            <input value={notes} onChange={e => setNotes(e.target.value)} style={styles.loginInput} placeholder="Use at the SE9 branch" />
-          </FormField>
+            <FormField label="Notes (optional)">
+              <input value={notes} onChange={e => setNotes(e.target.value)} style={styles.loginInput} placeholder="Use at the SE9 branch" />
+            </FormField>
 
-          <FormField label="Barcode image">
-            {imageUrl ? (
-              <div style={{
-                background: '#fffdf7', borderRadius: 14, padding: 14,
-                border: '1px solid #efe7d2', textAlign: 'center',
-              }}>
-                <img src={imageUrl} alt="Barcode preview" style={{
-                  display: 'block', margin: '0 auto', maxWidth: '100%', maxHeight: 180,
-                  objectFit: 'contain',
-                }} />
-                <label style={{
-                  display: 'inline-block', marginTop: 12,
-                  background: 'transparent', border: '1px solid #efe7d2',
-                  padding: '8px 14px', borderRadius: 999,
-                  color: '#7a8270', fontSize: 11, letterSpacing: '0.05em',
-                  textTransform: 'uppercase', fontWeight: 500, cursor: 'pointer',
+            <FormField label="Barcode image">
+              {imageUrl ? (
+                <div style={{
+                  background: COLOR.cream, borderRadius: 14, padding: 14,
+                  border: `1px solid ${COLOR.bone}`, textAlign: 'center',
                 }}>
-                  Replace image
+                  <img src={imageUrl} alt="Barcode preview" style={{
+                    display: 'block', margin: '0 auto', maxWidth: '100%', maxHeight: 220,
+                    objectFit: 'contain',
+                  }} />
+                  <label style={{
+                    display: 'inline-block', marginTop: 12,
+                    background: 'transparent', border: `1px solid ${COLOR.bone}`,
+                    padding: '8px 14px', borderRadius: 999,
+                    color: COLOR.moss, fontSize: 11, letterSpacing: '0.05em',
+                    textTransform: 'uppercase', fontWeight: 500, cursor: 'pointer',
+                  }}>
+                    Replace image
+                    <input type="file" accept="image/*" onChange={onPickFile} style={{ display: 'none' }} disabled={uploading} />
+                  </label>
+                </div>
+              ) : (
+                <label style={{
+                  display: 'block', padding: '28px 16px',
+                  border: `1px dashed ${COLOR.shell}`, borderRadius: 14,
+                  background: 'transparent', textAlign: 'center', cursor: 'pointer',
+                }}>
+                  <div style={TYPE.emptyState}>
+                    {uploading ? 'Uploading…' : 'Tap to upload barcode'}
+                  </div>
+                  <div style={{ ...TYPE.metaSmall, marginTop: 8 }}>
+                    PNG or JPG. Up to 5MB.
+                  </div>
                   <input type="file" accept="image/*" onChange={onPickFile} style={{ display: 'none' }} disabled={uploading} />
                 </label>
-              </div>
-            ) : (
-              <label style={{
-                display: 'block', padding: '24px 16px',
-                border: '1px dashed #d4cdb8', borderRadius: 14,
-                background: 'transparent', textAlign: 'center', cursor: 'pointer',
+              )}
+            </FormField>
+
+            {error && (
+              <div style={{
+                padding: 12, background: '#fef0ec', color: COLOR.brown,
+                borderRadius: 8, fontSize: 13,
               }}>
-                <div style={{
-                  fontFamily: '"Playfair Display", serif', fontSize: 15,
-                  color: '#5c4a38', fontStyle: 'italic',
-                }}>
-                  {uploading ? 'Uploading…' : 'Tap to upload barcode'}
-                </div>
-                <div style={{ fontSize: 11, color: '#a59478', marginTop: 6 }}>
-                  PNG or JPG. Up to 5MB.
-                </div>
-                <input type="file" accept="image/*" onChange={onPickFile} style={{ display: 'none' }} disabled={uploading} />
-              </label>
+                {error}
+              </div>
             )}
-          </FormField>
+          </div>
+        </ModalBody>
 
-          {error && (
-            <div style={{
-              padding: 12, background: '#fef0ec', color: '#5c4a38',
-              borderRadius: 8, fontSize: 13,
+        <ModalFooter>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={save} disabled={busy || uploading} className="salus-btn" style={{
+              ...styles.btnPrimary, flex: 1, justifyContent: 'center',
+              padding: '14px 22px', fontSize: 14,
             }}>
-              {error}
-            </div>
-          )}
-        </div>
-
-        <div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
-          <button onClick={save} disabled={busy || uploading} className="salus-btn" style={{
-            ...styles.btnPrimary, flex: 1, justifyContent: 'center',
-          }}>
-            {busy ? 'Saving…' : (isNew ? 'Add card' : 'Save')}
-          </button>
-          {!isNew && (
-            <button onClick={archive} disabled={busy} className="salus-btn" style={styles.btnDanger}>
-              Remove
+              {busy ? 'Saving…' : (isNew ? 'Add card' : 'Save')}
             </button>
-          )}
-        </div>
+            {!isNew && (
+              <button onClick={archive} disabled={busy} className="salus-btn" style={{
+                ...styles.btnDanger, padding: '14px 18px',
+              }}>
+                Remove
+              </button>
+            )}
+          </div>
+        </ModalFooter>
       </div>
     </>
-  );
+  , document.body);
 }
 
 function StockItemRow({ item, busy, isManager, onDecrement, onIncrement, onEdit }) {
@@ -5759,47 +5771,24 @@ function StockItemEditModal({ item, isManager, currentUserId, onClose, onSaved }
     }
   };
 
-  return (
+  return createPortal(
     <>
       <div onClick={onClose} style={{
-        position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.55)', zIndex: 200,
+        position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.55)', zIndex: 9998,
         touchAction: 'none',
       }} />
       <div style={{
         position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-        background: '#fffdf7', zIndex: 201,
+        background: COLOR.cream, zIndex: 9999,
         display: 'flex', flexDirection: 'column',
       }}>
-        {/* Fixed header */}
-        <div style={{
-          padding: '14px 22px',
-          paddingTop: 'calc(14px + env(safe-area-inset-top, 0px))',
-          borderBottom: '1px solid #efe7d2',
-          flexShrink: 0, background: '#fffdf7',
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 4 }}>
-                {isNew ? 'New item' : 'Edit item'}
-              </div>
-              <div style={{
-                fontFamily: '"Playfair Display", serif',
-                fontSize: 22, fontWeight: 400, color: '#1a2620', letterSpacing: '-0.005em',
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}>
-                {isNew ? 'Add to stock' : item.name}
-              </div>
-            </div>
-            <CloseButton onClick={onClose} />
-          </div>
-        </div>
+        <ModalHeader
+          eyebrow={isNew ? 'New item' : 'Edit item'}
+          title={isNew ? 'Add to stock' : item.name}
+          onClose={onClose}
+        />
 
-        {/* Scrollable body */}
-        <div style={{
-          flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch',
-          overscrollBehavior: 'contain',
-          padding: '18px 22px 22px',
-        }}>
+        <ModalBody>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <FormField label="Name">
               <input value={name} onChange={e => setName(e.target.value)} style={styles.loginInput} placeholder="Hand wash" />
@@ -5824,7 +5813,7 @@ function StockItemEditModal({ item, isManager, currentUserId, onClose, onSaved }
 
             <FormField label="Low-stock threshold">
               <input type="number" min="0" value={lowThreshold} onChange={e => setLowThreshold(e.target.value)} style={styles.loginInput} />
-              <div style={{ fontSize: 11, color: '#a59478', marginTop: 4 }}>
+              <div style={{ ...TYPE.metaSmall, marginTop: 4 }}>
                 Marked "running low" when quantity is at or below this number.
               </div>
             </FormField>
@@ -5837,39 +5826,35 @@ function StockItemEditModal({ item, isManager, currentUserId, onClose, onSaved }
               <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} style={{ ...styles.loginInput, resize: 'vertical' }} placeholder="Brand preference, supplier, etc." />
             </FormField>
           </div>
-        </div>
+        </ModalBody>
 
-        {/* Sticky footer */}
-        <div style={{
-          padding: '14px 22px',
-          paddingBottom: 'calc(14px + env(safe-area-inset-bottom, 0px))',
-          borderTop: '1px solid #efe7d2',
-          background: '#fffdf7', flexShrink: 0,
-          display: 'flex', gap: 10,
-        }}>
-          <button onClick={save} disabled={busy} className="salus-btn" style={{
-            ...styles.btnPrimary, flex: 1, justifyContent: 'center',
-            padding: '14px 22px', fontSize: 14,
-          }}>
-            {busy ? 'Saving…' : (isNew ? 'Add item' : 'Save')}
-          </button>
-          {!isNew && (
-            <button onClick={archive} disabled={busy} className="salus-btn" style={{
-              ...styles.btnDanger, padding: '14px 18px',
+        <ModalFooter>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={save} disabled={busy} className="salus-btn" style={{
+              ...styles.btnPrimary, flex: 1, justifyContent: 'center',
+              padding: '14px 22px', fontSize: 14,
             }}>
-              Archive
+              {busy ? 'Saving…' : (isNew ? 'Add item' : 'Save')}
             </button>
-          )}
-        </div>
+            {!isNew && (
+              <button onClick={archive} disabled={busy} className="salus-btn" style={{
+                ...styles.btnDanger, padding: '14px 18px',
+              }}>
+                Archive
+              </button>
+            )}
+          </div>
+        </ModalFooter>
       </div>
     </>
-  );
+  , document.body);
 }
 
+// Unified FormField label — Inter caps in taupe
 function FormField({ label, children }) {
   return (
     <div>
-      <div style={{ fontSize: 10, fontWeight: 500, color: '#7a8270', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 6 }}>
+      <div style={{ ...TYPE.eyebrow, letterSpacing: 1.8, marginBottom: 6 }}>
         {label}
       </div>
       {children}
@@ -6444,7 +6429,7 @@ function DmThreadModal({ otherUser, data, currentUser, onClose, onSend, onMarkRe
     setSending(false);
   };
 
-  return (
+  return createPortal(
     <div style={styles.threadBackdrop} onClick={onClose}>
       <div style={styles.threadSheet} onClick={(e) => e.stopPropagation()}>
         <div style={styles.threadHeader}>
@@ -6505,7 +6490,7 @@ function DmThreadModal({ otherUser, data, currentUser, onClose, onSend, onMarkRe
         </div>
       </div>
     </div>
-  );
+  , document.body);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -6627,7 +6612,7 @@ function NotificationsDrawer({ data, currentUser, isManager, onClose, onGoTo, on
     return `${Math.floor(sec / 86400)}d`;
   };
 
-  return (
+  return createPortal(
     <div style={styles.notifsBackdrop} onClick={onClose}>
       <div style={styles.notifsDrawer} onClick={(e) => e.stopPropagation()}>
         <div style={styles.notifsHeader}>
@@ -6657,7 +6642,7 @@ function NotificationsDrawer({ data, currentUser, isManager, onClose, onGoTo, on
         )}
       </div>
     </div>
-  );
+  , document.body);
 }
 
 function LoginScreen({ error, onLogin, onSignup, onClearError }) {
@@ -7464,59 +7449,31 @@ function CustomizeHomeModal({ currentWidgets, isManager, currentUser, onReload, 
 
   const inactive = ALL_WIDGETS.filter(w => !selected.includes(w.key));
 
-  return (
+  return createPortal(
     <>
       {/* Backdrop */}
       <div onClick={onClose} style={{
-        position: 'fixed', inset: 0, zIndex: 200,
+        position: 'fixed', inset: 0, zIndex: 9998,
         background: 'rgba(26, 38, 32, 0.55)',
         touchAction: 'none',
       }} />
 
-      {/* Full-viewport sheet — covers entire screen including status bar area */}
+      {/* Full-viewport sheet */}
       <div style={{
         position: 'fixed',
         top: 0, left: 0, right: 0, bottom: 0,
-        background: '#fffdf7',
-        zIndex: 201,
+        background: COLOR.cream,
+        zIndex: 9999,
         display: 'flex', flexDirection: 'column',
       }}>
-        {/* Header — fixed at top, padded for status bar */}
-        <div style={{
-          padding: '14px 22px',
-          paddingTop: 'calc(14px + env(safe-area-inset-top, 0px))',
-          borderBottom: '1px solid #efe7d2',
-          flexShrink: 0,
-          background: '#fffdf7',
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 4 }}>
-                Settings
-              </div>
-              <div style={{
-                fontFamily: '"Playfair Display", serif',
-                fontSize: 22, fontWeight: 400, color: '#1a2620', letterSpacing: '-0.005em',
-                lineHeight: 1.2,
-              }}>
-                Customize home
-              </div>
-              <div style={{ fontSize: 12, color: '#7a8270', marginTop: 4 }}>
-                Pick what you want to see. Saves automatically.
-              </div>
-            </div>
-            <CloseButton onClick={onClose} />
-          </div>
-        </div>
+        <ModalHeader
+          eyebrow="Settings"
+          title="Customize home"
+          subtitle="Pick what you want to see. Saves automatically."
+          onClose={onClose}
+        />
 
-        {/* Body — only this scrolls */}
-        <div style={{
-          flex: 1,
-          overflowY: 'auto',
-          WebkitOverflowScrolling: 'touch',
-          overscrollBehavior: 'contain',
-          padding: '18px 22px 22px',
-        }}>
+        <ModalBody>
           {/* Active widgets in order */}
           {selected.length > 0 && (
             <>
@@ -7607,34 +7564,21 @@ function CustomizeHomeModal({ currentWidgets, isManager, currentUser, onReload, 
           )}
 
           {selected.length === 0 && inactive.length === 0 && (
-            <div style={{ padding: '40px 0', textAlign: 'center' }}>
-              <div style={{
-                fontFamily: '"Playfair Display", serif', fontSize: 16, color: '#5c4a38',
-                fontStyle: 'italic',
-              }}>
-                No widgets available.
-              </div>
-            </div>
+            <EmptyState>No widgets available.</EmptyState>
           )}
-        </div>
+        </ModalBody>
 
-        {/* Sticky footer */}
-        <div style={{
-          padding: '14px 22px',
-          paddingBottom: 'calc(14px + env(safe-area-inset-bottom, 0px))',
-          borderTop: '1px solid #efe7d2',
-          background: '#fffdf7',
-          flexShrink: 0,
-        }}>
+        <ModalFooter>
           <button onClick={onClose} className="salus-btn" style={{
             ...styles.btnPrimary, width: '100%', justifyContent: 'center',
             padding: '14px 22px', fontSize: 14,
           }}>
             Done
           </button>
-        </div>
+        </ModalFooter>
       </div>
-    </>
+    </>,
+    document.body
   );
 }
 
@@ -7703,9 +7647,13 @@ function LoadingLogo() {
   );
 }
 
-// ─── PageHeader — reusable editorial header with optional photo ───
-// Used at the top of major sections (Schedule, Admin sub-sections, etc).
-function PageHeader({ eyebrow, title, subtitle, photo, compact }) {
+// ─── Eyebrow — small caps label above a title ───────────────────────────
+function Eyebrow({ children, style }) {
+  return <div style={{ ...TYPE.eyebrow, ...style }}>{children}</div>;
+}
+
+// ─── PageHeader — top of every major page (Home, Admin, Schedule, etc.) ──
+function PageHeader({ eyebrow, title, subtitle, photo, compact, action }) {
   return (
     <div style={{ padding: compact ? '4px 0 10px' : '8px 0 18px' }}>
       {photo && (
@@ -7722,21 +7670,123 @@ function PageHeader({ eyebrow, title, subtitle, photo, compact }) {
           }} />
         </div>
       )}
-      {eyebrow && (
-        <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: compact ? 4 : 6 }}>
-          {eyebrow}
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          {eyebrow && <Eyebrow style={{ marginBottom: compact ? 4 : 6 }}>{eyebrow}</Eyebrow>}
+          <div style={compact ? TYPE.pageTitleSm : TYPE.pageTitle}>{title}</div>
+          {subtitle && (
+            <div style={{ ...TYPE.bodySub, marginTop: 6 }}>{subtitle}</div>
+          )}
         </div>
-      )}
-      <div style={{
-        fontFamily: '"Playfair Display", serif',
-        fontSize: compact ? 22 : 30, fontWeight: 400, color: '#1a2620',
-        lineHeight: 1.1, letterSpacing: '-0.015em',
-      }}>
-        {title}
+        {action}
       </div>
-      {subtitle && (
-        <div style={{ fontSize: 13, color: '#7a8270', marginTop: 6 }}>{subtitle}</div>
-      )}
+    </div>
+  );
+}
+
+// ─── ModalHeader — top of every full-screen modal ────────────────────────
+// Eyebrow + title + subtitle + close button. Pads for iOS safe area.
+function ModalHeader({ eyebrow, title, subtitle, onClose, variant }) {
+  const dark = variant === 'dark';
+  return (
+    <div style={{
+      padding: '14px 22px',
+      paddingTop: 'calc(14px + env(safe-area-inset-top, 0px))',
+      borderBottom: `1px solid ${dark ? 'rgba(255, 253, 247, 0.1)' : COLOR.bone}`,
+      flexShrink: 0,
+      background: dark ? COLOR.forest : COLOR.cream,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          {eyebrow && (
+            <div style={{
+              ...TYPE.eyebrow,
+              color: dark ? 'rgba(255, 253, 247, 0.5)' : COLOR.taupe,
+              marginBottom: 4,
+            }}>{eyebrow}</div>
+          )}
+          <div style={{
+            ...TYPE.modalTitle,
+            color: dark ? COLOR.cream : COLOR.forest,
+          }}>{title}</div>
+          {subtitle && (
+            <div style={{
+              ...TYPE.bodySub,
+              color: dark ? 'rgba(255, 253, 247, 0.65)' : COLOR.moss,
+              marginTop: 4,
+            }}>{subtitle}</div>
+          )}
+        </div>
+        <CloseButton onClick={onClose} variant={dark ? 'dark' : undefined} />
+      </div>
+    </div>
+  );
+}
+
+// ─── ModalFooter — sticky bottom of a full-screen modal ──────────────────
+function ModalFooter({ children, dark }) {
+  return (
+    <div style={{
+      padding: '14px 22px',
+      paddingBottom: 'calc(14px + env(safe-area-inset-bottom, 0px))',
+      borderTop: `1px solid ${dark ? 'rgba(255, 253, 247, 0.1)' : COLOR.bone}`,
+      background: dark ? COLOR.forest : COLOR.cream,
+      flexShrink: 0,
+    }}>
+      {children}
+    </div>
+  );
+}
+
+// ─── ModalBody — the scrollable middle of a full-screen modal ───────────
+function ModalBody({ children, style }) {
+  return (
+    <div style={{
+      flex: 1, overflowY: 'auto',
+      WebkitOverflowScrolling: 'touch',
+      overscrollBehavior: 'contain',
+      padding: '18px 22px 22px',
+      ...style,
+    }}>
+      {children}
+    </div>
+  );
+}
+
+// ─── SectionDivider — eyebrow caps + thin underline used between sections ─
+function SectionDivider({ children, style }) {
+  return (
+    <div style={{
+      ...TYPE.eyebrow,
+      marginTop: 18, marginBottom: 8, padding: '0 2px',
+      ...style,
+    }}>
+      {children}
+    </div>
+  );
+}
+
+// ─── SectionLabel — italic Playfair section label (day groupings etc) ────
+function SectionLabel({ children, style }) {
+  return (
+    <div style={{
+      ...TYPE.sectionLabel,
+      padding: '0 0 6px',
+      borderBottom: `1px solid ${COLOR.bone}`,
+      marginBottom: 4,
+      ...style,
+    }}>
+      {children}
+    </div>
+  );
+}
+
+// ─── EmptyState — Playfair italic centered, used for empty lists ─────────
+function EmptyState({ children, sub, style }) {
+  return (
+    <div style={{ padding: '60px 20px', textAlign: 'center', ...style }}>
+      <div style={TYPE.emptyState}>{children}</div>
+      {sub && <div style={{ ...TYPE.metaSmall, marginTop: 8 }}>{sub}</div>}
     </div>
   );
 }
@@ -9926,46 +9976,32 @@ function NewMessagePicker({ users, existingThreadIds, onPick, onClose }) {
     return list.filter(u => u.name.toLowerCase().includes(q));
   }, [users, query]);
 
-  return (
+  return createPortal(
     <>
       <div onClick={onClose} style={{
-        position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.55)', zIndex: 200,
+        position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.55)', zIndex: 9998,
         touchAction: 'none',
       }} />
       <div style={{
         position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-        background: '#fffdf7', zIndex: 201,
+        background: COLOR.cream, zIndex: 9999,
         display: 'flex', flexDirection: 'column',
       }}>
-        {/* Header */}
-        <div style={{
-          padding: '14px 22px',
-          paddingTop: 'calc(14px + env(safe-area-inset-top, 0px))',
-          borderBottom: '1px solid #efe7d2',
-          flexShrink: 0, background: '#fffdf7',
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 4 }}>
-                Private message
-              </div>
-              <div style={{
-                fontFamily: '"Playfair Display", serif',
-                fontSize: 22, fontWeight: 400, color: '#1a2620', letterSpacing: '-0.005em',
-              }}>
-                Who would you like to message?
-              </div>
-            </div>
-            <CloseButton onClick={onClose} />
-          </div>
+        <ModalHeader
+          eyebrow="Private message"
+          title="Who would you like to message?"
+          onClose={onClose}
+        />
+        {/* Inline search field — below header */}
+        <div style={{ padding: '10px 22px 14px', background: COLOR.cream, flexShrink: 0, borderBottom: `1px solid ${COLOR.bone}` }}>
           <input
             value={query}
             onChange={e => setQuery(e.target.value)}
             placeholder="Search by name"
             style={{
-              width: '100%', marginTop: 14, padding: '12px 14px',
-              background: '#f5f1e8', border: 'none', borderRadius: 12,
-              fontFamily: 'inherit', fontSize: 14, color: '#1a2620',
+              width: '100%', padding: '12px 14px',
+              background: COLOR.sand, border: 'none', borderRadius: 12,
+              fontFamily: 'inherit', fontSize: 14, color: COLOR.forest,
               outline: 'none',
             }}
           />
@@ -10040,7 +10076,7 @@ function NewMessagePicker({ users, existingThreadIds, onPick, onClose }) {
         </div>
       </div>
     </>
-  );
+  , document.body);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -14049,14 +14085,23 @@ function HireStudioModal({ onClose, onSubmit, currentUser }) {
   );
 }
 
+// ─── ModalPortal — wraps any modal in a portal to document.body ─────────
+// Use this for any modal that needs to escape its parent containers
+// (anything with position: fixed inside a transformed/positioned ancestor).
+function ModalPortal({ children }) {
+  if (typeof document === 'undefined') return null;
+  return createPortal(children, document.body);
+}
+
 function Modal({ children, onClose }) {
-  return (
+  return createPortal(
     <div style={styles.modalOverlay} onClick={onClose}>
       <div className="salus-modal-content salus-modal-card" style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
         <button onClick={onClose} style={styles.modalClose}><X size={18} /></button>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -14156,7 +14201,7 @@ const styles = {
   // ─── HOME (cover-first dashboard) ───
   homeContainer: { padding: '0 20px 100px' },
   homeGreeting: { padding: '24px 0 24px' },
-  homeH1: { fontFamily: '"Playfair Display", serif', fontSize: 32, fontWeight: 400, color: '#1a2620', margin: 0, letterSpacing: '-0.01em', lineHeight: 1.1 },
+  homeH1: { fontFamily: '"Playfair Display", serif', fontSize: 30, fontWeight: 400, color: '#1a2620', margin: 0, letterSpacing: '-0.015em', lineHeight: 1.1 },
   homeGreetSub: { fontSize: 13, color: '#7a8270', marginTop: 6, margin: 0, letterSpacing: '0.01em' },
   homeSection: { marginTop: 28 },
   homeSectionHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14, padding: '0 2px' },
@@ -15883,12 +15928,15 @@ const styles = {
   modalOverlay: {
     position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.45)',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    padding: 16, zIndex: 100,
+    padding: 16,
+    paddingTop: 'calc(16px + env(safe-area-inset-top, 0px))',
+    paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
+    zIndex: 9990,
     backdropFilter: 'blur(2px)',
   },
   modalCard: {
     background: '#fffdf7', borderRadius: 16, maxWidth: 520, width: '100%',
-    maxHeight: '90vh', overflow: 'auto', position: 'relative',
+    maxHeight: '100%', overflow: 'auto', position: 'relative',
     boxShadow: '0 20px 50px rgba(26, 38, 32, 0.15)',
   },
   modalClose: {
