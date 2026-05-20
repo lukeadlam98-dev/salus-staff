@@ -5774,77 +5774,105 @@ function StockItemEditModal({ item, isManager, currentUserId, onClose, onSaved }
     <>
       <div onClick={onClose} style={{
         position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.55)', zIndex: 200,
+        touchAction: 'none',
       }} />
       <div style={{
-        position: 'fixed', left: 0, right: 0, bottom: 0,
-        background: '#fffdf7', borderRadius: '20px 20px 0 0',
-        zIndex: 201, padding: '20px 22px 28px',
-        paddingBottom: 'calc(28px + env(safe-area-inset-bottom))',
-        maxHeight: '92vh', overflowY: 'auto',
-        boxShadow: '0 -10px 40px rgba(26, 38, 32, 0.2)',
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        background: '#fffdf7', zIndex: 201,
+        display: 'flex', flexDirection: 'column',
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
-          <div>
-            <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 4 }}>
-              {isNew ? 'New item' : 'Edit item'}
+        {/* Fixed header */}
+        <div style={{
+          padding: '14px 22px',
+          paddingTop: 'calc(14px + env(safe-area-inset-top, 0px))',
+          borderBottom: '1px solid #efe7d2',
+          flexShrink: 0, background: '#fffdf7',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 4 }}>
+                {isNew ? 'New item' : 'Edit item'}
+              </div>
+              <div style={{
+                fontFamily: '"Playfair Display", serif',
+                fontSize: 22, fontWeight: 400, color: '#1a2620', letterSpacing: '-0.005em',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>
+                {isNew ? 'Add to stock' : item.name}
+              </div>
             </div>
-            <div style={{
-              fontFamily: '"Playfair Display", serif',
-              fontSize: 22, fontWeight: 400, color: '#1a2620', letterSpacing: '-0.005em',
-            }}>
-              {isNew ? 'Add to stock' : item.name}
-            </div>
+            <button onClick={onClose} className="salus-btn" aria-label="Close" style={{
+              background: 'transparent', border: '1px solid #efe7d2', borderRadius: '50%',
+              width: 36, height: 36, padding: 0, color: '#5c4a38',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 18, fontWeight: 300, lineHeight: 1, flexShrink: 0,
+            }}>×</button>
           </div>
-          <button onClick={onClose} className="salus-btn" style={{
-            background: 'transparent', border: 'none', padding: 4,
-            color: '#a59478', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
-          }}>Close</button>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <FormField label="Name">
-            <input value={name} onChange={e => setName(e.target.value)} style={styles.loginInput} placeholder="Hand wash" />
-          </FormField>
-
-          <FormField label="Category">
-            <select value={category} onChange={e => setCategory(e.target.value)} style={styles.loginInput}>
-              {Object.entries(STOCK_CATEGORIES).map(([k, v]) => (
-                <option key={k} value={k}>{v.label}</option>
-              ))}
-            </select>
-          </FormField>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <FormField label="Current quantity">
-              <input type="number" min="0" value={currentQty} onChange={e => setCurrentQty(e.target.value)} style={styles.loginInput} />
+        {/* Scrollable body */}
+        <div style={{
+          flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch',
+          overscrollBehavior: 'contain',
+          padding: '18px 22px 22px',
+        }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <FormField label="Name">
+              <input value={name} onChange={e => setName(e.target.value)} style={styles.loginInput} placeholder="Hand wash" />
             </FormField>
-            <FormField label="Unit">
-              <input value={unit} onChange={e => setUnit(e.target.value)} style={styles.loginInput} placeholder="bottle" />
+
+            <FormField label="Category">
+              <select value={category} onChange={e => setCategory(e.target.value)} style={styles.loginInput}>
+                {Object.entries(STOCK_CATEGORIES).map(([k, v]) => (
+                  <option key={k} value={k}>{v.label}</option>
+                ))}
+              </select>
+            </FormField>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <FormField label="Current quantity">
+                <input type="number" min="0" value={currentQty} onChange={e => setCurrentQty(e.target.value)} style={styles.loginInput} />
+              </FormField>
+              <FormField label="Unit">
+                <input value={unit} onChange={e => setUnit(e.target.value)} style={styles.loginInput} placeholder="bottle" />
+              </FormField>
+            </div>
+
+            <FormField label="Low-stock threshold">
+              <input type="number" min="0" value={lowThreshold} onChange={e => setLowThreshold(e.target.value)} style={styles.loginInput} />
+              <div style={{ fontSize: 11, color: '#a59478', marginTop: 4 }}>
+                Marked "running low" when quantity is at or below this number.
+              </div>
+            </FormField>
+
+            <FormField label="Reorder link (optional)">
+              <input value={reorderUrl} onChange={e => setReorderUrl(e.target.value)} style={styles.loginInput} placeholder="https://amazon.co.uk/..." />
+            </FormField>
+
+            <FormField label="Notes (optional)">
+              <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} style={{ ...styles.loginInput, resize: 'vertical' }} placeholder="Brand preference, supplier, etc." />
             </FormField>
           </div>
-
-          <FormField label="Low-stock threshold">
-            <input type="number" min="0" value={lowThreshold} onChange={e => setLowThreshold(e.target.value)} style={styles.loginInput} />
-            <div style={{ fontSize: 11, color: '#a59478', marginTop: 4 }}>
-              Marked "running low" when quantity is at or below this number.
-            </div>
-          </FormField>
-
-          <FormField label="Reorder link (optional)">
-            <input value={reorderUrl} onChange={e => setReorderUrl(e.target.value)} style={styles.loginInput} placeholder="https://amazon.co.uk/..." />
-          </FormField>
-
-          <FormField label="Notes (optional)">
-            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} style={{ ...styles.loginInput, resize: 'vertical' }} placeholder="Brand preference, supplier, etc." />
-          </FormField>
         </div>
 
-        <div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
-          <button onClick={save} disabled={busy} className="salus-btn" style={{ ...styles.btnPrimary, flex: 1, justifyContent: 'center' }}>
+        {/* Sticky footer */}
+        <div style={{
+          padding: '14px 22px',
+          paddingBottom: 'calc(14px + env(safe-area-inset-bottom, 0px))',
+          borderTop: '1px solid #efe7d2',
+          background: '#fffdf7', flexShrink: 0,
+          display: 'flex', gap: 10,
+        }}>
+          <button onClick={save} disabled={busy} className="salus-btn" style={{
+            ...styles.btnPrimary, flex: 1, justifyContent: 'center',
+            padding: '14px 22px', fontSize: 14,
+          }}>
             {busy ? 'Saving…' : (isNew ? 'Add item' : 'Save')}
           </button>
           {!isNew && (
-            <button onClick={archive} disabled={busy} className="salus-btn" style={styles.btnDanger}>
+            <button onClick={archive} disabled={busy} className="salus-btn" style={{
+              ...styles.btnDanger, padding: '14px 18px',
+            }}>
               Archive
             </button>
           )}
@@ -7432,30 +7460,31 @@ function CustomizeHomeModal({ currentWidgets, isManager, currentUser, onReload, 
         touchAction: 'none',
       }} />
 
-      {/* Full-height sheet */}
+      {/* Full-viewport sheet — covers entire screen including status bar area */}
       <div style={{
-        position: 'fixed', left: 0, right: 0,
-        top: 'env(safe-area-inset-top, 0px)', bottom: 0,
-        background: '#fffdf7', borderRadius: '24px 24px 0 0',
+        position: 'fixed',
+        top: 0, left: 0, right: 0, bottom: 0,
+        background: '#fffdf7',
         zIndex: 201,
         display: 'flex', flexDirection: 'column',
-        boxShadow: '0 -10px 40px rgba(26, 38, 32, 0.2)',
       }}>
-        {/* Header — fixed at top */}
+        {/* Header — fixed at top, padded for status bar */}
         <div style={{
-          padding: '18px 22px 14px',
+          padding: '14px 22px',
+          paddingTop: 'calc(14px + env(safe-area-inset-top, 0px))',
           borderBottom: '1px solid #efe7d2',
           flexShrink: 0,
+          background: '#fffdf7',
         }}>
-          <div style={{ width: 36, height: 4, background: '#efe7d2', borderRadius: 999, margin: '0 auto 14px' }} />
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 4 }}>
                 Settings
               </div>
               <div style={{
                 fontFamily: '"Playfair Display", serif',
                 fontSize: 22, fontWeight: 400, color: '#1a2620', letterSpacing: '-0.005em',
+                lineHeight: 1.2,
               }}>
                 Customize home
               </div>
@@ -7463,11 +7492,16 @@ function CustomizeHomeModal({ currentWidgets, isManager, currentUser, onReload, 
                 Pick what you want to see. Saves automatically.
               </div>
             </div>
-            <button onClick={onClose} className="salus-btn" style={{
-              background: 'transparent', border: 'none', padding: '8px 4px 8px 12px',
-              color: '#a59478', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
-              flexShrink: 0,
-            }}>Close</button>
+            <button onClick={onClose} className="salus-btn" aria-label="Close" style={{
+              background: 'transparent', border: '1px solid #efe7d2', borderRadius: '50%',
+              width: 36, height: 36, padding: 0,
+              color: '#5c4a38', flexShrink: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 18, fontWeight: 300, lineHeight: 1,
+              cursor: 'pointer',
+            }}>
+              ×
+            </button>
           </div>
         </div>
 
@@ -7492,21 +7526,21 @@ function CustomizeHomeModal({ currentWidgets, isManager, currentUser, onReload, 
                   const isBusy = savingKey === key;
                   return (
                     <div key={key} style={{
-                      display: 'flex', alignItems: 'center', gap: 12,
+                      display: 'flex', alignItems: 'center', gap: 8,
                       padding: '14px 0',
                       borderBottom: idx < selected.length - 1 ? '1px solid #efe7d2' : 'none',
                       opacity: isBusy ? 0.5 : 1,
                     }}>
-                      <w.Icon size={18} color="#5c4a38" />
+                      <w.Icon size={18} color="#5c4a38" style={{ flexShrink: 0 }} />
                       <div style={{ flex: 1, minWidth: 0, fontSize: 14, color: '#1a2620', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {w.label}
                       </div>
                       <button onClick={() => moveUp(key)} disabled={idx === 0 || isBusy} className="salus-btn"
-                        style={{ width: 36, height: 36, borderRadius: '50%', background: 'transparent', border: 'none', opacity: idx === 0 ? 0.25 : 1, color: '#7a8270', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }} aria-label="Move up">↑</button>
+                        style={{ width: 32, height: 32, borderRadius: '50%', background: 'transparent', border: 'none', opacity: idx === 0 ? 0.25 : 1, color: '#7a8270', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, flexShrink: 0 }} aria-label="Move up">↑</button>
                       <button onClick={() => moveDown(key)} disabled={idx === selected.length - 1 || isBusy} className="salus-btn"
-                        style={{ width: 36, height: 36, borderRadius: '50%', background: 'transparent', border: 'none', opacity: idx === selected.length - 1 ? 0.25 : 1, color: '#7a8270', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }} aria-label="Move down">↓</button>
+                        style={{ width: 32, height: 32, borderRadius: '50%', background: 'transparent', border: 'none', opacity: idx === selected.length - 1 ? 0.25 : 1, color: '#7a8270', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, flexShrink: 0 }} aria-label="Move down">↓</button>
                       <button onClick={() => remove(key)} disabled={isBusy} className="salus-btn"
-                        style={{ background: 'transparent', border: 'none', padding: '6px 4px', color: '#c8442a', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                        style={{ background: 'transparent', border: 'none', padding: '6px 4px', color: '#c8442a', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', flexShrink: 0 }}>
                         Remove
                       </button>
                     </div>
@@ -7532,7 +7566,7 @@ function CustomizeHomeModal({ currentWidgets, isManager, currentUser, onReload, 
                       borderBottom: idx < inactive.length - 1 ? '1px solid #efe7d2' : 'none',
                       opacity: isBusy ? 0.5 : 1,
                     }}>
-                      <w.Icon size={18} color="#a59478" />
+                      <w.Icon size={18} color="#a59478" style={{ flexShrink: 0 }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 14, color: '#1a2620', letterSpacing: '-0.005em' }}>{w.label}</div>
                         <div style={{ fontSize: 11, color: '#a59478', marginTop: 2 }}>{w.desc}</div>
@@ -7568,7 +7602,7 @@ function CustomizeHomeModal({ currentWidgets, isManager, currentUser, onReload, 
         {/* Sticky footer */}
         <div style={{
           padding: '14px 22px',
-          paddingBottom: 'calc(14px + env(safe-area-inset-bottom))',
+          paddingBottom: 'calc(14px + env(safe-area-inset-bottom, 0px))',
           borderTop: '1px solid #efe7d2',
           background: '#fffdf7',
           flexShrink: 0,
@@ -7596,8 +7630,8 @@ function LoadingLogo() {
     }}>
       <style>{`
         @keyframes salus-breathe {
-          0%, 100% { transform: scale(1); opacity: 0.55; }
-          50% { transform: scale(1.08); opacity: 1; }
+          0%, 100% { transform: scale(1); opacity: 0.45; }
+          50% { transform: scale(1.12); opacity: 1; }
         }
         @keyframes salus-rotate {
           from { transform: rotate(0deg); }
@@ -7606,7 +7640,7 @@ function LoadingLogo() {
       `}</style>
       <div style={{
         width: 64, height: 64,
-        animation: 'salus-breathe 2.6s ease-in-out infinite',
+        animation: 'salus-breathe 4.5s ease-in-out infinite',
       }}>
         <img
           src="https://cdn.prod.website-files.com/66803175747777a7dd2956e8/668c04b49ff0954ea73d39ef_download-compresskaru.com.png"
@@ -8273,7 +8307,7 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
           getDate={(c) => c.date}
           getTime={(c) => c._sortTime || c.time}
           isCover={(c) => c._kind === 'class' && c.status === 'needsCover'}
-          totalLabel="items"
+          totalLabel="classes"
           filter={filter}
           setFilter={setFilter}
           isManager={isManager}
@@ -8290,7 +8324,7 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
           getDate={(c) => c.date}
           getTime={(c) => c._sortTime || c.time}
           isCover={(c) => c._kind === 'class' && c.status === 'needsCover'}
-          totalLabel="items"
+          totalLabel="classes"
           filter={filter}
           setFilter={setFilter}
           isManager={isManager}
@@ -8440,7 +8474,36 @@ function DayView({ items, allItems, dayOffset, setDayOffset, getDate, getTime, i
             </div>
           </div>
         ) : (
-          dayItems.map(item => renderCard(item))
+          (() => {
+            // Group by time of day for editorial rhythm
+            const morning = dayItems.filter(it => parseInt(getTime(it).slice(0, 2)) < 12);
+            const afternoon = dayItems.filter(it => {
+              const h = parseInt(getTime(it).slice(0, 2));
+              return h >= 12 && h < 17;
+            });
+            const evening = dayItems.filter(it => parseInt(getTime(it).slice(0, 2)) >= 17);
+            const sections = [
+              { label: 'Morning', items: morning },
+              { label: 'Afternoon', items: afternoon },
+              { label: 'Evening', items: evening },
+            ].filter(s => s.items.length > 0);
+
+            return sections.map(section => (
+              <div key={section.label} style={{ marginTop: 20 }}>
+                <div style={{
+                  fontFamily: '"Playfair Display", serif',
+                  fontSize: 13, fontStyle: 'italic',
+                  color: '#a59478', letterSpacing: '0.02em',
+                  padding: '0 2px 8px',
+                  borderBottom: '1px solid #efe7d2',
+                  marginBottom: 4,
+                }}>
+                  {section.label}
+                </div>
+                {section.items.map(item => renderCard(item))}
+              </div>
+            ));
+          })()
         )}
       </div>
     </>
