@@ -8001,10 +8001,11 @@ function HireSchedule({ data, currentUser, isManager, isMobile, onBookingClick }
   const [weekOffset, setWeekOffset] = useState(0);
   const [dayOffset, setDayOffset] = useState(0);
   const [monthOffset, setMonthOffset] = useState(0);
-  const [filter, setFilter] = useState('all');
+  const [scope, setScope] = useState('internal');  // 'internal' | 'external'
 
-  // Hires = studio bookings, not cancelled. Format into class-like items.
-  const hireItems = useMemo(() => {
+  // All hires, formatted as class-like items.
+  // External = external_event booking type; everything else (1on1, classes, events by coaches) = Internal.
+  const allHires = useMemo(() => {
     return (data.bookings || [])
       .filter(b => b.status !== 'cancelled')
       .map(b => ({
@@ -8012,18 +8013,27 @@ function HireSchedule({ data, currentUser, isManager, isMobile, onBookingClick }
         date: b.date,
         time: b.startTime,
         endTime: b.endTime,
-        type: b.title || (b.hireType === '1on1' ? '1:1 hire' : 'Private hire'),
+        type: b.title || (BOOKING_TYPES[b.bookingType]?.label || 'Studio hire'),
         studio: b.studio,
-        coachId: b.hostUserId,
-        guestName: b.guestName,
-        hireType: b.hireType,
+        coachId: b.createdBy,
+        guestName: b.hirerName,
+        bookingType: b.bookingType,
+        isExternal: b.bookingType === 'external_event',
         dur: b.startTime && b.endTime ? minutesBetween(b.startTime, b.endTime) : null,
       }));
   }, [data.bookings]);
 
+  const internalCount = useMemo(() => allHires.filter(h => !h.isExternal).length, [allHires]);
+  const externalCount = useMemo(() => allHires.filter(h => h.isExternal).length, [allHires]);
+
+  const hireItems = useMemo(() => {
+    return allHires.filter(h => scope === 'external' ? h.isExternal : !h.isExternal);
+  }, [allHires, scope]);
+
   const renderCard = (item) => {
     const userById = Object.fromEntries(data.users.map(u => [u.id, u]));
     const host = item.coachId ? userById[item.coachId] : null;
+    const meta = BOOKING_TYPES[item.bookingType] || {};
     return (
       <ScheduleCard
         key={item.id}
@@ -8031,38 +8041,88 @@ function HireSchedule({ data, currentUser, isManager, isMobile, onBookingClick }
         timeLeft={item.time}
         timeBottom={item.endTime ? `to ${item.endTime}` : (item.dur ? `${item.dur} min` : null)}
         title={item.type}
-        subtitle={item.guestName || (item.hireType === '1on1' ? 'Private session' : 'Studio hire')}
+        subtitle={item.guestName || meta.label || 'Studio hire'}
         person={host}
         needsCover={false}
         isMine={item.coachId === currentUser.id}
         isManager={isManager}
-        kindLabel="HIRE"
-        kindColor="#c6926a"
+        kindLabel={meta.short || (item.isExternal ? 'EXTERNAL' : 'INTERNAL')}
+        kindColor={meta.color || (item.isExternal ? '#c6926a' : '#7a8c5c')}
       />
     );
   };
 
-  const filterFn = (item) => {
-    if (filter === 'mine') return item.coachId === currentUser.id;
-    return true;
-  };
-
   return (
     <div style={styles.timetable}>
+      {/* Internal / External scope tabs */}
+      <div style={{
+        display: 'flex', gap: 24,
+        padding: '0 4px 10px',
+        borderBottom: '1px solid #efe7d2',
+        marginBottom: 14,
+      }}>
+        <button
+          onClick={() => setScope('internal')}
+          className="salus-btn"
+          style={{
+            padding: '8px 0', background: 'transparent', border: 'none',
+            borderBottom: scope === 'internal' ? '1.5px solid #7a8c5c' : '1.5px solid transparent',
+            fontSize: 12, fontWeight: scope === 'internal' ? 600 : 500,
+            color: scope === 'internal' ? '#1a2620' : '#a59478',
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1,
+            display: 'flex', alignItems: 'center', gap: 8,
+          }}
+        >
+          Internal
+          {internalCount > 0 && (
+            <span style={{
+              fontSize: 10, color: scope === 'internal' ? '#7a8c5c' : '#a59478',
+              fontWeight: 500,
+            }}>
+              {internalCount}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => setScope('external')}
+          className="salus-btn"
+          style={{
+            padding: '8px 0', background: 'transparent', border: 'none',
+            borderBottom: scope === 'external' ? '1.5px solid #c6926a' : '1.5px solid transparent',
+            fontSize: 12, fontWeight: scope === 'external' ? 600 : 500,
+            color: scope === 'external' ? '#1a2620' : '#a59478',
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1,
+            display: 'flex', alignItems: 'center', gap: 8,
+          }}
+        >
+          External
+          {externalCount > 0 && (
+            <span style={{
+              fontSize: 10, color: scope === 'external' ? '#c6926a' : '#a59478',
+              fontWeight: 500,
+            }}>
+              {externalCount}
+            </span>
+          )}
+        </button>
+      </div>
+
       <SchedulePeriodToggle viewMode={viewMode} setViewMode={setViewMode} />
 
       {viewMode === 'day' && (
         <DayView
-          items={hireItems.filter(filterFn)}
+          items={hireItems}
           allItems={hireItems}
           dayOffset={dayOffset}
           setDayOffset={setDayOffset}
           getDate={(c) => c.date}
           getTime={(c) => c.time}
           isCover={() => false}
-          totalLabel="hires"
-          filter={filter}
-          setFilter={setFilter}
+          totalLabel={scope === 'external' ? 'external hires' : 'internal hires'}
+          filter={'all'}
+          setFilter={() => {}}
           isManager={isManager}
           renderCard={renderCard}
         />
@@ -8070,16 +8130,16 @@ function HireSchedule({ data, currentUser, isManager, isMobile, onBookingClick }
 
       {viewMode === 'week' && (
         <WeekViewBody
-          items={hireItems.filter(filterFn)}
+          items={hireItems}
           allItems={hireItems}
           weekOffset={weekOffset}
           setWeekOffset={setWeekOffset}
           getDate={(c) => c.date}
           getTime={(c) => c.time}
           isCover={() => false}
-          totalLabel="hires"
-          filter={filter}
-          setFilter={setFilter}
+          totalLabel={scope === 'external' ? 'external hires' : 'internal hires'}
+          filter={'all'}
+          setFilter={() => {}}
           isManager={isManager}
           renderCard={renderCard}
         />
