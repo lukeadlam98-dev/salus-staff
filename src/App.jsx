@@ -30,6 +30,7 @@ import {
   dmFromDb,
   emailIntegrationFromDb,
   stockItemFromDb,
+  storeCardFromDb,
 } from './lib/transformers';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -81,6 +82,7 @@ const EMPTY_DATA = {
   dms: [],
   emailIntegration: null,
   stock: [],
+  storeCards: [],
 };
 
 const CLASS_TYPES = {
@@ -129,6 +131,14 @@ function toIsoDate(date) {
   return d.getFullYear() + '-' +
     String(d.getMonth() + 1).padStart(2, '0') + '-' +
     String(d.getDate()).padStart(2, '0');
+}
+function minutesBetween(startHM, endHM) {
+  // "HH:MM" → minutes
+  if (!startHM || !endHM) return null;
+  const [sh, sm] = startHM.split(':').map(Number);
+  const [eh, em] = endHM.split(':').map(Number);
+  if (Number.isNaN(sh) || Number.isNaN(eh)) return null;
+  return (eh * 60 + (em || 0)) - (sh * 60 + (sm || 0));
 }
 
 // Renders text with @mentions highlighted. If `me` is mentioned, the highlight is stronger.
@@ -315,7 +325,7 @@ export default function SalusStaff() {
     if (!session) return;
     if (!silent) setLoading(true);
     try {
-      const [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes, emailIntRes, stockRes] = await Promise.all([
+      const [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes, emailIntRes, stockRes, storeCardsRes] = await Promise.all([
         supabase.from('profiles').select('*'),
         supabase.from('classes').select('*'),
         supabase.from('cover_requests').select('*'),
@@ -335,6 +345,7 @@ export default function SalusStaff() {
         supabase.from('direct_messages').select('*').order('created_at', { ascending: true }),
         supabase.from('email_integrations').select('*').eq('user_id', session.user?.id).maybeSingle(),
         supabase.from('stock_items').select('*').eq('archived', false).order('name'),
+        supabase.from('store_cards').select('*').eq('archived', false).order('display_order'),
       ]);
 
       const errors = [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes]
@@ -365,6 +376,7 @@ export default function SalusStaff() {
         dms: (dmsRes.data || []).map(dmFromDb),
         emailIntegration: emailIntRes?.data ? emailIntegrationFromDb(emailIntRes.data) : null,
         stock: (stockRes.data || []).map(stockItemFromDb),
+        storeCards: (storeCardsRes.data || []).map(storeCardFromDb),
       });
     } catch (e) {
       console.error('Failed to load data:', e);
@@ -1573,6 +1585,7 @@ export default function SalusStaff() {
             onShiftClick={(shiftId) => setModal({ type: 'shiftDetail', shiftId })}
             onAddClass={() => setModal({ type: 'editClass', classId: null })}
             onDayClick={(isoDate) => setModal({ type: 'dayDetail', isoDate })}
+            onBookingClick={(id) => setModal({ type: 'bookingDetail', id })}
           />
         )}
         {tab === 'cover' && (
@@ -5123,9 +5136,12 @@ const STOCK_CATEGORIES = {
 
 function AdminStockSection({ data, currentUser, isManager, onReload }) {
   const items = data.stock || [];
+  const cards = data.storeCards || [];
   const [filter, setFilter] = useState('all'); // all | low
   const [editItem, setEditItem] = useState(null); // item being edited (or 'new')
   const [busyIds, setBusyIds] = useState(new Set());
+  const [viewCard, setViewCard] = useState(null); // card being viewed full-screen
+  const [editCard, setEditCard] = useState(null); // card being edited (or 'new')
 
   const visible = filter === 'low'
     ? items.filter(i => i.currentQty <= i.lowThreshold)
@@ -5224,6 +5240,75 @@ function AdminStockSection({ data, currentUser, isManager, onReload }) {
         </button>
       </div>
 
+      {/* Store cards — barcodes for FOH to scan at the till */}
+      {(cards.length > 0 || isManager) && (
+        <div style={{ marginTop: 20, marginBottom: 8 }}>
+          <div style={{
+            display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+            marginBottom: 10, padding: '0 2px',
+          }}>
+            <div style={{
+              fontSize: 10, fontWeight: 500, color: '#a59478',
+              letterSpacing: 2.5, textTransform: 'uppercase',
+            }}>
+              Store cards
+            </div>
+            {isManager && (
+              <button onClick={() => setEditCard('new')} className="salus-btn" style={{
+                background: 'transparent', border: 'none', padding: 4,
+                color: '#a59478', fontSize: 10, letterSpacing: '0.12em',
+                textTransform: 'uppercase', fontWeight: 500,
+              }}>
+                + Add card
+              </button>
+            )}
+          </div>
+          {cards.length === 0 ? (
+            <div style={{
+              padding: '20px 16px', textAlign: 'center',
+              border: '1px dashed #e8e0cc', borderRadius: 14,
+              color: '#a59478', fontSize: 13, fontStyle: 'italic',
+            }}>
+              No store cards saved yet.{isManager && ' Tap “+ Add card” to upload a Bookers barcode.'}
+            </div>
+          ) : (
+            <div style={{
+              display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+              gap: 10,
+            }}>
+              {cards.map(card => (
+                <button
+                  key={card.id}
+                  onClick={() => setViewCard(card)}
+                  className="salus-btn"
+                  style={{
+                    background: '#fffdf7', border: 'none',
+                    borderRadius: 14, padding: 0, overflow: 'hidden',
+                    boxShadow: '0 1px 0 rgba(92, 74, 56, 0.06)',
+                    fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left',
+                  }}
+                >
+                  <div style={{
+                    aspectRatio: '16 / 10',
+                    background: `#fffdf7 url(${card.imageUrl}) center/contain no-repeat`,
+                  }} />
+                  <div style={{ padding: '10px 12px' }}>
+                    <div style={{
+                      fontFamily: '"Playfair Display", serif',
+                      fontSize: 13, fontWeight: 500, color: '#1a2620',
+                      letterSpacing: '-0.005em',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      {card.name}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Empty state */}
       {visible.length === 0 && (
         <div style={{ padding: '60px 20px', textAlign: 'center' }}>
@@ -5262,6 +5347,12 @@ function AdminStockSection({ data, currentUser, isManager, onReload }) {
         </div>
       ))}
 
+      {isManager && visible.length > 0 && (
+        <div style={{ fontSize: 11, color: '#a59478', textAlign: 'center', marginTop: 24, fontStyle: 'italic' }}>
+          Tap any item name to edit.
+        </div>
+      )}
+
       {/* Edit / new item modal */}
       {editItem && (
         <StockItemEditModal
@@ -5272,6 +5363,273 @@ function AdminStockSection({ data, currentUser, isManager, onReload }) {
           onSaved={() => { setEditItem(null); onReload?.(); }}
         />
       )}
+
+      {/* View store card full-screen */}
+      {viewCard && (
+        <StoreCardViewModal card={viewCard} onClose={() => setViewCard(null)} />
+      )}
+
+      {/* Edit / new store card */}
+      {editCard && (
+        <StoreCardEditModal
+          card={editCard === 'new' ? null : editCard}
+          currentUserId={currentUser.id}
+          onClose={() => setEditCard(null)}
+          onSaved={() => { setEditCard(null); onReload?.(); }}
+        />
+      )}
+    </>
+  );
+}
+
+// ─── Store card view modal — full-screen barcode for till ───
+function StoreCardViewModal({ card, onClose }) {
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, background: '#1a2620',
+      zIndex: 300, display: 'flex', flexDirection: 'column',
+      paddingTop: 'env(safe-area-inset-top, 0px)',
+      paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+    }}>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        padding: '16px 22px',
+      }}>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 500, color: 'rgba(255, 253, 247, 0.5)', letterSpacing: 2.5, textTransform: 'uppercase' }}>
+            Store card
+          </div>
+          <div style={{
+            fontFamily: '"Playfair Display", serif',
+            fontSize: 18, fontWeight: 400, color: '#fffdf7', letterSpacing: '-0.005em', marginTop: 2,
+          }}>
+            {card.name}
+          </div>
+        </div>
+        <button onClick={onClose} className="salus-btn" style={{
+          background: 'transparent', border: 'none', padding: 8,
+          color: 'rgba(255, 253, 247, 0.6)', fontSize: 10, letterSpacing: '0.12em',
+          textTransform: 'uppercase', fontWeight: 500,
+        }}>Close</button>
+      </div>
+
+      <div onClick={(e) => e.stopPropagation()} style={{
+        flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '20px 22px',
+      }}>
+        <div style={{
+          background: '#fffdf7', borderRadius: 18, padding: 28,
+          maxWidth: '100%', maxHeight: '100%',
+          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
+        }}>
+          <img src={card.imageUrl} alt={card.name} style={{
+            display: 'block', maxWidth: '100%', maxHeight: '60vh',
+            objectFit: 'contain',
+          }} />
+        </div>
+      </div>
+
+      {card.notes && (
+        <div style={{
+          padding: '14px 22px 20px', textAlign: 'center',
+          color: 'rgba(255, 253, 247, 0.7)', fontSize: 13, lineHeight: 1.5,
+          fontStyle: 'italic',
+        }}>
+          {card.notes}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Store card edit modal — upload to Supabase Storage ───
+function StoreCardEditModal({ card, currentUserId, onClose, onSaved }) {
+  const isNew = !card;
+  const [name, setName] = useState(card?.name || '');
+  const [notes, setNotes] = useState(card?.notes || '');
+  const [imageUrl, setImageUrl] = useState(card?.imageUrl || '');
+  const [storagePath, setStoragePath] = useState(card?.storagePath || null);
+  const [uploading, setUploading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const onPickFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Image too large (5MB max). Crop or compress and try again.');
+      return;
+    }
+    setError(null);
+    setUploading(true);
+    try {
+      const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+      const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from('store-cards')
+        .upload(path, file, { cacheControl: '3600', upsert: false });
+      if (upErr) throw upErr;
+      const { data: urlData } = supabase.storage.from('store-cards').getPublicUrl(path);
+      setImageUrl(urlData.publicUrl);
+      setStoragePath(path);
+    } catch (e) {
+      setError(`Upload failed: ${e.message || e}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const save = async () => {
+    if (!name.trim()) { setError('Name required'); return; }
+    if (!imageUrl) { setError('Upload an image first'); return; }
+    setError(null);
+    setBusy(true);
+    try {
+      const payload = {
+        name: name.trim(),
+        notes: notes.trim() || null,
+        image_url: imageUrl,
+        storage_path: storagePath,
+        updated_at: new Date().toISOString(),
+      };
+      if (isNew) {
+        payload.created_by = currentUserId;
+        const { error } = await supabase.from('store_cards').insert(payload);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('store_cards').update(payload).eq('id', card.id);
+        if (error) throw error;
+      }
+      onSaved();
+    } catch (e) {
+      setError(`Save failed: ${e.message || e}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const archive = async () => {
+    if (!confirm(`Remove "${card.name}"?`)) return;
+    setBusy(true);
+    try {
+      const { error } = await supabase.from('store_cards').update({ archived: true }).eq('id', card.id);
+      if (error) throw error;
+      // Also try to delete the file
+      if (card.storagePath) {
+        try { await supabase.storage.from('store-cards').remove([card.storagePath]); } catch {}
+      }
+      onSaved();
+    } catch (e) {
+      setError(`Remove failed: ${e.message || e}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.55)', zIndex: 200,
+      }} />
+      <div style={{
+        position: 'fixed', left: 0, right: 0, bottom: 0,
+        background: '#fffdf7', borderRadius: '20px 20px 0 0',
+        zIndex: 201, padding: '20px 22px 28px',
+        paddingBottom: 'calc(28px + env(safe-area-inset-bottom))',
+        maxHeight: '92vh', overflowY: 'auto',
+        boxShadow: '0 -10px 40px rgba(26, 38, 32, 0.2)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 4 }}>
+              {isNew ? 'New card' : 'Edit card'}
+            </div>
+            <div style={{
+              fontFamily: '"Playfair Display", serif',
+              fontSize: 22, fontWeight: 400, color: '#1a2620', letterSpacing: '-0.005em',
+            }}>
+              {isNew ? 'Add a store card' : card.name}
+            </div>
+          </div>
+          <button onClick={onClose} className="salus-btn" style={{
+            background: 'transparent', border: 'none', padding: 4,
+            color: '#a59478', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
+          }}>Close</button>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <FormField label="Card name">
+            <input value={name} onChange={e => setName(e.target.value)} style={styles.loginInput} placeholder="Bookers Wholesale" />
+          </FormField>
+
+          <FormField label="Notes (optional)">
+            <input value={notes} onChange={e => setNotes(e.target.value)} style={styles.loginInput} placeholder="Use at the SE9 branch" />
+          </FormField>
+
+          <FormField label="Barcode image">
+            {imageUrl ? (
+              <div style={{
+                background: '#fffdf7', borderRadius: 14, padding: 14,
+                border: '1px solid #efe7d2', textAlign: 'center',
+              }}>
+                <img src={imageUrl} alt="Barcode preview" style={{
+                  display: 'block', margin: '0 auto', maxWidth: '100%', maxHeight: 180,
+                  objectFit: 'contain',
+                }} />
+                <label style={{
+                  display: 'inline-block', marginTop: 12,
+                  background: 'transparent', border: '1px solid #efe7d2',
+                  padding: '8px 14px', borderRadius: 999,
+                  color: '#7a8270', fontSize: 11, letterSpacing: '0.05em',
+                  textTransform: 'uppercase', fontWeight: 500, cursor: 'pointer',
+                }}>
+                  Replace image
+                  <input type="file" accept="image/*" onChange={onPickFile} style={{ display: 'none' }} disabled={uploading} />
+                </label>
+              </div>
+            ) : (
+              <label style={{
+                display: 'block', padding: '24px 16px',
+                border: '1px dashed #d4cdb8', borderRadius: 14,
+                background: 'transparent', textAlign: 'center', cursor: 'pointer',
+              }}>
+                <div style={{
+                  fontFamily: '"Playfair Display", serif', fontSize: 15,
+                  color: '#5c4a38', fontStyle: 'italic',
+                }}>
+                  {uploading ? 'Uploading…' : 'Tap to upload barcode'}
+                </div>
+                <div style={{ fontSize: 11, color: '#a59478', marginTop: 6 }}>
+                  PNG or JPG. Up to 5MB.
+                </div>
+                <input type="file" accept="image/*" onChange={onPickFile} style={{ display: 'none' }} disabled={uploading} />
+              </label>
+            )}
+          </FormField>
+
+          {error && (
+            <div style={{
+              padding: 12, background: '#fef0ec', color: '#5c4a38',
+              borderRadius: 8, fontSize: 13,
+            }}>
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
+          <button onClick={save} disabled={busy || uploading} className="salus-btn" style={{
+            ...styles.btnPrimary, flex: 1, justifyContent: 'center',
+          }}>
+            {busy ? 'Saving…' : (isNew ? 'Add card' : 'Save')}
+          </button>
+          {!isNew && (
+            <button onClick={archive} disabled={busy} className="salus-btn" style={styles.btnDanger}>
+              Remove
+            </button>
+          )}
+        </div>
+      </div>
     </>
   );
 }
@@ -5282,68 +5640,73 @@ function StockItemRow({ item, busy, isManager, onDecrement, onIncrement, onEdit 
 
   return (
     <div style={{
-      padding: '16px 4px',
+      padding: '14px 4px',
       borderBottom: '1px solid #efe7d2',
-      display: 'flex', alignItems: 'center', gap: 14,
+      display: 'flex', alignItems: 'center', gap: 10,
     }}>
-      {/* Name + qty */}
-      <div style={{ flex: 1, minWidth: 0 }}>
+      {/* Name + qty area — tap to edit if manager */}
+      <button
+        onClick={isManager ? onEdit : undefined}
+        disabled={!isManager}
+        className="salus-btn"
+        style={{
+          flex: 1, minWidth: 0, textAlign: 'left',
+          background: 'transparent', border: 'none', padding: 0,
+          cursor: isManager ? 'pointer' : 'default',
+          fontFamily: 'inherit',
+        }}
+      >
         <div style={{
           fontFamily: '"Playfair Display", serif',
-          fontSize: 16, fontWeight: 500, color: '#1a2620', letterSpacing: '-0.005em',
+          fontSize: 15, fontWeight: 500, color: '#1a2620', letterSpacing: '-0.005em',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
           {item.name}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
           <span style={{
             fontFamily: '"Playfair Display", serif',
-            fontSize: 18, fontWeight: 500,
+            fontSize: 17, fontWeight: 500,
             color: isOut ? '#c8442a' : isLow ? '#c6926a' : '#5c4a38',
           }}>
             {item.currentQty}
           </span>
-          <span style={{ fontSize: 11, color: '#a59478', letterSpacing: '0.02em' }}>
+          <span style={{ fontSize: 10, color: '#a59478', letterSpacing: '0.02em' }}>
             {item.unit}{item.currentQty !== 1 ? 's' : ''}
           </span>
           {isLow && (
             <span style={{
-              fontSize: 10, color: isOut ? '#c8442a' : '#c6926a', fontWeight: 600,
-              textTransform: 'uppercase', letterSpacing: 2, marginLeft: 4,
+              fontSize: 9, color: isOut ? '#c8442a' : '#c6926a', fontWeight: 600,
+              textTransform: 'uppercase', letterSpacing: 1.5, marginLeft: 2,
             }}>
               {isOut ? 'Out' : 'Low'}
             </span>
           )}
         </div>
-      </div>
+      </button>
 
-      {/* Quick actions */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+      {/* Quick − / + only */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
         <button onClick={onDecrement} disabled={busy || item.currentQty === 0} className="salus-btn" style={{
-          width: 36, height: 36, borderRadius: '50%',
+          width: 38, height: 38, borderRadius: '50%',
           background: 'transparent', border: '1px solid #efe7d2',
-          color: '#5c4a38', fontSize: 18, fontWeight: 400,
+          color: '#5c4a38', fontSize: 20, fontWeight: 300,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           opacity: item.currentQty === 0 ? 0.3 : 1,
+          cursor: item.currentQty === 0 ? 'default' : 'pointer',
+          padding: 0,
         }} aria-label="Took one">
           −
         </button>
         <button onClick={onIncrement} disabled={busy} className="salus-btn" style={{
-          width: 36, height: 36, borderRadius: '50%',
-          background: 'transparent', border: '1px solid #efe7d2',
-          color: '#5c4a38', fontSize: 18, fontWeight: 400,
+          width: 38, height: 38, borderRadius: '50%',
+          background: '#1a2620', border: 'none',
+          color: '#fffdf7', fontSize: 20, fontWeight: 300,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer', padding: 0,
         }} aria-label="Added one">
           +
         </button>
-        {isManager && (
-          <button onClick={onEdit} className="salus-btn" style={{
-            background: 'transparent', border: 'none', padding: '0 4px',
-            color: '#a59478', fontSize: 10, letterSpacing: '0.12em',
-            textTransform: 'uppercase', fontWeight: 500, marginLeft: 4,
-          }}>
-            Edit
-          </button>
-        )}
       </div>
     </div>
   );
@@ -7356,7 +7719,7 @@ function CoverHomeCard({ req, users, interested, urgent, pending, onClick, onCla
 
 function ScheduleView({
   data, currentUser, isManager, isMobile, scheduleView, setScheduleView,
-  onClassClick, onShiftClick, onAddClass, onDayClick,
+  onClassClick, onShiftClick, onAddClass, onDayClick, onBookingClick,
 }) {
   const fohOnly = currentUser.isFoh && !currentUser.isCoach;
   const studioOnly = currentUser.isCoach && !currentUser.isFoh;
@@ -7410,6 +7773,7 @@ function ScheduleView({
           onClassClick={onClassClick}
           onAddClass={onAddClass}
           onDayClick={onDayClick}
+          onBookingClick={onBookingClick}
         />
       ) : (
         <FOHSchedule
@@ -7752,36 +8116,88 @@ function ShiftDetailModal({ shift, data, currentUser, isManager, onClose, onAssi
   );
 }
 
-function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAddClass, onDayClick }) {
+function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAddClass, onDayClick, onBookingClick }) {
   const [viewMode, setViewMode] = useState('week');  // 'day' | 'week' | 'month'
   const [weekOffset, setWeekOffset] = useState(0);
   const [dayOffset, setDayOffset] = useState(0);     // days from today
   const [monthOffset, setMonthOffset] = useState(0); // months from current
   const [filter, setFilter] = useState('all');
 
-  const renderCard = (cls, isMine) => {
+  // ── Merge classes + studio bookings into one timeline ───────────────────
+  // Each item is tagged with _kind so we can render and link appropriately.
+  const mergedItems = useMemo(() => {
+    const classItems = (data.classes || []).map(c => ({
+      ...c,
+      _kind: 'class',
+      _sortTime: c.time,
+    }));
+    // Bookings: only show non-cancelled, future or recent
+    const bookingItems = (data.bookings || [])
+      .filter(b => b.status !== 'cancelled')
+      .map(b => ({
+        id: b.id,
+        date: b.date,
+        time: b.startTime,
+        endTime: b.endTime,
+        type: b.title || (b.hireType === '1on1' ? '1:1 hire' : 'Private hire'),
+        studio: b.studio,
+        coachId: b.hostUserId,
+        guestName: b.guestName,
+        hireType: b.hireType,
+        _kind: 'booking',
+        _booking: b,
+        _sortTime: b.startTime,
+        // compute duration in minutes from start–end
+        dur: b.startTime && b.endTime ? minutesBetween(b.startTime, b.endTime) : null,
+      }));
+    return [...classItems, ...bookingItems];
+  }, [data.classes, data.bookings]);
+
+  const renderCard = (item) => {
     const userById = Object.fromEntries(data.users.map(u => [u.id, u]));
-    const coach = cls.coachId ? userById[cls.coachId] : null;
-    const needsCover = cls.status === 'needsCover';
+
+    if (item._kind === 'booking') {
+      const host = item.coachId ? userById[item.coachId] : null;
+      return (
+        <ScheduleCard
+          key={`booking-${item.id}`}
+          onClick={() => onBookingClick?.(item.id)}
+          timeLeft={item.time}
+          timeBottom={item.endTime ? `to ${item.endTime}` : null}
+          title={item.type}
+          subtitle={item.guestName || (item.hireType === '1on1' ? 'Private session' : 'Studio hire')}
+          person={host}
+          needsCover={false}
+          isMine={item.coachId === currentUser.id}
+          isManager={isManager}
+          kindLabel="HIRE"
+          kindColor="#c6926a"
+        />
+      );
+    }
+
+    // Default: a class
+    const coach = item.coachId ? userById[item.coachId] : null;
+    const needsCover = item.status === 'needsCover';
     return (
       <ScheduleCard
-        key={cls.id}
-        onClick={() => onClassClick(cls.id)}
-        timeLeft={cls.time}
-        timeBottom={`${cls.dur} min`}
-        title={cls.type}
-        subtitle={STUDIOS[cls.studio]?.short || cls.studio}
+        key={`class-${item.id}`}
+        onClick={() => onClassClick(item.id)}
+        timeLeft={item.time}
+        timeBottom={`${item.dur} min`}
+        title={item.type}
+        subtitle={STUDIOS[item.studio]?.short || item.studio}
         person={coach}
         needsCover={needsCover}
-        isMine={cls.coachId === currentUser.id}
+        isMine={item.coachId === currentUser.id}
         isManager={isManager}
       />
     );
   };
 
-  const filterFn = (cls) => {
-    if (filter === 'mine')       return cls.coachId === currentUser.id;
-    if (filter === 'needsCover') return cls.status === 'needsCover';
+  const filterFn = (item) => {
+    if (filter === 'mine')       return item.coachId === currentUser.id;
+    if (filter === 'needsCover') return item._kind === 'class' && item.status === 'needsCover';
     return true;
   };
 
@@ -7791,14 +8207,14 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
 
       {viewMode === 'day' && (
         <DayView
-          items={data.classes.filter(filterFn)}
-          allItems={data.classes}
+          items={mergedItems.filter(filterFn)}
+          allItems={mergedItems}
           dayOffset={dayOffset}
           setDayOffset={setDayOffset}
           getDate={(c) => c.date}
-          getTime={(c) => c.time}
-          isCover={(c) => c.status === 'needsCover'}
-          totalLabel="classes"
+          getTime={(c) => c._sortTime || c.time}
+          isCover={(c) => c._kind === 'class' && c.status === 'needsCover'}
+          totalLabel="items"
           filter={filter}
           setFilter={setFilter}
           isManager={isManager}
@@ -7808,14 +8224,14 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
 
       {viewMode === 'week' && (
         <WeekViewBody
-          items={data.classes.filter(filterFn)}
-          allItems={data.classes}
+          items={mergedItems.filter(filterFn)}
+          allItems={mergedItems}
           weekOffset={weekOffset}
           setWeekOffset={setWeekOffset}
           getDate={(c) => c.date}
-          getTime={(c) => c.time}
-          isCover={(c) => c.status === 'needsCover'}
-          totalLabel="classes"
+          getTime={(c) => c._sortTime || c.time}
+          isCover={(c) => c._kind === 'class' && c.status === 'needsCover'}
+          totalLabel="items"
           filter={filter}
           setFilter={setFilter}
           isManager={isManager}
@@ -8323,18 +8739,19 @@ function ScheduleFilterRow({ filter, setFilter, isManager }) {
   );
 }
 
-function ScheduleCard({ onClick, timeLeft, timeBottom, title, subtitle, person, needsCover, isMine, isManager }) {
+function ScheduleCard({ onClick, timeLeft, timeBottom, title, subtitle, person, needsCover, isMine, isManager, kindLabel, kindColor }) {
   return (
     <button
       onClick={onClick}
       className="salus-btn"
       style={styles.scheduleCard}
     >
-      {/* Left accent indicator — sage for mine, coral for cover */}
-      {(isMine || needsCover) && (
+      {/* Left accent indicator — sage for mine, coral for cover, amber for hire */}
+      {(isMine || needsCover || kindLabel) && (
         <span style={{
           position: 'absolute', left: -2, top: 14, bottom: 14, width: 2,
-          background: needsCover ? '#c8442a' : '#7a8c5c', borderRadius: 1,
+          background: needsCover ? '#c8442a' : kindLabel ? (kindColor || '#c6926a') : '#7a8c5c',
+          borderRadius: 1,
         }} />
       )}
 
@@ -8343,7 +8760,15 @@ function ScheduleCard({ onClick, timeLeft, timeBottom, title, subtitle, person, 
         {timeBottom && <div style={styles.scheduleCardTimeSub}>{timeBottom}</div>}
       </div>
       <div style={styles.scheduleCardMid}>
-        <div style={styles.scheduleCardTitle}>{title}</div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+          <div style={styles.scheduleCardTitle}>{title}</div>
+          {kindLabel && (
+            <span style={{
+              fontSize: 9, fontWeight: 600, color: kindColor || '#c6926a',
+              textTransform: 'uppercase', letterSpacing: 2,
+            }}>{kindLabel}</span>
+          )}
+        </div>
         {subtitle && <div style={styles.scheduleCardSub}>{subtitle}</div>}
       </div>
       <div style={styles.scheduleCardRight}>
