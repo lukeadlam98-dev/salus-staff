@@ -17,11 +17,25 @@ export const profileFromDb = (row, authEmail) => ({
   bankSortCode: row.bank_sort_code || null,
   isCoach: row.is_coach === true,
   isFoh: row.is_foh === true,
+  isManager: row.is_manager === true,
   codeOfConductAckedAt: row.code_of_conduct_acked_at,
   duringClassAckedAt: row.during_class_acked_at,
   afterClassAckedAt: row.after_class_acked_at,
   uniformAckedAt: row.uniform_acked_at,
-  onboardingCompletedAt: row.onboarding_completed_at,
+  // Onboarding fields
+  phone:                    row.phone || '',
+  dateOfBirth:              row.date_of_birth || null,
+  emergencyContactName:     row.emergency_contact_name || '',
+  emergencyContactPhone:    row.emergency_contact_phone || '',
+  emergencyContactRelation: row.emergency_contact_relation || '',
+  bankAccountName:          row.bank_account_name || '',
+  bankAccountNumber:        row.bank_account_number || '',
+  rightToWorkDocUrl:        row.right_to_work_doc_url || null,
+  rightToWorkDocPath:       row.right_to_work_doc_path || null,
+  contractSignedAt:         row.contract_signed_at,
+  policiesAcknowledgedAt:   row.policies_acknowledged_at,
+  onboardingStartedAt:      row.onboarding_started_at,
+  onboardingCompletedAt:    row.onboarding_completed_at,
   homeWidgets: Array.isArray(row.home_widgets)
     ? row.home_widgets
     : ['cover', 'upcoming', 'tours', 'tasks', 'request_cover', 'hire_studio'],
@@ -281,4 +295,44 @@ export const storeCardFromDb = (row) => ({
   createdBy: row.created_by || null,
   createdAt: row.created_at ? new Date(row.created_at).getTime() : null,
   updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : null,
+});
+
+export const broadcastFromDb = (row) => ({
+  id: row.id,
+  senderId: row.sender_id || null,
+  title: row.title,
+  body: row.body,
+  urgency: row.urgency || 'normal',
+  expiresAt: row.expires_at ? new Date(row.expires_at).getTime() : null,
+  createdAt: row.created_at ? new Date(row.created_at).getTime() : 0,
+});
+
+export const broadcastReadFromDb = (row) => ({
+  broadcastId: row.broadcast_id,
+  userId: row.user_id,
+  readAt: row.read_at ? new Date(row.read_at).getTime() : 0,
+});
+
+export const incidentFromDb = (row) => ({
+  id: row.id,
+  reportedBy: row.reported_by || null,
+  category: row.category,
+  severity: row.severity || 'low',
+  occurredAt: row.occurred_at ? new Date(row.occurred_at).getTime() : 0,
+  location: row.location || '',
+  description: row.description || '',
+  peopleInvolved: row.people_involved || '',
+  actionTaken: row.action_taken || '',
+  photoUrls: row.photo_urls || [],
+  status: row.status || 'open',
+  managerNotes: row.manager_notes || '',
+  createdAt: row.created_at ? new Date(row.created_at).getTime() : 0,
+  updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : 0,
+});
+
+export const onboardingStepFromDb = (row) => ({
+  userId: row.user_id,
+  stepKey: row.step_key,
+  completedAt: row.completed_at ? new Date(row.completed_at).getTime() : 0,
+  data: row.data || null,
 });
