@@ -32,6 +32,10 @@ import {
   emailIntegrationFromDb,
   stockItemFromDb,
   storeCardFromDb,
+  broadcastFromDb,
+  broadcastReadFromDb,
+  incidentFromDb,
+  onboardingStepFromDb,
 } from './lib/transformers';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -84,6 +88,10 @@ const EMPTY_DATA = {
   emailIntegration: null,
   stock: [],
   storeCards: [],
+  broadcasts: [],
+  broadcastReads: [],
+  incidents: [],
+  onboardingSteps: [],
 };
 
 const CLASS_TYPES = {
@@ -369,7 +377,7 @@ export default function SalusStaff() {
     if (!session) return;
     if (!silent) setLoading(true);
     try {
-      const [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes, emailIntRes, stockRes, storeCardsRes] = await Promise.all([
+      const [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes, emailIntRes, stockRes, storeCardsRes, broadcastsRes, broadcastReadsRes, incidentsRes, onboardingStepsRes] = await Promise.all([
         supabase.from('profiles').select('*'),
         supabase.from('classes').select('*'),
         supabase.from('cover_requests').select('*'),
@@ -390,6 +398,10 @@ export default function SalusStaff() {
         supabase.from('email_integrations').select('*').eq('user_id', session.user?.id).maybeSingle(),
         supabase.from('stock_items').select('*').eq('archived', false).order('name'),
         supabase.from('store_cards').select('*').eq('archived', false).order('display_order'),
+        supabase.from('broadcasts').select('*').order('created_at', { ascending: false }).limit(50),
+        supabase.from('broadcast_reads').select('*').eq('user_id', session.user?.id),
+        supabase.from('incidents').select('*').order('created_at', { ascending: false }),
+        supabase.from('onboarding_steps').select('*'),
       ]);
 
       const errors = [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes]
@@ -421,6 +433,10 @@ export default function SalusStaff() {
         emailIntegration: emailIntRes?.data ? emailIntegrationFromDb(emailIntRes.data) : null,
         stock: (stockRes.data || []).map(stockItemFromDb),
         storeCards: (storeCardsRes.data || []).map(storeCardFromDb),
+        broadcasts: (broadcastsRes.data || []).map(broadcastFromDb),
+        broadcastReads: (broadcastReadsRes.data || []).map(broadcastReadFromDb),
+        incidents: (incidentsRes.data || []).map(incidentFromDb),
+        onboardingSteps: (onboardingStepsRes.data || []).map(onboardingStepFromDb),
       });
     } catch (e) {
       console.error('Failed to load data:', e);
@@ -641,6 +657,17 @@ export default function SalusStaff() {
     );
   }
 
+  // ─── Onboarding gate — new hires complete the wizard before seeing the app ─
+  const currentUserProfile = data.users.find(u => u.id === currentUserId);
+  if (currentUserProfile && !isOnboardingComplete(currentUserProfile)) {
+    return (
+      <OnboardingScreen
+        currentUser={currentUserProfile}
+        onComplete={() => reloadData(true)}
+      />
+    );
+  }
+
   // ─── Mutations ─────────────────────────────────────────────────────────────
   // Pattern: write to Supabase, then reload all data on success.
 
@@ -656,6 +683,15 @@ export default function SalusStaff() {
     if (Object.keys(patch).length === 0) return;
     const { error } = await supabase.from('profiles').update(patch).eq('id', userId);
     if (error) { console.error('updateUserSettings', error); return; }
+    await reloadData(true);
+  };
+
+  const markBroadcastRead = async (broadcastId) => {
+    if (!broadcastId || !currentUserId) return;
+    await supabase.from('broadcast_reads').upsert({
+      broadcast_id: broadcastId,
+      user_id: currentUserId,
+    });
     await reloadData(true);
   };
 
@@ -1599,6 +1635,7 @@ export default function SalusStaff() {
             onOpenMaintenance={(id) => setModal({ type: 'maintenanceDetail', id })}
             onCreateFeedback={() => setModal({ type: 'createFeedback' })}
             onOpenFeedback={(id) => setModal({ type: 'feedbackDetail', id })}
+            onMarkBroadcastRead={markBroadcastRead}
           />
         )}
         {(tab === 'timetable' || tab === 'cover') && (
@@ -1667,6 +1704,7 @@ export default function SalusStaff() {
             currentUser={currentUser}
             isManager={isManager}
             emailIntegration={data.emailIntegration}
+            sessionToken={session?.access_token}
             onCreate={() => setModal({ type: 'createBooking' })}
             onOpenBooking={(id) => setModal({ type: 'bookingDetail', id })}
             onConnectGmail={handleConnectGmail}
@@ -3791,9 +3829,10 @@ function generateRecurringDates(startIso, endIso, days /* 0=Mon..6=Sun */) {
 // AdminPage — wraps Inbox, Cancellations, Tours, and Bookings.
 // Coaches see Bookings only; manager + FOH see all sections.
 // ============================================================
-function AdminPage({ data, currentUser, isManager, emailIntegration, onCreate, onOpenBooking, onConnectGmail, onCreateTask, onReload }) {
+function AdminPage({ data, currentUser, isManager, emailIntegration, sessionToken, onCreate, onOpenBooking, onConnectGmail, onCreateTask, onReload }) {
   const canSeeAdminSections = isManager || currentUser.isFoh;
   const [section, setSection] = useState(canSeeAdminSections ? 'reports' : 'bookings');
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
 
   // If the user can't see admin sections, just show bookings.
   if (!canSeeAdminSections) {
@@ -3836,7 +3875,26 @@ function AdminPage({ data, currentUser, isManager, emailIntegration, onCreate, o
           style={{ ...styles.adminTab, ...(section === 'bookings' ? styles.adminTabActive : {}) }}>
           <Bookmark size={14} /> Bookings
         </button>
+        <button onClick={() => setSection('incidents')} className="salus-btn"
+          style={{ ...styles.adminTab, ...(section === 'incidents' ? styles.adminTabActive : {}) }}>
+          <AlertCircle size={14} /> Incidents
+        </button>
       </div>
+
+      {/* Manager broadcast button — visible only to managers, above section content */}
+      {isManager && (
+        <button onClick={() => setBroadcastOpen(true)} className="salus-btn" style={{
+          width: '100%', padding: '12px 16px',
+          background: 'transparent', border: `1px solid ${COLOR.bone}`,
+          borderRadius: 999,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          color: COLOR.brown, fontSize: 12, fontWeight: 500,
+          letterSpacing: '0.04em', marginBottom: 14,
+          fontFamily: 'inherit', cursor: 'pointer',
+        }}>
+          📣  Broadcast to all staff
+        </button>
+      )}
 
       {/* Section content */}
       {section === 'inbox' && (
@@ -3871,6 +3929,24 @@ function AdminPage({ data, currentUser, isManager, emailIntegration, onCreate, o
           isManager={isManager}
           onCreate={onCreate}
           onOpenBooking={onOpenBooking}
+        />
+      )}
+      {section === 'incidents' && (
+        <AdminIncidentsSection
+          data={data}
+          currentUser={currentUser}
+          isManager={isManager}
+          onReload={onReload}
+        />
+      )}
+
+      {/* Broadcast composer */}
+      {broadcastOpen && (
+        <BroadcastModal
+          currentUserId={currentUser.id}
+          sessionToken={sessionToken}
+          onClose={() => setBroadcastOpen(false)}
+          onSent={() => { setBroadcastOpen(false); onReload?.(); }}
         />
       )}
     </div>
@@ -5635,6 +5711,1071 @@ function StoreCardEditModal({ card, currentUserId, onClose, onSaved }) {
   , document.body);
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// MANAGER BROADCASTS
+// ════════════════════════════════════════════════════════════════════════
+
+// ─── BroadcastBanner — shows at top of Home for unread broadcasts ───────
+function BroadcastBanner({ broadcasts, broadcastReads, currentUser, onMarkRead }) {
+  const readIds = new Set(broadcastReads.map(r => r.broadcastId));
+  const now = Date.now();
+  const unread = broadcasts.filter(b =>
+    !readIds.has(b.id)
+    && (!b.expiresAt || b.expiresAt > now)
+  );
+
+  if (unread.length === 0) return null;
+  const latest = unread[0];  // already sorted newest-first
+
+  const isUrgent = latest.urgency === 'urgent';
+
+  return (
+    <div style={{
+      background: isUrgent ? '#fbe5dd' : COLOR.cream,
+      border: `1px solid ${isUrgent ? '#f0c6b6' : COLOR.bone}`,
+      borderLeft: `4px solid ${isUrgent ? COLOR.coral : COLOR.amber}`,
+      borderRadius: 14, padding: '14px 16px', marginBottom: 18,
+      display: 'flex', alignItems: 'flex-start', gap: 12,
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          ...TYPE.eyebrow,
+          color: isUrgent ? COLOR.coral : COLOR.amber,
+          marginBottom: 4,
+        }}>
+          {isUrgent ? 'Urgent · From the team' : 'From the team'}
+        </div>
+        <div style={{ ...TYPE.cardTitle, fontSize: 15, marginBottom: 4 }}>
+          {latest.title}
+        </div>
+        <div style={{ ...TYPE.body, color: COLOR.brown, lineHeight: 1.5, fontSize: 13 }}>
+          {latest.body}
+        </div>
+        {unread.length > 1 && (
+          <div style={{ ...TYPE.metaSmall, marginTop: 8 }}>
+            + {unread.length - 1} more
+          </div>
+        )}
+      </div>
+      <button onClick={() => onMarkRead(latest.id)} className="salus-btn" style={{
+        background: 'transparent', border: 'none', padding: 4,
+        color: COLOR.taupe, fontSize: 10, letterSpacing: '0.08em',
+        textTransform: 'uppercase', fontWeight: 500, flexShrink: 0,
+        cursor: 'pointer',
+      }}>
+        Got it
+      </button>
+    </div>
+  );
+}
+
+// ─── BroadcastModal — manager composes a broadcast ──────────────────────
+function BroadcastModal({ currentUserId, sessionToken, onClose, onSent }) {
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+  const [urgency, setUrgency] = useState('normal');
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState(null);
+
+  const send = async () => {
+    if (!title.trim() || !body.trim()) {
+      setError('Title and message are required');
+      return;
+    }
+    setSending(true);
+    setError(null);
+    try {
+      const { data, error } = await supabase.from('broadcasts')
+        .insert({
+          sender_id: currentUserId,
+          title: title.trim(),
+          body: body.trim(),
+          urgency,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+
+      // Fire push notifications
+      try {
+        const resp = await fetch('/api/send-broadcast', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${sessionToken}`,
+          },
+          body: JSON.stringify({
+            broadcastId: data.id,
+            title: data.title,
+            body: data.body,
+            urgency: data.urgency,
+          }),
+        });
+        const result = await resp.json();
+        console.log('Broadcast push result:', result);
+      } catch (pushErr) {
+        console.error('Push failed (broadcast was still saved):', pushErr);
+      }
+
+      onSent();
+    } catch (e) {
+      setError(e.message || 'Failed to send');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return createPortal(
+    <>
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.55)', zIndex: 9998,
+        touchAction: 'none',
+      }} />
+      <div style={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        background: COLOR.cream, zIndex: 9999,
+        display: 'flex', flexDirection: 'column',
+      }}>
+        <ModalHeader
+          eyebrow="Manager"
+          title="New broadcast"
+          subtitle="Push notification + banner sent to every staff member."
+          onClose={onClose}
+        />
+        <ModalBody>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <FormField label="Title">
+              <input
+                value={title}
+                onChange={e => setTitle(e.target.value)}
+                style={styles.loginInput}
+                placeholder="Studio closed today"
+                maxLength={80}
+              />
+            </FormField>
+            <FormField label="Message">
+              <textarea
+                value={body}
+                onChange={e => setBody(e.target.value)}
+                rows={5}
+                style={{ ...styles.loginInput, resize: 'vertical', minHeight: 100 }}
+                placeholder="Power outage — sorry team, no classes today. Will let you know about tomorrow as soon as I hear from the supplier."
+                maxLength={500}
+              />
+              <div style={{ ...TYPE.metaSmall, marginTop: 4, textAlign: 'right' }}>
+                {body.length}/500
+              </div>
+            </FormField>
+            <FormField label="Urgency">
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={() => setUrgency('normal')}
+                  className="salus-btn"
+                  style={{
+                    flex: 1, padding: '12px 14px',
+                    background: urgency === 'normal' ? COLOR.forest : 'transparent',
+                    color: urgency === 'normal' ? COLOR.cream : COLOR.brown,
+                    border: `1px solid ${urgency === 'normal' ? COLOR.forest : COLOR.bone}`,
+                    borderRadius: 999, fontSize: 12, fontWeight: 500,
+                    letterSpacing: '0.04em',
+                  }}
+                >
+                  Normal
+                </button>
+                <button
+                  onClick={() => setUrgency('urgent')}
+                  className="salus-btn"
+                  style={{
+                    flex: 1, padding: '12px 14px',
+                    background: urgency === 'urgent' ? COLOR.coral : 'transparent',
+                    color: urgency === 'urgent' ? COLOR.cream : COLOR.coral,
+                    border: `1px solid ${COLOR.coral}`,
+                    borderRadius: 999, fontSize: 12, fontWeight: 500,
+                    letterSpacing: '0.04em',
+                  }}
+                >
+                  Urgent
+                </button>
+              </div>
+              <div style={{ ...TYPE.metaSmall, marginTop: 6 }}>
+                Urgent broadcasts use a red banner and stay until dismissed.
+              </div>
+            </FormField>
+            {error && (
+              <div style={{
+                padding: 12, background: '#fef0ec', color: COLOR.brown,
+                borderRadius: 8, fontSize: 13,
+              }}>{error}</div>
+            )}
+          </div>
+        </ModalBody>
+        <ModalFooter>
+          <button onClick={send} disabled={sending} className="salus-btn" style={{
+            ...styles.btnPrimary, width: '100%', justifyContent: 'center',
+            padding: '14px 22px', fontSize: 14,
+          }}>
+            {sending ? 'Sending…' : 'Send to all staff'}
+          </button>
+        </ModalFooter>
+      </div>
+    </>
+  , document.body);
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// INCIDENTS — health & safety reporting
+// ════════════════════════════════════════════════════════════════════════
+
+const INCIDENT_CATEGORIES = {
+  injury:     { label: 'Injury',           icon: 'bandage' },
+  near_miss:  { label: 'Near miss',        icon: 'alert' },
+  equipment:  { label: 'Equipment fault',  icon: 'wrench' },
+  complaint:  { label: 'Member complaint', icon: 'message' },
+  other:      { label: 'Other',            icon: 'circle' },
+};
+const INCIDENT_LOCATIONS = {
+  reformer:  'Reformer studio',
+  hybrid:    'Hybrid studio',
+  reception: 'Reception',
+  changing:  'Changing rooms',
+  other:     'Other',
+};
+const INCIDENT_SEVERITY = {
+  low:    { label: 'Low',    color: COLOR.moss },
+  medium: { label: 'Medium', color: COLOR.amber },
+  high:   { label: 'High',   color: COLOR.coral },
+};
+
+// ─── ReportIncidentModal — anyone can file ──────────────────────────────
+function ReportIncidentModal({ currentUserId, onClose, onSaved }) {
+  const [category, setCategory] = useState('injury');
+  const [severity, setSeverity] = useState('low');
+  const [occurredAt, setOccurredAt] = useState(() => {
+    const d = new Date();
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0, 16);
+  });
+  const [location, setLocation] = useState('reformer');
+  const [description, setDescription] = useState('');
+  const [peopleInvolved, setPeopleInvolved] = useState('');
+  const [actionTaken, setActionTaken] = useState('');
+  const [photoUrls, setPhotoUrls] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const uploadPhoto = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      setError('Image too large (8MB max).');
+      return;
+    }
+    setError(null);
+    setUploading(true);
+    try {
+      const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+      const path = `${currentUserId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from('incidents').upload(path, file, { cacheControl: '3600', upsert: false });
+      if (upErr) throw upErr;
+      const { data: urlData } = supabase.storage.from('incidents').getPublicUrl(path);
+      setPhotoUrls([...photoUrls, urlData.publicUrl]);
+    } catch (e) {
+      setError(`Upload failed: ${e.message || e}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const save = async () => {
+    if (!description.trim()) {
+      setError('Description is required');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const { error } = await supabase.from('incidents').insert({
+        reported_by: currentUserId,
+        category, severity,
+        occurred_at: new Date(occurredAt).toISOString(),
+        location,
+        description: description.trim(),
+        people_involved: peopleInvolved.trim() || null,
+        action_taken: actionTaken.trim() || null,
+        photo_urls: photoUrls,
+      });
+      if (error) throw error;
+      onSaved();
+    } catch (e) {
+      setError(`Save failed: ${e.message || e}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return createPortal(
+    <>
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.55)', zIndex: 9998,
+        touchAction: 'none',
+      }} />
+      <div style={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        background: COLOR.cream, zIndex: 9999,
+        display: 'flex', flexDirection: 'column',
+      }}>
+        <ModalHeader
+          eyebrow="Health & safety"
+          title="Report an incident"
+          subtitle="Logs are visible to the team for learning. Manager triages."
+          onClose={onClose}
+        />
+        <ModalBody>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <FormField label="Category">
+              <select value={category} onChange={e => setCategory(e.target.value)} style={styles.loginInput}>
+                {Object.entries(INCIDENT_CATEGORIES).map(([k, v]) => (
+                  <option key={k} value={k}>{v.label}</option>
+                ))}
+              </select>
+            </FormField>
+
+            <FormField label="Severity">
+              <div style={{ display: 'flex', gap: 8 }}>
+                {Object.entries(INCIDENT_SEVERITY).map(([k, v]) => (
+                  <button
+                    key={k}
+                    onClick={() => setSeverity(k)}
+                    className="salus-btn"
+                    style={{
+                      flex: 1, padding: '10px 12px',
+                      background: severity === k ? v.color : 'transparent',
+                      color: severity === k ? COLOR.cream : v.color,
+                      border: `1px solid ${v.color}`,
+                      borderRadius: 999, fontSize: 11, fontWeight: 500,
+                      letterSpacing: '0.04em', textTransform: 'uppercase',
+                    }}
+                  >
+                    {v.label}
+                  </button>
+                ))}
+              </div>
+            </FormField>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <FormField label="When">
+                <input
+                  type="datetime-local"
+                  value={occurredAt}
+                  onChange={e => setOccurredAt(e.target.value)}
+                  style={styles.loginInput}
+                />
+              </FormField>
+              <FormField label="Where">
+                <select value={location} onChange={e => setLocation(e.target.value)} style={styles.loginInput}>
+                  {Object.entries(INCIDENT_LOCATIONS).map(([k, v]) => (
+                    <option key={k} value={k}>{v}</option>
+                  ))}
+                </select>
+              </FormField>
+            </div>
+
+            <FormField label="What happened">
+              <textarea
+                value={description}
+                onChange={e => setDescription(e.target.value)}
+                rows={4}
+                style={{ ...styles.loginInput, resize: 'vertical' }}
+                placeholder="A member slipped on the reformer mat exiting class…"
+              />
+            </FormField>
+
+            <FormField label="People involved (optional)">
+              <input
+                value={peopleInvolved}
+                onChange={e => setPeopleInvolved(e.target.value)}
+                style={styles.loginInput}
+                placeholder="Member: Jane Smith. Staff present: Sarah"
+              />
+            </FormField>
+
+            <FormField label="Action taken (optional)">
+              <textarea
+                value={actionTaken}
+                onChange={e => setActionTaken(e.target.value)}
+                rows={2}
+                style={{ ...styles.loginInput, resize: 'vertical' }}
+                placeholder="Applied first aid, called manager, advised member to see GP"
+              />
+            </FormField>
+
+            <FormField label="Photos (optional)">
+              {photoUrls.length > 0 && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: 8, marginBottom: 8 }}>
+                  {photoUrls.map((url, idx) => (
+                    <div key={idx} style={{
+                      aspectRatio: '1 / 1', borderRadius: 8,
+                      backgroundImage: `url(${url})`,
+                      backgroundSize: 'cover', backgroundPosition: 'center',
+                      position: 'relative',
+                    }}>
+                      <button onClick={() => setPhotoUrls(photoUrls.filter((_, i) => i !== idx))}
+                        className="salus-btn" style={{
+                          position: 'absolute', top: 4, right: 4,
+                          width: 22, height: 22, borderRadius: '50%',
+                          background: 'rgba(26, 38, 32, 0.7)', color: COLOR.cream,
+                          border: 'none', fontSize: 13, fontWeight: 300,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          cursor: 'pointer', padding: 0,
+                        }}>×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <label style={{
+                display: 'inline-block', padding: '10px 16px',
+                background: 'transparent', border: `1px dashed ${COLOR.shell}`,
+                borderRadius: 999, cursor: uploading ? 'wait' : 'pointer',
+                color: COLOR.brown, fontSize: 12, letterSpacing: '0.05em',
+                textTransform: 'uppercase', fontWeight: 500,
+              }}>
+                {uploading ? 'Uploading…' : '+ Add photo'}
+                <input type="file" accept="image/*" capture="environment"
+                  onChange={uploadPhoto} disabled={uploading} style={{ display: 'none' }} />
+              </label>
+            </FormField>
+
+            {error && (
+              <div style={{
+                padding: 12, background: '#fef0ec', color: COLOR.brown,
+                borderRadius: 8, fontSize: 13,
+              }}>{error}</div>
+            )}
+          </div>
+        </ModalBody>
+        <ModalFooter>
+          <button onClick={save} disabled={saving || uploading} className="salus-btn" style={{
+            ...styles.btnPrimary, width: '100%', justifyContent: 'center',
+            padding: '14px 22px', fontSize: 14,
+          }}>
+            {saving ? 'Saving…' : 'Submit report'}
+          </button>
+        </ModalFooter>
+      </div>
+    </>
+  , document.body);
+}
+
+// ─── AdminIncidentsSection — list + triage ──────────────────────────────
+function AdminIncidentsSection({ data, currentUser, isManager, onReload }) {
+  const [filter, setFilter] = useState('open');
+  const [reportOpen, setReportOpen] = useState(false);
+  const [detail, setDetail] = useState(null);
+
+  const incidents = data.incidents || [];
+  const visible = incidents.filter(i => {
+    if (filter === 'open')     return i.status === 'open';
+    if (filter === 'reviewed') return i.status === 'reviewed';
+    if (filter === 'closed')   return i.status === 'closed';
+    return true;
+  });
+
+  const userById = Object.fromEntries(data.users.map(u => [u.id, u]));
+  const openCount = incidents.filter(i => i.status === 'open').length;
+
+  return (
+    <>
+      <PageHeader eyebrow="Health & safety" title="Incidents" compact />
+
+      {/* Report button — anyone can use */}
+      <button onClick={() => setReportOpen(true)} className="salus-btn" style={{
+        ...styles.btnPrimary, width: '100%', justifyContent: 'center',
+        padding: '14px 22px', fontSize: 14, marginBottom: 18,
+      }}>
+        + Report an incident
+      </button>
+
+      {/* Filter tabs */}
+      <div style={{
+        display: 'flex', gap: 22, padding: '0 4px 8px',
+        borderBottom: `1px solid ${COLOR.bone}`, marginBottom: 16,
+      }}>
+        {[
+          ['open', `Open ${openCount > 0 ? openCount : ''}`],
+          ['reviewed', 'Reviewed'],
+          ['closed', 'Closed'],
+          ['all', 'All'],
+        ].map(([key, label]) => (
+          <button key={key}
+            onClick={() => setFilter(key)}
+            className="salus-btn"
+            style={{
+              padding: '6px 0', background: 'transparent', border: 'none',
+              borderBottom: filter === key ? `1.5px solid ${COLOR.forest}` : '1.5px solid transparent',
+              ...(filter === key ? TYPE.capsLabelActive : TYPE.capsLabel),
+              fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap',
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {visible.length === 0 ? (
+        <EmptyState>No incidents to show.</EmptyState>
+      ) : (
+        visible.map(inc => {
+          const cat = INCIDENT_CATEGORIES[inc.category] || {};
+          const sev = INCIDENT_SEVERITY[inc.severity] || {};
+          const reporter = userById[inc.reportedBy];
+          return (
+            <button key={inc.id} onClick={() => setDetail(inc)} className="salus-btn"
+              style={{
+                width: '100%', textAlign: 'left',
+                padding: '14px 4px', borderBottom: `1px solid ${COLOR.bone}`,
+                background: 'transparent', border: 'none', borderBottomLeftRadius: 0, borderBottomRightRadius: 0,
+                fontFamily: 'inherit', cursor: 'pointer',
+                display: 'flex', alignItems: 'flex-start', gap: 12,
+                position: 'relative',
+              }}>
+              <span style={{
+                position: 'absolute', left: -2, top: 14, bottom: 14, width: 3,
+                background: sev.color, borderRadius: 1,
+              }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 3, flexWrap: 'wrap' }}>
+                  <span style={{ ...TYPE.itemTitle }}>{cat.label}</span>
+                  <span style={{ ...TYPE.capsLabel, color: sev.color }}>{sev.label}</span>
+                </div>
+                <div style={{ ...TYPE.body, color: COLOR.brown, fontSize: 13, lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                  {inc.description}
+                </div>
+                <div style={{ ...TYPE.metaSmall, marginTop: 6 }}>
+                  {new Date(inc.occurredAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                  {reporter && ` · ${reporter.name?.split(' ')[0]}`}
+                  {INCIDENT_LOCATIONS[inc.location] && ` · ${INCIDENT_LOCATIONS[inc.location]}`}
+                  {inc.photoUrls?.length > 0 && ` · ${inc.photoUrls.length} photo${inc.photoUrls.length !== 1 ? 's' : ''}`}
+                </div>
+              </div>
+            </button>
+          );
+        })
+      )}
+
+      {reportOpen && (
+        <ReportIncidentModal
+          currentUserId={currentUser.id}
+          onClose={() => setReportOpen(false)}
+          onSaved={() => { setReportOpen(false); onReload?.(); }}
+        />
+      )}
+      {detail && (
+        <IncidentDetailModal
+          incident={detail}
+          data={data}
+          isManager={isManager}
+          onClose={() => setDetail(null)}
+          onUpdated={() => { setDetail(null); onReload?.(); }}
+        />
+      )}
+    </>
+  );
+}
+
+// ─── IncidentDetailModal — manager triages ──────────────────────────────
+function IncidentDetailModal({ incident, data, isManager, onClose, onUpdated }) {
+  const [status, setStatus] = useState(incident.status);
+  const [notes, setNotes] = useState(incident.managerNotes || '');
+  const [saving, setSaving] = useState(false);
+  const userById = Object.fromEntries(data.users.map(u => [u.id, u]));
+  const reporter = userById[incident.reportedBy];
+  const cat = INCIDENT_CATEGORIES[incident.category] || {};
+  const sev = INCIDENT_SEVERITY[incident.severity] || {};
+
+  const update = async (newStatus) => {
+    setSaving(true);
+    try {
+      const { error } = await supabase.from('incidents').update({
+        status: newStatus,
+        manager_notes: notes.trim() || null,
+        updated_at: new Date().toISOString(),
+      }).eq('id', incident.id);
+      if (error) throw error;
+      onUpdated();
+    } catch (e) {
+      alert('Update failed: ' + (e.message || e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return createPortal(
+    <>
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.55)', zIndex: 9998,
+        touchAction: 'none',
+      }} />
+      <div style={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        background: COLOR.cream, zIndex: 9999,
+        display: 'flex', flexDirection: 'column',
+      }}>
+        <ModalHeader
+          eyebrow={`${cat.label} · ${sev.label}`}
+          title={incident.description.slice(0, 60) + (incident.description.length > 60 ? '…' : '')}
+          subtitle={`Reported by ${reporter?.name || 'unknown'} · ${new Date(incident.occurredAt).toLocaleString('en-GB')}`}
+          onClose={onClose}
+        />
+        <ModalBody>
+          <SectionDivider>Description</SectionDivider>
+          <div style={{ ...TYPE.body, color: COLOR.brown, lineHeight: 1.6, marginBottom: 14 }}>
+            {incident.description}
+          </div>
+
+          {incident.peopleInvolved && (
+            <>
+              <SectionDivider>People involved</SectionDivider>
+              <div style={{ ...TYPE.body, color: COLOR.brown, marginBottom: 14 }}>
+                {incident.peopleInvolved}
+              </div>
+            </>
+          )}
+
+          {incident.actionTaken && (
+            <>
+              <SectionDivider>Action taken at the time</SectionDivider>
+              <div style={{ ...TYPE.body, color: COLOR.brown, lineHeight: 1.6, marginBottom: 14 }}>
+                {incident.actionTaken}
+              </div>
+            </>
+          )}
+
+          {incident.photoUrls?.length > 0 && (
+            <>
+              <SectionDivider>Photos</SectionDivider>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 8, marginBottom: 14 }}>
+                {incident.photoUrls.map((url, idx) => (
+                  <a key={idx} href={url} target="_blank" rel="noopener noreferrer" style={{
+                    aspectRatio: '1 / 1', borderRadius: 8,
+                    backgroundImage: `url(${url})`,
+                    backgroundSize: 'cover', backgroundPosition: 'center',
+                    display: 'block',
+                  }} />
+                ))}
+              </div>
+            </>
+          )}
+
+          {isManager && (
+            <>
+              <SectionDivider>Manager notes</SectionDivider>
+              <textarea
+                value={notes}
+                onChange={e => setNotes(e.target.value)}
+                rows={3}
+                style={{ ...styles.loginInput, resize: 'vertical' }}
+                placeholder="Investigation notes, follow-up actions, etc."
+              />
+            </>
+          )}
+        </ModalBody>
+        {isManager && (
+          <ModalFooter>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {status === 'open' && (
+                <button onClick={() => update('reviewed')} disabled={saving} className="salus-btn" style={{
+                  ...styles.btnSecondary, flex: 1, padding: '12px 16px', fontSize: 13,
+                }}>
+                  Mark reviewed
+                </button>
+              )}
+              <button onClick={() => update('closed')} disabled={saving} className="salus-btn" style={{
+                ...styles.btnPrimary, flex: 1, padding: '12px 16px', fontSize: 13,
+              }}>
+                Close incident
+              </button>
+            </div>
+          </ModalFooter>
+        )}
+      </div>
+    </>
+  , document.body);
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// ONBOARDING FLOW — new hire wizard
+// ════════════════════════════════════════════════════════════════════════
+
+const ONBOARDING_STEPS = [
+  { key: 'welcome',   label: 'Welcome',           heading: 'Welcome to Salus House' },
+  { key: 'personal',  label: 'Personal details',  heading: 'A bit about you' },
+  { key: 'emergency', label: 'Emergency contact', heading: 'In case we need to reach someone' },
+  { key: 'bank',      label: 'Bank details',      heading: 'For payroll' },
+  { key: 'rtw',       label: 'Right to work',     heading: 'Right-to-work documents' },
+  { key: 'contract',  label: 'Contract',          heading: 'Your employment contract' },
+  { key: 'policies',  label: 'Policies',          heading: 'Workplace policies' },
+  { key: 'done',      label: 'All set',           heading: "You're in" },
+];
+
+function isOnboardingComplete(user) {
+  return !!user?.onboardingCompletedAt;
+}
+
+// ─── OnboardingScreen — full-screen wizard ──────────────────────────────
+function OnboardingScreen({ currentUser, onComplete }) {
+  const [stepIdx, setStepIdx] = useState(0);
+  const step = ONBOARDING_STEPS[stepIdx];
+  const isFirst = stepIdx === 0;
+  const isLast = stepIdx === ONBOARDING_STEPS.length - 1;
+
+  // Form state — pre-fill from profile if already set
+  const [phone, setPhone] = useState(currentUser.phone || '');
+  const [dob, setDob] = useState(currentUser.dateOfBirth || '');
+  const [ecName, setEcName] = useState(currentUser.emergencyContactName || '');
+  const [ecPhone, setEcPhone] = useState(currentUser.emergencyContactPhone || '');
+  const [ecRel, setEcRel] = useState(currentUser.emergencyContactRelation || '');
+  const [bankName, setBankName] = useState(currentUser.bankAccountName || '');
+  const [sortCode, setSortCode] = useState(currentUser.bankSortCode || '');
+  const [accountNum, setAccountNum] = useState(currentUser.bankAccountNumber || '');
+  const [rtwUrl, setRtwUrl] = useState(currentUser.rightToWorkDocUrl || '');
+  const [rtwPath, setRtwPath] = useState(currentUser.rightToWorkDocPath || '');
+  const [contractAck, setContractAck] = useState(!!currentUser.contractSignedAt);
+  const [policiesAck, setPoliciesAck] = useState(!!currentUser.policiesAcknowledgedAt);
+  const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Mark onboarding as started on first view
+  useEffect(() => {
+    if (!currentUser.onboardingStartedAt) {
+      supabase.from('profiles').update({
+        onboarding_started_at: new Date().toISOString(),
+      }).eq('id', currentUser.id).then(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const saveCurrentStep = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const patch = { updated_at: new Date().toISOString() };
+      if (step.key === 'personal') {
+        patch.phone = phone.trim() || null;
+        patch.date_of_birth = dob || null;
+      } else if (step.key === 'emergency') {
+        patch.emergency_contact_name = ecName.trim() || null;
+        patch.emergency_contact_phone = ecPhone.trim() || null;
+        patch.emergency_contact_relation = ecRel.trim() || null;
+      } else if (step.key === 'bank') {
+        patch.bank_account_name = bankName.trim() || null;
+        patch.bank_sort_code = sortCode.trim() || null;
+        patch.bank_account_number = accountNum.trim() || null;
+      } else if (step.key === 'rtw') {
+        patch.right_to_work_doc_url = rtwUrl || null;
+        patch.right_to_work_doc_path = rtwPath || null;
+      } else if (step.key === 'contract') {
+        if (contractAck) patch.contract_signed_at = new Date().toISOString();
+      } else if (step.key === 'policies') {
+        if (policiesAck) patch.policies_acknowledged_at = new Date().toISOString();
+      }
+
+      if (Object.keys(patch).length > 1) {
+        const { error } = await supabase.from('profiles').update(patch).eq('id', currentUser.id);
+        if (error) throw error;
+      }
+
+      // Log step completion
+      if (step.key !== 'welcome' && step.key !== 'done') {
+        await supabase.from('onboarding_steps')
+          .upsert({ user_id: currentUser.id, step_key: step.key, completed_at: new Date().toISOString() });
+      }
+
+      // Final step: mark completed
+      if (isLast) {
+        await supabase.from('profiles').update({
+          onboarding_completed_at: new Date().toISOString(),
+        }).eq('id', currentUser.id);
+        onComplete();
+        return;
+      }
+
+      setStepIdx(stepIdx + 1);
+    } catch (e) {
+      setError(e.message || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const uploadRtw = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      setError('File too large (8MB max).');
+      return;
+    }
+    setError(null);
+    setUploading(true);
+    try {
+      const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+      const path = `${currentUser.id}/${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from('rtw-docs').upload(path, file, { cacheControl: '3600', upsert: false });
+      if (upErr) throw upErr;
+      const { data: urlData } = supabase.storage.from('rtw-docs').getPublicUrl(path);
+      setRtwUrl(urlData.publicUrl);
+      setRtwPath(path);
+    } catch (e) {
+      setError(`Upload failed: ${e.message || e}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: COLOR.cream, zIndex: 50,
+      display: 'flex', flexDirection: 'column',
+      fontFamily: COLOR.sans,
+    }}>
+      {/* Header */}
+      <div style={{
+        padding: '14px 22px',
+        paddingTop: 'calc(14px + env(safe-area-inset-top, 0px))',
+        borderBottom: `1px solid ${COLOR.bone}`, flexShrink: 0,
+      }}>
+        <div style={{ ...TYPE.eyebrow, marginBottom: 4 }}>
+          Step {stepIdx + 1} of {ONBOARDING_STEPS.length}
+        </div>
+        <div style={{ ...TYPE.modalTitle }}>{step.heading}</div>
+        {/* Progress dots */}
+        <div style={{ display: 'flex', gap: 4, marginTop: 12 }}>
+          {ONBOARDING_STEPS.map((_, i) => (
+            <div key={i} style={{
+              flex: 1, height: 3, borderRadius: 2,
+              background: i <= stepIdx ? COLOR.forest : COLOR.bone,
+            }} />
+          ))}
+        </div>
+      </div>
+
+      {/* Body */}
+      <div style={{
+        flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch',
+        overscrollBehavior: 'contain',
+        padding: '24px 22px',
+      }}>
+        {step.key === 'welcome' && (
+          <div style={{ textAlign: 'center', paddingTop: 20 }}>
+            <div style={{ ...TYPE.emptyState, fontSize: 18, color: COLOR.brown, marginBottom: 18 }}>
+              Welcome, {currentUser.name?.split(' ')[0]}.
+            </div>
+            <div style={{ ...TYPE.body, color: COLOR.brown, lineHeight: 1.7, maxWidth: 360, margin: '0 auto' }}>
+              We've got a few things to set up before you're ready to teach.
+              It takes about five minutes — you can pause and come back at any point.
+            </div>
+            <div style={{ ...TYPE.metaSmall, marginTop: 24, maxWidth: 320, margin: '24px auto 0' }}>
+              We'll collect personal details, your bank info for payroll, and ask
+              you to acknowledge the studio policies. Anything you submit is private
+              to the manager.
+            </div>
+          </div>
+        )}
+
+        {step.key === 'personal' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <FormField label="Mobile number">
+              <input value={phone} onChange={e => setPhone(e.target.value)}
+                style={styles.loginInput} placeholder="07…" inputMode="tel" />
+            </FormField>
+            <FormField label="Date of birth">
+              <input type="date" value={dob} onChange={e => setDob(e.target.value)}
+                style={styles.loginInput} />
+            </FormField>
+          </div>
+        )}
+
+        {step.key === 'emergency' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <FormField label="Name">
+              <input value={ecName} onChange={e => setEcName(e.target.value)}
+                style={styles.loginInput} placeholder="Jane Doe" />
+            </FormField>
+            <FormField label="Phone">
+              <input value={ecPhone} onChange={e => setEcPhone(e.target.value)}
+                style={styles.loginInput} placeholder="07…" inputMode="tel" />
+            </FormField>
+            <FormField label="Relationship">
+              <input value={ecRel} onChange={e => setEcRel(e.target.value)}
+                style={styles.loginInput} placeholder="Partner / Parent / Friend" />
+            </FormField>
+          </div>
+        )}
+
+        {step.key === 'bank' && (
+          <>
+            <div style={{ ...TYPE.metaSmall, marginBottom: 14, lineHeight: 1.5 }}>
+              For monthly payroll. UK accounts only. Stored encrypted. Manager-only access.
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <FormField label="Account name">
+                <input value={bankName} onChange={e => setBankName(e.target.value)}
+                  style={styles.loginInput} placeholder="Your name as it appears on the account" />
+              </FormField>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 12 }}>
+                <FormField label="Sort code">
+                  <input value={sortCode} onChange={e => setSortCode(e.target.value)}
+                    style={styles.loginInput} placeholder="00-00-00" inputMode="numeric" maxLength={8} />
+                </FormField>
+                <FormField label="Account number">
+                  <input value={accountNum} onChange={e => setAccountNum(e.target.value)}
+                    style={styles.loginInput} placeholder="12345678" inputMode="numeric" maxLength={8} />
+                </FormField>
+              </div>
+            </div>
+          </>
+        )}
+
+        {step.key === 'rtw' && (
+          <>
+            <div style={{ ...TYPE.metaSmall, marginBottom: 14, lineHeight: 1.5 }}>
+              UK law requires us to check your right to work. A clear photo of your passport, BRP, or share code from gov.uk is fine.
+            </div>
+            {rtwUrl ? (
+              <div style={{ marginBottom: 14 }}>
+                <a href={rtwUrl} target="_blank" rel="noopener noreferrer" style={{
+                  display: 'block', padding: 16,
+                  background: COLOR.sand, border: `1px solid ${COLOR.bone}`,
+                  borderRadius: 12, color: COLOR.forest, textDecoration: 'none',
+                  fontSize: 13,
+                }}>
+                  ✓ Uploaded — tap to view
+                </a>
+                <button onClick={() => { setRtwUrl(''); setRtwPath(''); }} className="salus-btn" style={{
+                  background: 'transparent', border: 'none', padding: '8px 0',
+                  color: COLOR.coral, fontSize: 11, letterSpacing: '0.08em',
+                  textTransform: 'uppercase', fontWeight: 500, marginTop: 8,
+                }}>
+                  Replace
+                </button>
+              </div>
+            ) : (
+              <label style={{
+                display: 'block', padding: '32px 16px',
+                border: `1px dashed ${COLOR.shell}`, borderRadius: 14,
+                background: 'transparent', textAlign: 'center', cursor: 'pointer',
+              }}>
+                <div style={TYPE.emptyState}>
+                  {uploading ? 'Uploading…' : 'Tap to upload document'}
+                </div>
+                <div style={{ ...TYPE.metaSmall, marginTop: 8 }}>
+                  Photo or PDF · Up to 8MB
+                </div>
+                <input type="file" accept="image/*,application/pdf" onChange={uploadRtw}
+                  style={{ display: 'none' }} disabled={uploading} />
+              </label>
+            )}
+          </>
+        )}
+
+        {step.key === 'contract' && (
+          <>
+            <div style={{
+              padding: 18, background: COLOR.sand, borderRadius: 12,
+              ...TYPE.body, color: COLOR.brown, lineHeight: 1.7, marginBottom: 18,
+            }}>
+              Your employment contract has been emailed to you separately. Please read it carefully
+              and acknowledge below. If you have any questions before signing, speak to Luke directly.
+            </div>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+              <input type="checkbox" checked={contractAck} onChange={e => setContractAck(e.target.checked)}
+                style={{ marginTop: 3, accentColor: COLOR.forest }} />
+              <span style={{ ...TYPE.body, lineHeight: 1.5 }}>
+                I have read and agree to the employment contract sent to me.
+              </span>
+            </label>
+          </>
+        )}
+
+        {step.key === 'policies' && (
+          <>
+            <div style={{ ...TYPE.metaSmall, marginBottom: 14, lineHeight: 1.5 }}>
+              These cover how we work together — please skim before acknowledging.
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
+              {[
+                'Code of conduct',
+                'Health & safety policy',
+                'Data protection (GDPR)',
+                'Uniform & presentation',
+                'Cover & swap policy',
+              ].map(label => (
+                <div key={label} style={{
+                  padding: '12px 14px', background: COLOR.sand, borderRadius: 10,
+                  ...TYPE.body, color: COLOR.brown, fontSize: 13,
+                }}>{label}</div>
+              ))}
+            </div>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+              <input type="checkbox" checked={policiesAck} onChange={e => setPoliciesAck(e.target.checked)}
+                style={{ marginTop: 3, accentColor: COLOR.forest }} />
+              <span style={{ ...TYPE.body, lineHeight: 1.5 }}>
+                I have read and agree to abide by the workplace policies above.
+              </span>
+            </label>
+          </>
+        )}
+
+        {step.key === 'done' && (
+          <div style={{ textAlign: 'center', paddingTop: 20 }}>
+            <div style={{ ...TYPE.emptyState, fontSize: 22, color: COLOR.forest, marginBottom: 18 }}>
+              You're all set.
+            </div>
+            <div style={{ ...TYPE.body, color: COLOR.brown, lineHeight: 1.7, maxWidth: 320, margin: '0 auto' }}>
+              Welcome to the team, {currentUser.name?.split(' ')[0]}. Tap Finish below and you'll land on your home page.
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div style={{
+            marginTop: 16, padding: 12, background: '#fef0ec', color: COLOR.brown,
+            borderRadius: 8, fontSize: 13,
+          }}>{error}</div>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div style={{
+        padding: '14px 22px',
+        paddingBottom: 'calc(14px + env(safe-area-inset-bottom, 0px))',
+        borderTop: `1px solid ${COLOR.bone}`, flexShrink: 0,
+        display: 'flex', gap: 10,
+      }}>
+        {!isFirst && (
+          <button onClick={() => setStepIdx(stepIdx - 1)} className="salus-btn" style={{
+            ...styles.btnSecondary, padding: '14px 22px', fontSize: 14,
+          }}>
+            Back
+          </button>
+        )}
+        <button onClick={saveCurrentStep} disabled={saving || uploading} className="salus-btn" style={{
+          ...styles.btnPrimary, flex: 1, justifyContent: 'center',
+          padding: '14px 22px', fontSize: 14,
+        }}>
+          {saving ? 'Saving…' :
+           isLast ? 'Finish' :
+           isFirst ? 'Get started' :
+           'Continue'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function StockItemRow({ item, busy, isManager, onDecrement, onIncrement, onEdit }) {
   const isLow = item.currentQty <= item.lowThreshold;
   const isOut = item.currentQty === 0;
@@ -6972,7 +8113,7 @@ function MonthView({ classes, coverRequests, currentUser, onDayClick }) {
 // HOME — cover-first dashboard, the new app landing screen
 // ──────────────────────────────────────────────────────────────────────────────
 
-function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestCover, onHireStudio, onClaim, onExpressInterest, onViewAllCover, onViewChat, onCreateTask, onOpenTask, onOpenAllTasks, onOpenTour, onCreateMaintenance, onOpenMaintenance, onCreateFeedback, onOpenFeedback }) {
+function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestCover, onHireStudio, onClaim, onExpressInterest, onViewAllCover, onViewChat, onCreateTask, onOpenTask, onOpenAllTasks, onOpenTour, onCreateMaintenance, onOpenMaintenance, onCreateFeedback, onOpenFeedback, onMarkBroadcastRead }) {
   const now = new Date();
   const hour = now.getHours();
   const greeting = hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening';
@@ -7053,6 +8194,14 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
           </div>
         </div>
       </div>
+
+      {/* Manager broadcasts — urgent comms */}
+      <BroadcastBanner
+        broadcasts={data.broadcasts || []}
+        broadcastReads={data.broadcastReads || []}
+        currentUser={currentUser}
+        onMarkRead={onMarkBroadcastRead}
+      />
 
       {/* Brand photo — rotates each session */}
       <div style={{
