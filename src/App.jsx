@@ -7208,9 +7208,9 @@ function LoadingLogo() {
 
 // ─── PageHeader — reusable editorial header with optional photo ───
 // Used at the top of major sections (Schedule, Admin sub-sections, etc).
-function PageHeader({ eyebrow, title, subtitle, photo }) {
+function PageHeader({ eyebrow, title, subtitle, photo, compact }) {
   return (
-    <div style={{ padding: '8px 0 18px' }}>
+    <div style={{ padding: compact ? '4px 0 10px' : '8px 0 18px' }}>
       {photo && (
         <div style={{
           height: 120, borderRadius: 18, overflow: 'hidden',
@@ -7226,13 +7226,13 @@ function PageHeader({ eyebrow, title, subtitle, photo }) {
         </div>
       )}
       {eyebrow && (
-        <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 6 }}>
+        <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: compact ? 4 : 6 }}>
           {eyebrow}
         </div>
       )}
       <div style={{
         fontFamily: '"Playfair Display", serif',
-        fontSize: 30, fontWeight: 400, color: '#1a2620',
+        fontSize: compact ? 22 : 30, fontWeight: 400, color: '#1a2620',
         lineHeight: 1.1, letterSpacing: '-0.015em',
       }}>
         {title}
@@ -7369,10 +7369,11 @@ function ScheduleView({
 
   return (
     <>
-      {/* Editorial page header */}
+      {/* Editorial page header — compact since this is a frequently-used tab */}
       <PageHeader
         eyebrow="The week"
         title="Schedule"
+        compact
       />
 
       {canSeeBoth && (
@@ -7443,7 +7444,7 @@ function FOHSchedule({ data, currentUser, isManager, isMobile, onShiftClick }) {
         onClick={() => onShiftClick(s.id)}
         timeLeft={s.shiftLabel}
         timeBottom={`${s.startTime}–${s.endTime}`}
-        title="FOH shift"
+        title="Front of House"
         subtitle={null}
         person={staff}
         needsCover={!staff}
@@ -7841,8 +7842,8 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
       )}
 
       {isManager && (
-        <button onClick={onAddClass} className="salus-btn" style={styles.scheduleFab}>
-          <Plus size={16} /> Add class
+        <button onClick={onAddClass} className="salus-btn" style={styles.scheduleFab} aria-label="Add class">
+          <Plus size={22} />
         </button>
       )}
     </div>
@@ -7897,27 +7898,55 @@ function DayView({ items, allItems, dayOffset, setDayOffset, getDate, getTime, i
 
   return (
     <>
-      <div style={styles.weekNav}>
+      {/* Editorial day nav */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 14,
+        padding: '14px 0 18px', justifyContent: 'space-between',
+      }}>
         <button onClick={() => canBack && setDayOffset(d => d - 1)}
           disabled={!canBack} className="salus-btn"
-          style={{ ...styles.weekNavBtn, opacity: canBack ? 1 : 0.3 }}>
-          <ChevronLeft size={18} />
+          style={{
+            background: 'transparent', border: 'none', padding: 4,
+            color: canBack ? '#7a8270' : '#d4cdb8',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+          <ChevronLeft size={20} />
         </button>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <div style={styles.weekNavLabel}>{headerLabel}</div>
+        <div style={{ flex: 1, textAlign: 'center', minWidth: 0 }}>
+          <div style={{
+            fontFamily: '"Playfair Display", serif',
+            fontSize: 18, fontWeight: 400, color: '#1a2620',
+            letterSpacing: '-0.005em', lineHeight: 1.1,
+            display: 'inline-flex', alignItems: 'baseline', gap: 8,
+          }}>
+            <span>{headerLabel}</span>
+            {isToday && (
+              <span style={{
+                fontSize: 10, color: '#c8442a', fontWeight: 600,
+                textTransform: 'uppercase', letterSpacing: 2,
+              }}>Today</span>
+            )}
+          </div>
           {!isToday && (
-            <button onClick={() => setDayOffset(0)} className="salus-btn" style={styles.weekTodayLink}>
-              Jump to today
-            </button>
-          )}
-          {isToday && (
-            <span style={{ ...styles.fohTodayBadge, marginTop: 2 }}>Today</span>
+            <div>
+              <button onClick={() => setDayOffset(0)} className="salus-btn" style={{
+                background: 'transparent', border: 'none', padding: '4px 0 0',
+                color: '#a59478', fontSize: 10, letterSpacing: '0.12em',
+                textTransform: 'uppercase', fontWeight: 500, cursor: 'pointer',
+              }}>
+                Back to today
+              </button>
+            </div>
           )}
         </div>
         <button onClick={() => canFwd && setDayOffset(d => d + 1)}
           disabled={!canFwd} className="salus-btn"
-          style={{ ...styles.weekNavBtn, opacity: canFwd ? 1 : 0.3 }}>
-          <ChevronRight size={18} />
+          style={{
+            background: 'transparent', border: 'none', padding: 4,
+            color: canFwd ? '#7a8270' : '#d4cdb8',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+          <ChevronRight size={20} />
         </button>
       </div>
 
@@ -7925,16 +7954,19 @@ function DayView({ items, allItems, dayOffset, setDayOffset, getDate, getTime, i
 
       <ScheduleFilterRow filter={filter} setFilter={setFilter} isManager={isManager} />
 
-      <div style={{ padding: '12px 14px 0' }}>
-        <div style={styles.fohShiftList}>
-          {dayItems.length === 0 ? (
-            <div style={{ padding: 40, textAlign: 'center', color: '#7a8270' }}>
+      <div>
+        {dayItems.length === 0 ? (
+          <div style={{ padding: '60px 20px', textAlign: 'center' }}>
+            <div style={{
+              fontFamily: '"Playfair Display", serif', fontSize: 18, color: '#5c4a38',
+              fontStyle: 'italic', letterSpacing: '-0.005em',
+            }}>
               Nothing on this day.
             </div>
-          ) : (
-            dayItems.map(item => renderCard(item))
-          )}
-        </div>
+          </div>
+        ) : (
+          dayItems.map(item => renderCard(item))
+        )}
       </div>
     </>
   );
@@ -8048,17 +8080,36 @@ function MonthGrid({ items, monthOffset, setMonthOffset, getDate, isCover, onDay
 
   return (
     <>
-      <div style={styles.weekNav}>
+      {/* Editorial month nav — chevrons flat, no boxes */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 14,
+        padding: '14px 0 18px', justifyContent: 'space-between',
+      }}>
         <button onClick={() => canBack && setMonthOffset(m => m - 1)}
           disabled={!canBack} className="salus-btn"
-          style={{ ...styles.weekNavBtn, opacity: canBack ? 1 : 0.3 }}>
-          <ChevronLeft size={18} />
+          style={{
+            background: 'transparent', border: 'none', padding: 4,
+            color: canBack ? '#7a8270' : '#d4cdb8',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+          <ChevronLeft size={20} />
         </button>
-        <div style={styles.weekNavLabel}>{monthLabel}</div>
+        <div style={{
+          flex: 1, textAlign: 'center',
+          fontFamily: '"Playfair Display", serif',
+          fontSize: 18, fontWeight: 400, color: '#1a2620',
+          letterSpacing: '-0.005em', lineHeight: 1.1,
+        }}>
+          {monthLabel}
+        </div>
         <button onClick={() => canFwd && setMonthOffset(m => m + 1)}
           disabled={!canFwd} className="salus-btn"
-          style={{ ...styles.weekNavBtn, opacity: canFwd ? 1 : 0.3 }}>
-          <ChevronRight size={18} />
+          style={{
+            background: 'transparent', border: 'none', padding: 4,
+            color: canFwd ? '#7a8270' : '#d4cdb8',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+          <ChevronRight size={20} />
         </button>
       </div>
 
@@ -8080,28 +8131,24 @@ function MonthGrid({ items, monthOffset, setMonthOffset, getDate, isCover, onDay
               key={i}
               onClick={() => onDayTap(cell.iso)}
               className="salus-btn"
-              style={{
-                ...styles.monthGridCell,
-                ...(isToday ? styles.monthGridCellToday : {}),
-                ...(info?.cover > 0 ? styles.monthGridCellCover : {}),
-              }}
+              style={styles.monthGridCell}
             >
               <span style={{
                 ...styles.monthGridCellDate,
-                ...(isToday ? { color: '#fff', fontWeight: 700 } : {}),
+                ...(isToday ? {
+                  background: '#1a2620', color: '#fffdf7', fontWeight: 500,
+                } : {}),
               }}>
                 {cell.date.getDate()}
               </span>
-              {info && (
-                <div style={styles.monthGridDots}>
-                  {info.cover > 0 && (
-                    <span style={{ ...styles.monthGridDot, background: '#c8442a' }} />
-                  )}
-                  {info.count > info.cover && (
-                    <span style={{ ...styles.monthGridDot, background: isToday ? '#fff' : '#5c4a38' }} />
-                  )}
-                </div>
-              )}
+              <div style={styles.monthGridDots}>
+                {info?.cover > 0 && (
+                  <span style={{ ...styles.monthGridDot, background: '#c8442a' }} />
+                )}
+                {info && info.count > info.cover && (
+                  <span style={{ ...styles.monthGridDot, background: '#a59478' }} />
+                )}
+              </div>
             </button>
           );
         })}
@@ -8113,7 +8160,7 @@ function MonthGrid({ items, monthOffset, setMonthOffset, getDate, isCover, onDay
           Needs cover
         </div>
         <div style={styles.monthGridLegendItem}>
-          <span style={{ ...styles.monthGridDot, background: '#5c4a38' }} />
+          <span style={{ ...styles.monthGridDot, background: '#a59478' }} />
           Scheduled
         </div>
       </div>
@@ -13795,49 +13842,54 @@ const styles = {
   // ─── MONTH GRID ───
   monthGridDayHeader: {
     display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)',
-    padding: '6px 14px',
-    gap: 4,
+    padding: '0 0 8px',
   },
   monthGridDayLabel: {
-    textAlign: 'center', fontSize: 10, fontWeight: 700,
-    color: '#7a8270', letterSpacing: 0.4, textTransform: 'uppercase',
+    textAlign: 'center', fontSize: 9, fontWeight: 500,
+    color: '#a59478', letterSpacing: 2, textTransform: 'uppercase',
     padding: '4px 0',
   },
   monthGrid: {
     display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)',
-    gap: 4, padding: '0 14px',
+    rowGap: 4, padding: 0,
   },
   monthGridCell: {
     aspectRatio: '1 / 1',
-    background: '#fffdf7', border: '1px solid #efe7d2',
-    borderRadius: 8, padding: 4,
-    display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+    background: 'transparent', border: 'none',
+    borderRadius: 0, padding: 4,
+    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
     fontFamily: 'inherit', cursor: 'pointer',
+    position: 'relative',
   },
   monthGridCellToday: {
-    background: '#5c4a38', borderColor: '#5c4a38',
+    background: 'transparent', borderColor: 'transparent',
   },
   monthGridCellCover: {
-    background: '#fef0ea', borderColor: '#e8b8a8',
+    background: 'transparent', borderColor: 'transparent',
   },
   monthGridEmpty: {
     aspectRatio: '1 / 1',
   },
   monthGridCellDate: {
-    fontSize: 13, fontWeight: 600, color: '#1a2620', textAlign: 'center',
+    fontFamily: '"Playfair Display", serif',
+    fontSize: 16, fontWeight: 400, color: '#1a2620', textAlign: 'center',
+    letterSpacing: '-0.01em',
+    width: 30, height: 30, borderRadius: '50%',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
   },
   monthGridDots: {
-    display: 'flex', justifyContent: 'center', gap: 3,
+    display: 'flex', justifyContent: 'center', gap: 3, height: 5,
   },
   monthGridDot: {
-    width: 5, height: 5, borderRadius: '50%',
+    width: 4, height: 4, borderRadius: '50%',
   },
   monthGridLegend: {
-    display: 'flex', gap: 14, padding: '14px',
-    fontSize: 11, color: '#7a8270', justifyContent: 'center',
+    display: 'flex', gap: 18, padding: '18px 0 4px',
+    fontSize: 10, color: '#a59478', justifyContent: 'center',
+    letterSpacing: '0.05em',
   },
   monthGridLegendItem: {
-    display: 'flex', alignItems: 'center', gap: 5,
+    display: 'flex', alignItems: 'center', gap: 6,
   },
 
   // ─── ROLE PICKER ───
