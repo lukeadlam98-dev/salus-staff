@@ -4493,11 +4493,7 @@ function DraftReplyModal({ msg, onClose, onMarkHandled }) {
                 {subject}
               </div>
             </div>
-            <button onClick={onClose} className="salus-btn" style={{
-              background: 'transparent', border: 'none', padding: '8px 4px 8px 12px', marginLeft: 8,
-              color: '#a59478', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
-              flexShrink: 0,
-            }}>Close</button>
+            <CloseButton onClick={onClose} />
           </div>
         </div>
 
@@ -5406,11 +5402,7 @@ function StoreCardViewModal({ card, onClose }) {
             {card.name}
           </div>
         </div>
-        <button onClick={onClose} className="salus-btn" style={{
-          background: 'transparent', border: 'none', padding: 8,
-          color: 'rgba(255, 253, 247, 0.6)', fontSize: 10, letterSpacing: '0.12em',
-          textTransform: 'uppercase', fontWeight: 500,
-        }}>Close</button>
+        <CloseButton onClick={onClose} variant="dark" />
       </div>
 
       <div onClick={(e) => e.stopPropagation()} style={{
@@ -5551,10 +5543,7 @@ function StoreCardEditModal({ card, currentUserId, onClose, onSaved }) {
               {isNew ? 'Add a store card' : card.name}
             </div>
           </div>
-          <button onClick={onClose} className="salus-btn" style={{
-            background: 'transparent', border: 'none', padding: 4,
-            color: '#a59478', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
-          }}>Close</button>
+          <CloseButton onClick={onClose} />
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -5801,12 +5790,7 @@ function StockItemEditModal({ item, isManager, currentUserId, onClose, onSaved }
                 {isNew ? 'Add to stock' : item.name}
               </div>
             </div>
-            <button onClick={onClose} className="salus-btn" aria-label="Close" style={{
-              background: 'transparent', border: '1px solid #efe7d2', borderRadius: '50%',
-              width: 36, height: 36, padding: 0, color: '#5c4a38',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 18, fontWeight: 300, lineHeight: 1, flexShrink: 0,
-            }}>×</button>
+            <CloseButton onClick={onClose} />
           </div>
         </div>
 
@@ -7492,16 +7476,7 @@ function CustomizeHomeModal({ currentWidgets, isManager, currentUser, onReload, 
                 Pick what you want to see. Saves automatically.
               </div>
             </div>
-            <button onClick={onClose} className="salus-btn" aria-label="Close" style={{
-              background: 'transparent', border: '1px solid #efe7d2', borderRadius: '50%',
-              width: 36, height: 36, padding: 0,
-              color: '#5c4a38', flexShrink: 0,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 18, fontWeight: 300, lineHeight: 1,
-              cursor: 'pointer',
-            }}>
-              ×
-            </button>
+            <CloseButton onClick={onClose} />
           </div>
         </div>
 
@@ -7621,6 +7596,30 @@ function CustomizeHomeModal({ currentWidgets, isManager, currentUser, onReload, 
 
 // ─── LoadingLogo — animated brand logo for loading states ───
 // Slow breathing pulse animation — feels on-brand for wellness (like breath cycles).
+// ─── CloseButton — universal modal close, used on every sheet ───────────
+function CloseButton({ onClick, variant }) {
+  const dark = variant === 'dark';
+  return (
+    <button
+      onClick={onClick}
+      className="salus-btn"
+      aria-label="Close"
+      style={{
+        background: 'transparent',
+        border: `1px solid ${dark ? 'rgba(255, 253, 247, 0.25)' : '#efe7d2'}`,
+        borderRadius: '50%',
+        width: 36, height: 36, padding: 0,
+        color: dark ? 'rgba(255, 253, 247, 0.85)' : '#5c4a38',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 20, fontWeight: 300, lineHeight: 1, flexShrink: 0,
+        cursor: 'pointer', fontFamily: 'inherit',
+      }}
+    >
+      ×
+    </button>
+  );
+}
+
 function LoadingLogo() {
   return (
     <div style={{
@@ -8291,6 +8290,8 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
   const filterFn = (item) => {
     if (filter === 'mine')       return item.coachId === currentUser.id;
     if (filter === 'needsCover') return item._kind === 'class' && item.status === 'needsCover';
+    if (filter === 'classes')    return item._kind === 'class';
+    if (filter === 'hires')      return item._kind === 'booking';
     return true;
   };
 
@@ -8812,6 +8813,8 @@ function ScheduleFilterRow({ filter, setFilter, isManager }) {
     <div style={{
       display: 'flex', gap: 20, padding: '0 4px 8px',
       borderBottom: '1px solid #efe7d2', marginBottom: 4,
+      overflowX: 'auto', WebkitOverflowScrolling: 'touch',
+      scrollbarWidth: 'none',
     }}>
       <button
         onClick={() => setFilter('all')}
@@ -8822,10 +8825,38 @@ function ScheduleFilterRow({ filter, setFilter, isManager }) {
           fontSize: 11, fontWeight: filter === 'all' ? 600 : 500,
           color: filter === 'all' ? '#1a2620' : '#a59478',
           letterSpacing: '0.08em', textTransform: 'uppercase',
-          fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1,
+          fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap',
         }}
       >
         All
+      </button>
+      <button
+        onClick={() => setFilter('classes')}
+        className="salus-btn"
+        style={{
+          padding: '6px 0', background: 'transparent', border: 'none',
+          borderBottom: filter === 'classes' ? '1.5px solid #1a2620' : '1.5px solid transparent',
+          fontSize: 11, fontWeight: filter === 'classes' ? 600 : 500,
+          color: filter === 'classes' ? '#1a2620' : '#a59478',
+          letterSpacing: '0.08em', textTransform: 'uppercase',
+          fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap',
+        }}
+      >
+        Classes
+      </button>
+      <button
+        onClick={() => setFilter('hires')}
+        className="salus-btn"
+        style={{
+          padding: '6px 0', background: 'transparent', border: 'none',
+          borderBottom: filter === 'hires' ? '1.5px solid #c6926a' : '1.5px solid transparent',
+          fontSize: 11, fontWeight: filter === 'hires' ? 600 : 500,
+          color: filter === 'hires' ? '#c6926a' : '#a59478',
+          letterSpacing: '0.08em', textTransform: 'uppercase',
+          fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap',
+        }}
+      >
+        Hires
       </button>
       <button
         onClick={() => setFilter('needsCover')}
@@ -8836,7 +8867,7 @@ function ScheduleFilterRow({ filter, setFilter, isManager }) {
           fontSize: 11, fontWeight: filter === 'needsCover' ? 600 : 500,
           color: filter === 'needsCover' ? '#c8442a' : '#a59478',
           letterSpacing: '0.08em', textTransform: 'uppercase',
-          fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1,
+          fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap',
         }}
       >
         Needs cover
@@ -8851,7 +8882,7 @@ function ScheduleFilterRow({ filter, setFilter, isManager }) {
             fontSize: 11, fontWeight: filter === 'mine' ? 600 : 500,
             color: filter === 'mine' ? '#1a2620' : '#a59478',
             letterSpacing: '0.08em', textTransform: 'uppercase',
-            fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1,
+            fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap',
           }}
         >
           Mine
@@ -13997,10 +14028,10 @@ const styles = {
     paddingTop: 'calc(14px + env(safe-area-inset-top))',
   },
   threadCloseBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    background: '#f0eee4', border: 'none', display: 'flex',
-    alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-    color: '#5c4a38',
+    width: 36, height: 36, borderRadius: '50%',
+    background: 'transparent', border: '1px solid #efe7d2',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    cursor: 'pointer', color: '#5c4a38', padding: 0, flexShrink: 0,
   },
   threadHeaderTitle: {
     fontSize: 14, fontWeight: 600, color: '#5c4a38',
@@ -14341,9 +14372,13 @@ const styles = {
   scheduleCardRight: {
     display: 'flex', alignItems: 'center', gap: 8,
     flexShrink: 0,
+    width: 110, justifyContent: 'flex-start',
+    overflow: 'hidden',
   },
   scheduleCardName: {
     fontSize: 12, fontWeight: 500, color: '#5c4a38',
+    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+    minWidth: 0,
   },
   scheduleCoverChip: {
     background: 'transparent', color: '#c8442a',
