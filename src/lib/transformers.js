@@ -269,3 +269,16 @@ export const stockItemFromDb = (row) => ({
   lastUpdatedAt: row.last_updated_at ? new Date(row.last_updated_at).getTime() : null,
   createdAt: row.created_at ? new Date(row.created_at).getTime() : null,
 });
+
+export const storeCardFromDb = (row) => ({
+  id: row.id,
+  name: row.name,
+  notes: row.notes || '',
+  imageUrl: row.image_url,
+  storagePath: row.storage_path || null,
+  displayOrder: row.display_order ?? 0,
+  archived: !!row.archived,
+  createdBy: row.created_by || null,
+  createdAt: row.created_at ? new Date(row.created_at).getTime() : null,
+  updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : null,
+});
