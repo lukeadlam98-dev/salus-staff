@@ -6701,6 +6701,12 @@ function LoginScreen({ error, onLogin, onSignup, onClearError }) {
     setSuccessMsg(null);
   };
 
+  // Brand photo rotation — fresh feel each visit
+  const heroPhoto = useMemo(() => {
+    const photos = ['/brand/reformer.jpg', '/brand/cardio.jpg', '/brand/exterior.jpg', '/brand/sign.jpg'];
+    return photos[Math.floor(Math.random() * photos.length)];
+  }, []);
+
   return (
     <div style={styles.loginWrap}>
       <style>{`
@@ -6709,7 +6715,10 @@ function LoginScreen({ error, onLogin, onSignup, onClearError }) {
       `}</style>
 
       {/* Hero backdrop */}
-      <div style={styles.loginHero} />
+      <div style={{
+        ...styles.loginHero,
+        backgroundImage: `url(${heroPhoto})`,
+      }} />
       <div style={styles.loginHeroOverlay} />
 
       {/* Brand wordmark, floating */}
@@ -7039,33 +7048,31 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
   const has = (key) => widgets.includes(key);
   const [showCustomize, setShowCustomize] = useState(false);
 
+  // Brand photos rotate — one is shown each session, gives a fresh feeling
+  const brandPhoto = useMemo(() => {
+    const photos = ['/brand/cardio.jpg', '/brand/reformer.jpg', '/brand/exterior.jpg', '/brand/sign.jpg'];
+    return photos[Math.floor(Math.random() * photos.length)];
+  }, []);
+
   return (
     <div style={styles.homeContainer}>
       {/* Greeting */}
       <div style={styles.homeGreeting}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-          <div>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 6 }}>
               {todayStr}
             </div>
             <h1 style={styles.homeH1}>{greeting}, {firstName}</h1>
             <p style={styles.homeGreetSub}>{classesToday.length} {classesToday.length === 1 ? 'class' : 'classes'} today</p>
           </div>
-          <button onClick={() => setShowCustomize(true)} className="salus-btn" style={{
-            padding: 8, borderRadius: '50%',
-            background: 'transparent', border: 'none',
-            color: '#a59478',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }} aria-label="Customize home">
-            <SettingsIcon size={16} />
-          </button>
         </div>
       </div>
 
-      {/* Brand photo strip — quiet visual anchor */}
+      {/* Brand photo — rotates each session */}
       <div style={{
         height: 140, borderRadius: 20, overflow: 'hidden', marginBottom: 4, position: 'relative',
-        backgroundImage: 'url(/brand/cardio.jpg)',
+        backgroundImage: `url(${brandPhoto})`,
         backgroundSize: 'cover', backgroundPosition: 'center',
         boxShadow: '0 1px 0 rgba(92, 74, 56, 0.06)',
       }} />
@@ -7200,6 +7207,20 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
           default: return null;
         }
       })}
+
+      {/* Customize home — prominent link at the bottom */}
+      <button onClick={() => setShowCustomize(true)} className="salus-btn" style={{
+        marginTop: 32, marginBottom: 8, width: '100%',
+        padding: '14px 18px',
+        background: 'transparent', border: '1px solid #efe7d2', borderRadius: 14,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        color: '#5c4a38', fontSize: 12, fontWeight: 500,
+        letterSpacing: '0.08em', textTransform: 'uppercase',
+        fontFamily: 'inherit', cursor: 'pointer',
+      }}>
+        <SettingsIcon size={14} />
+        Customize home
+      </button>
 
       {/* Customize modal */}
       {showCustomize && (
@@ -7369,16 +7390,24 @@ function ChatPreviewWidget({ data, currentUser, onViewChat }) {
 }
 
 // ─── Widget registry — used by the customize modal ───
+// Groups: 'attention' (urgent today) | 'day' (your day) | 'actions' (quick actions) | 'extras'
 const ALL_WIDGETS = [
-  { key: 'cover',         label: 'Cover requests',        Icon: CoverIcon,     desc: 'Classes and shifts that need cover' },
-  { key: 'upcoming',      label: 'Your upcoming classes', Icon: Calendar,      desc: 'Your next teaching slots' },
-  { key: 'tours',         label: 'Tours',                 Icon: MapPin,        desc: 'Upcoming tours from Google Calendar' },
-  { key: 'tasks',         label: 'Tasks',                 Icon: ListChecks,    desc: 'Your task list' },
-  { key: 'total_hours',   label: 'Hours this week',       Icon: Clock,         desc: 'Your scheduled hours (classes plus FOH)' },
-  { key: 'request_cover', label: 'Request cover',         Icon: Plus,          desc: 'Quick button to post a cover request' },
-  { key: 'hire_studio',   label: 'Hire a studio',         Icon: Building2,     desc: 'Quick button to book the studio' },
-  { key: 'quote',         label: 'Quote of the day',      Icon: Quote,         desc: 'A different quote each day' },
-  { key: 'chat_preview',  label: 'Team chat preview',     Icon: MessageCircle, desc: 'Latest messages from team chat' },
+  { key: 'cover',         group: 'attention', label: 'Cover requests',        Icon: CoverIcon,     desc: 'Classes and shifts that need cover' },
+  { key: 'tasks',         group: 'attention', label: 'Tasks',                 Icon: ListChecks,    desc: 'Your task list' },
+  { key: 'upcoming',      group: 'day',       label: 'Your upcoming classes', Icon: Calendar,      desc: 'Your next teaching slots' },
+  { key: 'total_hours',   group: 'day',       label: 'Hours this week',       Icon: Clock,         desc: 'Your scheduled hours (classes plus FOH)' },
+  { key: 'tours',         group: 'day',       label: 'Tours',                 Icon: MapPin,        desc: 'Upcoming tours from Google Calendar' },
+  { key: 'request_cover', group: 'actions',   label: 'Request cover',         Icon: Plus,          desc: 'Quick button to post a cover request' },
+  { key: 'hire_studio',   group: 'actions',   label: 'Hire a studio',         Icon: Building2,     desc: 'Quick button to book the studio' },
+  { key: 'chat_preview',  group: 'extras',    label: 'Team chat preview',     Icon: MessageCircle, desc: 'Latest messages from team chat' },
+  { key: 'quote',         group: 'extras',    label: 'Quote of the day',      Icon: Quote,         desc: 'A different quote each day' },
+];
+
+const WIDGET_GROUPS = [
+  { key: 'attention', label: 'Needs your attention' },
+  { key: 'day',       label: 'Your day' },
+  { key: 'actions',   label: 'Quick actions' },
+  { key: 'extras',    label: 'Extras' },
 ];
 
 // ─── Customize Home modal ────────────────────────────────────────────────
@@ -7525,40 +7554,55 @@ function CustomizeHomeModal({ currentWidgets, isManager, currentUser, onReload, 
             </>
           )}
 
-          {/* Available to add */}
+          {/* Available to add — grouped by category */}
           {inactive.length > 0 && (
             <>
-              <div style={{ fontSize: 10, fontWeight: 600, color: '#a59478', textTransform: 'uppercase', letterSpacing: 2, marginBottom: 12 }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: '#a59478', textTransform: 'uppercase', letterSpacing: 2, marginBottom: 4 }}>
                 Add a widget
               </div>
-              <div>
-                {inactive.map((w, idx) => {
-                  const isBusy = savingKey === w.key;
-                  return (
-                    <div key={w.key} style={{
-                      display: 'flex', alignItems: 'center', gap: 12,
-                      padding: '14px 0',
-                      borderBottom: idx < inactive.length - 1 ? '1px solid #efe7d2' : 'none',
-                      opacity: isBusy ? 0.5 : 1,
+              {WIDGET_GROUPS.map(group => {
+                const groupInactive = inactive.filter(w => w.group === group.key);
+                if (groupInactive.length === 0) return null;
+                return (
+                  <div key={group.key} style={{ marginTop: 20 }}>
+                    <div style={{
+                      fontFamily: '"Playfair Display", serif', fontSize: 14,
+                      color: '#5c4a38', fontStyle: 'italic',
+                      padding: '0 0 6px',
+                      borderBottom: '1px solid #efe7d2',
+                      marginBottom: 4,
                     }}>
-                      <w.Icon size={18} color="#a59478" style={{ flexShrink: 0 }} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 14, color: '#1a2620', letterSpacing: '-0.005em' }}>{w.label}</div>
-                        <div style={{ fontSize: 11, color: '#a59478', marginTop: 2 }}>{w.desc}</div>
-                      </div>
-                      <button onClick={() => add(w.key)} disabled={isBusy} className="salus-btn"
-                        style={{
-                          padding: '8px 16px', borderRadius: 999,
-                          background: '#1a2620', color: '#fffdf7', border: 'none',
-                          fontSize: 12, fontWeight: 500, letterSpacing: '0.04em',
-                          flexShrink: 0,
-                        }}>
-                        {isBusy ? 'Adding…' : 'Add'}
-                      </button>
+                      {group.label}
                     </div>
-                  );
-                })}
-              </div>
+                    {groupInactive.map((w, idx) => {
+                      const isBusy = savingKey === w.key;
+                      return (
+                        <div key={w.key} style={{
+                          display: 'flex', alignItems: 'center', gap: 12,
+                          padding: '14px 0',
+                          borderBottom: idx < groupInactive.length - 1 ? '1px solid #efe7d2' : 'none',
+                          opacity: isBusy ? 0.5 : 1,
+                        }}>
+                          <w.Icon size={18} color="#a59478" style={{ flexShrink: 0 }} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 14, color: '#1a2620', letterSpacing: '-0.005em' }}>{w.label}</div>
+                            <div style={{ fontSize: 11, color: '#a59478', marginTop: 2 }}>{w.desc}</div>
+                          </div>
+                          <button onClick={() => add(w.key)} disabled={isBusy} className="salus-btn"
+                            style={{
+                              padding: '8px 16px', borderRadius: 999,
+                              background: '#1a2620', color: '#fffdf7', border: 'none',
+                              fontSize: 12, fontWeight: 500, letterSpacing: '0.04em',
+                              flexShrink: 0,
+                            }}>
+                            {isBusy ? 'Adding…' : 'Add'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
             </>
           )}
 
@@ -8125,6 +8169,7 @@ function HireSchedule({ data, currentUser, isManager, isMobile, onBookingClick }
           setFilter={() => {}}
           isManager={isManager}
           renderCard={renderCard}
+          hideFilters
         />
       )}
 
@@ -8142,6 +8187,7 @@ function HireSchedule({ data, currentUser, isManager, isMobile, onBookingClick }
           setFilter={() => {}}
           isManager={isManager}
           renderCard={renderCard}
+          hideFilters
         />
       )}
 
@@ -8525,7 +8571,7 @@ function SchedulePeriodToggle({ viewMode, setViewMode }) {
   );
 }
 
-function DayView({ items, allItems, dayOffset, setDayOffset, getDate, getTime, isCover, totalLabel, filter, setFilter, isManager, renderCard }) {
+function DayView({ items, allItems, dayOffset, setDayOffset, getDate, getTime, isCover, totalLabel, filter, setFilter, isManager, renderCard, hideFilters }) {
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const targetDate = addDays(today, dayOffset);
   const iso = toIsoDate(targetDate);
@@ -8599,7 +8645,7 @@ function DayView({ items, allItems, dayOffset, setDayOffset, getDate, getTime, i
 
       <ScheduleStatsRow coverCount={coverCount} totalCount={totalCount} totalLabel={totalLabel} />
 
-      <ScheduleFilterRow filter={filter} setFilter={setFilter} isManager={isManager} />
+      {!hideFilters && <ScheduleFilterRow filter={filter} setFilter={setFilter} isManager={isManager} />}
 
       <div>
         {dayItems.length === 0 ? (
@@ -8648,7 +8694,7 @@ function DayView({ items, allItems, dayOffset, setDayOffset, getDate, getTime, i
   );
 }
 
-function WeekViewBody({ items, allItems, weekOffset, setWeekOffset, getDate, getTime, isCover, totalLabel, filter, setFilter, isManager, renderCard }) {
+function WeekViewBody({ items, allItems, weekOffset, setWeekOffset, getDate, getTime, isCover, totalLabel, filter, setFilter, isManager, renderCard, hideFilters }) {
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const currentMonday = getMonday(today);
   const weekStart = addDays(currentMonday, weekOffset * 7);
@@ -8671,7 +8717,7 @@ function WeekViewBody({ items, allItems, weekOffset, setWeekOffset, getDate, get
     <>
       <ScheduleWeekNav weekStart={weekStart} weekOffset={weekOffset} setWeekOffset={setWeekOffset} />
       <ScheduleStatsRow coverCount={totalCover} totalCount={totalCount} totalLabel={totalLabel} />
-      <ScheduleFilterRow filter={filter} setFilter={setFilter} isManager={isManager} />
+      {!hideFilters && <ScheduleFilterRow filter={filter} setFilter={setFilter} isManager={isManager} />}
 
       {weekDates.map((d, dayIdx) => {
         const dayItems = byDay[dayIdx];
@@ -9769,6 +9815,8 @@ function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onEditMes
 }
 
 function DmsListView({ threads, data, currentUser, onOpenDm }) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+
   const timeAgo = (ts) => {
     const sec = Math.floor((Date.now() - ts) / 1000);
     if (sec < 60) return 'now';
@@ -9778,57 +9826,220 @@ function DmsListView({ threads, data, currentUser, onOpenDm }) {
     return new Date(ts).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
   };
 
-  if (threads.length === 0) {
-    return (
-      <div style={{ padding: '40px 24px', textAlign: 'center' }}>
-        <Mail size={36} color="#a59478" style={{ margin: '0 auto' }} />
-        <div style={{ fontFamily: '"Playfair Display", serif', fontSize: 18, color: '#5c4a38', marginTop: 8 }}>
-          No private messages yet
-        </div>
-        <div style={{ fontSize: 12, color: '#7a8270', marginTop: 6, lineHeight: 1.5 }}>
-          Go to <strong>Me → Team</strong> and tap <strong>DM</strong> next to anyone to start a private thread.
-        </div>
-      </div>
-    );
-  }
+  const renderNewButton = () => (
+    <button
+      onClick={() => setPickerOpen(true)}
+      className="salus-btn"
+      style={{
+        margin: '14px 16px',
+        padding: '14px 18px',
+        background: '#1a2620', color: '#fffdf7', border: 'none',
+        borderRadius: 14,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        fontSize: 13, fontWeight: 500, letterSpacing: '0.04em',
+        cursor: 'pointer', fontFamily: 'inherit',
+      }}
+    >
+      <Plus size={16} />
+      New message
+    </button>
+  );
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto' }}>
-      {threads.map(t => {
-        const other = data.users.find(u => u.id === t.otherId);
-        if (!other) return null;
-        const last = t.lastMessage;
-        const lastWasMine = last?.senderId === currentUser.id;
-        const preview = last
-          ? (lastWasMine ? 'You: ' : '') + (last.text.length > 50 ? last.text.slice(0, 50) + '…' : last.text)
-          : '';
-        return (
-          <button
-            key={t.otherId}
-            onClick={() => onOpenDm(t.otherId)}
-            className="salus-btn"
-            style={styles.dmRow}
-          >
-            <UserAvatar user={other} size={44} fontSize={15} />
-            <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-              <div style={styles.dmRowTop}>
-                <div style={styles.dmRowName}>{other.name}</div>
-                {last && <div style={styles.dmRowTime}>{timeAgo(last.createdAt)}</div>}
+    <>
+      {threads.length === 0 ? (
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          {renderNewButton()}
+          <div style={{ padding: '40px 24px', textAlign: 'center' }}>
+            <Mail size={36} color="#a59478" style={{ margin: '0 auto' }} />
+            <div style={{ fontFamily: '"Playfair Display", serif', fontSize: 18, color: '#5c4a38', marginTop: 8 }}>
+              No private messages yet
+            </div>
+            <div style={{ fontSize: 12, color: '#7a8270', marginTop: 6, lineHeight: 1.5 }}>
+              Tap <strong>New message</strong> to start a private thread.
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {renderNewButton()}
+          {threads.map(t => {
+            const other = data.users.find(u => u.id === t.otherId);
+            if (!other) return null;
+            const last = t.lastMessage;
+            const lastWasMine = last?.senderId === currentUser.id;
+            const preview = last
+              ? (lastWasMine ? 'You: ' : '') + (last.text.length > 50 ? last.text.slice(0, 50) + '…' : last.text)
+              : '';
+            return (
+              <button
+                key={t.otherId}
+                onClick={() => onOpenDm(t.otherId)}
+                className="salus-btn"
+                style={styles.dmRow}
+              >
+                <UserAvatar user={other} size={44} fontSize={15} />
+                <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                  <div style={styles.dmRowTop}>
+                    <div style={styles.dmRowName}>{other.name}</div>
+                    {last && <div style={styles.dmRowTime}>{timeAgo(last.createdAt)}</div>}
+                  </div>
+                  <div style={{
+                    ...styles.dmRowPreview,
+                    ...(t.unread > 0 ? { fontWeight: 600, color: '#1a2620' } : {}),
+                  }}>
+                    {preview || 'No messages yet'}
+                  </div>
+                </div>
+                {t.unread > 0 && (
+                  <span style={styles.dmUnreadBadge}>{t.unread}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {pickerOpen && (
+        <NewMessagePicker
+          users={data.users.filter(u => u.id !== currentUser.id && !u.deactivated)}
+          existingThreadIds={new Set(threads.map(t => t.otherId))}
+          onPick={(userId) => {
+            setPickerOpen(false);
+            onOpenDm(userId);
+          }}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+// ─── NewMessagePicker — pick who to start a thread with ─────────────────
+function NewMessagePicker({ users, existingThreadIds, onPick, onClose }) {
+  const [query, setQuery] = useState('');
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const list = users.slice().sort((a, b) => a.name.localeCompare(b.name));
+    if (!q) return list;
+    return list.filter(u => u.name.toLowerCase().includes(q));
+  }, [users, query]);
+
+  return (
+    <>
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.55)', zIndex: 200,
+        touchAction: 'none',
+      }} />
+      <div style={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        background: '#fffdf7', zIndex: 201,
+        display: 'flex', flexDirection: 'column',
+      }}>
+        {/* Header */}
+        <div style={{
+          padding: '14px 22px',
+          paddingTop: 'calc(14px + env(safe-area-inset-top, 0px))',
+          borderBottom: '1px solid #efe7d2',
+          flexShrink: 0, background: '#fffdf7',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 4 }}>
+                Private message
               </div>
               <div style={{
-                ...styles.dmRowPreview,
-                ...(t.unread > 0 ? { fontWeight: 600, color: '#1a2620' } : {}),
+                fontFamily: '"Playfair Display", serif',
+                fontSize: 22, fontWeight: 400, color: '#1a2620', letterSpacing: '-0.005em',
               }}>
-                {preview || 'No messages yet'}
+                Who would you like to message?
               </div>
             </div>
-            {t.unread > 0 && (
-              <span style={styles.dmUnreadBadge}>{t.unread}</span>
-            )}
-          </button>
-        );
-      })}
-    </div>
+            <CloseButton onClick={onClose} />
+          </div>
+          <input
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Search by name"
+            style={{
+              width: '100%', marginTop: 14, padding: '12px 14px',
+              background: '#f5f1e8', border: 'none', borderRadius: 12,
+              fontFamily: 'inherit', fontSize: 14, color: '#1a2620',
+              outline: 'none',
+            }}
+          />
+        </div>
+
+        {/* Scrollable list */}
+        <div style={{
+          flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch',
+          overscrollBehavior: 'contain',
+          padding: '8px 0',
+        }}>
+          {filtered.length === 0 ? (
+            <div style={{ padding: '40px 22px', textAlign: 'center' }}>
+              <div style={{
+                fontFamily: '"Playfair Display", serif', fontSize: 16, color: '#5c4a38',
+                fontStyle: 'italic',
+              }}>
+                No one matches "{query}".
+              </div>
+            </div>
+          ) : (
+            filtered.map(u => {
+              const exists = existingThreadIds.has(u.id);
+              return (
+                <button
+                  key={u.id}
+                  onClick={() => onPick(u.id)}
+                  className="salus-btn"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    width: '100%', padding: '12px 22px',
+                    background: 'transparent', border: 'none',
+                    borderBottom: '1px solid #efe7d2',
+                    fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer',
+                  }}
+                >
+                  <UserAvatar user={u} size={40} fontSize={14} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontSize: 14, color: '#1a2620',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>{u.name}</div>
+                    {(u.isCoach || u.isFoh) && (
+                      <div style={{ fontSize: 11, color: '#a59478', marginTop: 2, letterSpacing: '0.02em' }}>
+                        {[u.isCoach && 'Coach', u.isFoh && 'FOH'].filter(Boolean).join(' · ')}
+                      </div>
+                    )}
+                  </div>
+                  {exists && (
+                    <span style={{ fontSize: 10, color: '#a59478', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                      Open thread
+                    </span>
+                  )}
+                </button>
+              );
+            })
+          )}
+        </div>
+
+        {/* Footer — placeholder for group chats */}
+        <div style={{
+          padding: '12px 22px',
+          paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))',
+          borderTop: '1px solid #efe7d2', background: '#fffdf7',
+          flexShrink: 0,
+        }}>
+          <div style={{
+            fontSize: 11, color: '#a59478', textAlign: 'center', fontStyle: 'italic',
+          }}>
+            Group chats coming soon.
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
 
