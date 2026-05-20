@@ -7153,52 +7153,90 @@ function CaptureReceiptModal({ currentUserId, sessionToken, onClose, onSaved }) 
     const vatPence = vat.trim() ? Math.round(parseFloat(vat) * 100) : null;
 
     if (!amountPence || amountPence <= 0) {
-      setError('Amount is required.');
+      setError('Please enter an amount.');
       return;
     }
     if (!spentOn) {
-      setError('Date is required.');
+      setError('Please pick a date.');
       return;
     }
 
     setSaving(true);
     setError(null);
-    try {
-      let receiptUrl = null;
-      let receiptPath = null;
 
-      // Upload the photo if there is one
-      if (photoBase64) {
-        const blob = await (await fetch(photoBase64)).blob();
-        const ext = (photoMediaType.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
-        const path = `${currentUserId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-        const { error: upErr } = await supabase.storage
-          .from('receipts').upload(path, blob, { cacheControl: '3600', upsert: false, contentType: photoMediaType });
-        if (upErr) throw upErr;
-        receiptPath = path;
-        // Signed URL — receipts bucket is private
-        const { data: signed } = await supabase.storage.from('receipts').createSignedUrl(path, 60 * 60 * 24 * 365);
-        receiptUrl = signed?.signedUrl || null;
+    try {
+      // ─── Step 1: Insert the expense FIRST (without photo) ──────────
+      // This is the critical part — if this succeeds, the expense is saved.
+      // The photo upload is a bonus and won't be allowed to break the save.
+      console.log('[expense save] inserting…', { amountPence, spentOn, category, supplier });
+      const { data: inserted, error: insertErr } = await supabase
+        .from('expenses')
+        .insert({
+          user_id: currentUserId,
+          supplier: supplier.trim() || null,
+          amount_pence: amountPence,
+          vat_pence: vatPence,
+          spent_on: spentOn,
+          category,
+          payment_method: paymentMethod || null,
+          description: description.trim() || null,
+          ai_extracted: aiHint != null,
+        })
+        .select()
+        .single();
+
+      if (insertErr) {
+        console.error('[expense save] insert failed:', insertErr);
+        throw new Error(insertErr.message || 'Database insert failed');
       }
 
-      const { error: insertErr } = await supabase.from('expenses').insert({
-        user_id: currentUserId,
-        supplier: supplier.trim() || null,
-        amount_pence: amountPence,
-        vat_pence: vatPence,
-        spent_on: spentOn,
-        category,
-        payment_method: paymentMethod,
-        description: description.trim() || null,
-        receipt_url: receiptUrl,
-        receipt_path: receiptPath,
-        ai_extracted: aiHint != null,
-      });
-      if (insertErr) throw insertErr;
+      console.log('[expense save] inserted, id:', inserted?.id);
+
+      // ─── Step 2: Upload photo IF present — non-blocking ────────────
+      if (photoBase64 && inserted) {
+        try {
+          console.log('[expense save] uploading photo…');
+          const blob = await (await fetch(photoBase64)).blob();
+          const ext = (photoMediaType.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+          const path = `${currentUserId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+          const { error: upErr } = await supabase.storage
+            .from('receipts')
+            .upload(path, blob, { cacheControl: '3600', upsert: false, contentType: photoMediaType });
+
+          if (upErr) {
+            console.error('[expense save] photo upload failed (expense already saved):', upErr);
+          } else {
+            const { data: signed, error: signErr } = await supabase.storage
+              .from('receipts')
+              .createSignedUrl(path, 60 * 60 * 24 * 365);
+
+            if (signErr) {
+              console.error('[expense save] sign URL failed:', signErr);
+            }
+
+            // Patch the expense with photo info
+            const { error: updErr } = await supabase.from('expenses').update({
+              receipt_url: signed?.signedUrl || null,
+              receipt_path: path,
+            }).eq('id', inserted.id);
+
+            if (updErr) {
+              console.error('[expense save] update with photo failed:', updErr);
+            } else {
+              console.log('[expense save] photo attached');
+            }
+          }
+        } catch (photoErr) {
+          console.error('[expense save] photo handling exception:', photoErr);
+          // Don't throw — expense is saved, photo is just a bonus
+        }
+      }
+
+      // Success regardless of photo status
       onSaved();
     } catch (e) {
-      console.error('Expense save error:', e);
-      setError(`Save failed: ${e.message || e.error_description || JSON.stringify(e)}`);
+      console.error('[expense save] fatal error:', e);
+      setError(`Save failed: ${e.message || JSON.stringify(e)}`);
     } finally {
       setSaving(false);
     }
@@ -7222,19 +7260,29 @@ function CaptureReceiptModal({ currentUserId, sessionToken, onClose, onSaved }) 
           onClose={onClose}
         />
         <ModalBody>
-          {/* Photo area */}
+          {/* Photo area — clearly optional */}
           {!photoBase64 ? (
-            <label style={{
-              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-              height: 160, gap: 8, marginBottom: 18,
-              background: COLOR.sand, borderRadius: 12,
-              border: `1px dashed ${COLOR.shell}`, cursor: 'pointer',
-            }}>
-              <div style={{ fontSize: 32, color: COLOR.brown }}>📷</div>
-              <div style={{ ...TYPE.capsLabel, color: COLOR.brown }}>Snap or upload receipt</div>
-              <input type="file" accept="image/*" capture="environment"
-                onChange={handlePhoto} style={{ display: 'none' }} />
-            </label>
+            <>
+              <label style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                height: 130, gap: 6, marginBottom: 10,
+                background: COLOR.sand, borderRadius: 12,
+                border: `1px dashed ${COLOR.shell}`, cursor: 'pointer',
+              }}>
+                <div style={{ fontSize: 28, color: COLOR.brown }}>📷</div>
+                <div style={{ ...TYPE.capsLabel, color: COLOR.brown }}>Snap or upload receipt</div>
+                <div style={{ ...TYPE.metaSmall, color: COLOR.moss }}>AI will fill in the form</div>
+                <input type="file" accept="image/*" capture="environment"
+                  onChange={handlePhoto} style={{ display: 'none' }} />
+              </label>
+              <div style={{
+                textAlign: 'center', fontSize: 11, color: COLOR.taupe,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+                marginBottom: 14,
+              }}>
+                or fill it in by hand below
+              </div>
+            </>
           ) : (
             <div style={{ position: 'relative', marginBottom: 14 }}>
               <img src={photoBase64} alt="Receipt" style={{
