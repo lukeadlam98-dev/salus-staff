@@ -6475,7 +6475,7 @@ function OnboardingScreen({ currentUser, onComplete }) {
     setSaving(true);
     setError(null);
     try {
-      const patch = { updated_at: new Date().toISOString() };
+      const patch = {};
       if (step.key === 'personal') {
         patch.phone = phone.trim() || null;
         patch.date_of_birth = dob || null;
@@ -6496,7 +6496,7 @@ function OnboardingScreen({ currentUser, onComplete }) {
         if (policiesAck) patch.policies_acknowledged_at = new Date().toISOString();
       }
 
-      if (Object.keys(patch).length > 1) {
+      if (Object.keys(patch).length > 0) {
         const { error } = await supabase.from('profiles').update(patch).eq('id', currentUser.id);
         if (error) throw error;
       }
