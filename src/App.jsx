@@ -36,6 +36,7 @@ import {
   broadcastReadFromDb,
   incidentFromDb,
   onboardingStepFromDb,
+  expenseFromDb,
 } from './lib/transformers';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -92,6 +93,7 @@ const EMPTY_DATA = {
   broadcastReads: [],
   incidents: [],
   onboardingSteps: [],
+  expenses: [],
 };
 
 const CLASS_TYPES = {
@@ -377,7 +379,7 @@ export default function SalusStaff() {
     if (!session) return;
     if (!silent) setLoading(true);
     try {
-      const [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes, emailIntRes, stockRes, storeCardsRes, broadcastsRes, broadcastReadsRes, incidentsRes, onboardingStepsRes] = await Promise.all([
+      const [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes, emailIntRes, stockRes, storeCardsRes, broadcastsRes, broadcastReadsRes, incidentsRes, onboardingStepsRes, expensesRes] = await Promise.all([
         supabase.from('profiles').select('*'),
         supabase.from('classes').select('*'),
         supabase.from('cover_requests').select('*'),
@@ -402,6 +404,7 @@ export default function SalusStaff() {
         supabase.from('broadcast_reads').select('*').eq('user_id', session.user?.id),
         supabase.from('incidents').select('*').order('created_at', { ascending: false }),
         supabase.from('onboarding_steps').select('*'),
+        supabase.from('expenses').select('*').eq('user_id', session.user?.id).order('spent_on', { ascending: false }),
       ]);
 
       const errors = [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes]
@@ -437,6 +440,7 @@ export default function SalusStaff() {
         broadcastReads: (broadcastReadsRes.data || []).map(broadcastReadFromDb),
         incidents: (incidentsRes.data || []).map(incidentFromDb),
         onboardingSteps: (onboardingStepsRes.data || []).map(onboardingStepFromDb),
+        expenses: (expensesRes.data || []).map(expenseFromDb),
       });
     } catch (e) {
       console.error('Failed to load data:', e);
@@ -1722,6 +1726,7 @@ export default function SalusStaff() {
             onShowInvoices={() => setModal({ type: 'invoices' })}
             onShowTimeOff={() => setModal({ type: 'timeOff' })}
             onShowTeam={() => setModal({ type: 'team' })}
+            onShowExpenses={() => setModal({ type: 'expenses' })}
             onSignOut={handleLogout}
             onConnectGmail={handleConnectGmail}
             onDisconnectGmail={handleDisconnectGmail}
@@ -2063,6 +2068,15 @@ export default function SalusStaff() {
       )}
       {modal?.type === 'invoices' && (
         <InvoicesModal data={data} onClose={() => setModal(null)} />
+      )}
+      {modal?.type === 'expenses' && (
+        <ExpensesModal
+          data={data}
+          currentUser={currentUser}
+          sessionToken={session?.access_token}
+          onClose={() => setModal(null)}
+          onReload={reloadData}
+        />
       )}
       {showUrgentCover && (
         <UrgentCoverModal
@@ -6776,6 +6790,790 @@ function OnboardingScreen({ currentUser, onComplete }) {
   );
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// EXPENSES — per-user receipt tracker for self-assessment / tax returns
+// ════════════════════════════════════════════════════════════════════════
+
+const EXPENSE_CATEGORIES = {
+  stock_supplies:    { label: 'Stock & supplies' },
+  equipment_repairs: { label: 'Equipment & repairs' },
+  software:          { label: 'Software subscriptions' },
+  marketing:         { label: 'Marketing' },
+  professional_fees: { label: 'Professional fees' },
+  training_cpd:      { label: 'Training & CPD' },
+  travel:            { label: 'Travel & mileage' },
+  phone_internet:    { label: 'Phone & internet' },
+  insurance:         { label: 'Insurance' },
+  rent_rates:        { label: 'Rent & rates' },
+  utilities:         { label: 'Utilities' },
+  bank_fees:         { label: 'Bank fees' },
+  food_drink:        { label: 'Food & drink' },
+  cleaning:          { label: 'Cleaning' },
+  other:             { label: 'Other' },
+};
+
+const PAYMENT_METHODS = {
+  card:           'Card',
+  cash:           'Cash',
+  bank_transfer:  'Bank transfer',
+  other:          'Other',
+};
+
+const formatGbp = (pence) => {
+  if (pence == null) return '—';
+  const pounds = Math.abs(pence) / 100;
+  const sign = pence < 0 ? '−' : '';
+  return `${sign}£${pounds.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+// UK tax year start month/day (6 April)
+function ukTaxYearStart(now = new Date()) {
+  const y = now.getFullYear();
+  const aprilSixth = new Date(y, 3, 6);
+  if (now < aprilSixth) return new Date(y - 1, 3, 6);
+  return aprilSixth;
+}
+
+// ─── ExpensesPage — list, summary, capture ──────────────────────────────
+function ExpensesPage({ data, currentUser, sessionToken, onReload }) {
+  const [filter, setFilter] = useState('month'); // month | tax_year | all
+  const [captureOpen, setCaptureOpen] = useState(false);
+  const [detail, setDetail] = useState(null);
+
+  const expenses = data.expenses || [];
+
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const taxYearStart = ukTaxYearStart(now);
+  const monthStartIso = monthStart.toISOString().slice(0, 10);
+  const taxYearStartIso = taxYearStart.toISOString().slice(0, 10);
+
+  const inRange = (exp) => {
+    if (filter === 'month')    return exp.spentOn >= monthStartIso;
+    if (filter === 'tax_year') return exp.spentOn >= taxYearStartIso;
+    return true;
+  };
+
+  const visible = expenses.filter(inRange);
+  const totalPence = visible.reduce((s, e) => s + (e.amountPence || 0), 0);
+
+  // Per-category breakdown for the visible range
+  const byCategory = {};
+  visible.forEach(e => {
+    byCategory[e.category] = (byCategory[e.category] || 0) + e.amountPence;
+  });
+  const topCategories = Object.entries(byCategory)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4);
+
+  // Group expenses by month for the list
+  const grouped = {};
+  visible.forEach(e => {
+    const key = (e.spentOn || '').slice(0, 7);
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(e);
+  });
+  const groupKeys = Object.keys(grouped).sort().reverse();
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Personal"
+        title="Expenses"
+        subtitle="For your self-assessment. Private to you."
+        compact
+      />
+
+      <button onClick={() => setCaptureOpen(true)} className="salus-btn" style={{
+        ...styles.btnPrimary, width: '100%', justifyContent: 'center',
+        padding: '14px 22px', fontSize: 14, marginBottom: 16,
+      }}>
+        + Snap a receipt
+      </button>
+
+      {/* Summary card */}
+      <div style={{
+        background: COLOR.cream, border: `1px solid ${COLOR.bone}`,
+        borderRadius: 14, padding: '16px 18px', marginBottom: 16,
+      }}>
+        <div style={{ ...TYPE.eyebrow, marginBottom: 6 }}>
+          {filter === 'month' ? 'This month' : filter === 'tax_year' ? 'This tax year' : 'All time'}
+        </div>
+        <div style={{
+          fontFamily: COLOR.serif, fontSize: 28, fontWeight: 400,
+          color: COLOR.forest, letterSpacing: '-0.015em', lineHeight: 1.1,
+        }}>
+          {formatGbp(totalPence)}
+        </div>
+        <div style={{ ...TYPE.metaSmall, marginTop: 4 }}>
+          {visible.length} {visible.length === 1 ? 'receipt' : 'receipts'}
+        </div>
+
+        {topCategories.length > 0 && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${COLOR.bone}` }}>
+            <div style={{ ...TYPE.eyebrow, marginBottom: 8 }}>Top categories</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {topCategories.map(([cat, pence]) => (
+                <div key={cat} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
+                  <span style={{ color: COLOR.brown }}>{EXPENSE_CATEGORIES[cat]?.label || cat}</span>
+                  <span style={{ color: COLOR.forest, fontVariantNumeric: 'tabular-nums' }}>{formatGbp(pence)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Period filter */}
+      <div style={{
+        display: 'flex', gap: 22, padding: '0 4px 8px',
+        borderBottom: `1px solid ${COLOR.bone}`, marginBottom: 16,
+      }}>
+        {[
+          ['month', 'This month'],
+          ['tax_year', 'Tax year'],
+          ['all', 'All'],
+        ].map(([key, label]) => (
+          <button key={key}
+            onClick={() => setFilter(key)}
+            className="salus-btn"
+            style={{
+              padding: '6px 0', background: 'transparent', border: 'none',
+              borderBottom: filter === key ? `1.5px solid ${COLOR.forest}` : '1.5px solid transparent',
+              ...(filter === key ? TYPE.capsLabelActive : TYPE.capsLabel),
+              fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap',
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {visible.length === 0 ? (
+        <EmptyState sub="Snap a receipt to get started.">No expenses yet.</EmptyState>
+      ) : (
+        groupKeys.map(monthKey => {
+          const monthLabel = new Date(monthKey + '-01').toLocaleString('en-GB', { month: 'long', year: 'numeric' });
+          const monthTotal = grouped[monthKey].reduce((s, e) => s + e.amountPence, 0);
+          return (
+            <div key={monthKey} style={{ marginBottom: 22 }}>
+              <SectionLabel>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                  <span>{monthLabel}</span>
+                  <span style={{ ...TYPE.metaSmall, fontStyle: 'normal', fontFamily: COLOR.sans, fontVariantNumeric: 'tabular-nums' }}>
+                    {formatGbp(monthTotal)}
+                  </span>
+                </div>
+              </SectionLabel>
+              {grouped[monthKey].map(exp => (
+                <ExpenseRow key={exp.id} expense={exp} onTap={() => setDetail(exp)} />
+              ))}
+            </div>
+          );
+        })
+      )}
+
+      {/* Export footer */}
+      {expenses.length > 0 && (
+        <div style={{ marginTop: 32, padding: '20px 0', borderTop: `1px solid ${COLOR.bone}` }}>
+          <div style={{ ...TYPE.eyebrow, marginBottom: 10 }}>Export</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <button onClick={() => exportExpensesCsv(expenses, filter, taxYearStartIso, monthStartIso, currentUser)}
+              className="salus-btn" style={{
+                ...styles.btnSecondary, width: '100%', justifyContent: 'center',
+                padding: '12px 18px', fontSize: 13,
+              }}>
+              Download CSV
+            </button>
+            <div style={{ ...TYPE.metaSmall, textAlign: 'center', lineHeight: 1.5, marginTop: 6 }}>
+              CSV is ready to import into Xero, QuickBooks, or send to your accountant.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {captureOpen && (
+        <CaptureReceiptModal
+          currentUserId={currentUser.id}
+          sessionToken={sessionToken}
+          onClose={() => setCaptureOpen(false)}
+          onSaved={() => { setCaptureOpen(false); onReload?.(); }}
+        />
+      )}
+      {detail && (
+        <ExpenseDetailModal
+          expense={detail}
+          currentUserId={currentUser.id}
+          onClose={() => setDetail(null)}
+          onUpdated={() => { setDetail(null); onReload?.(); }}
+        />
+      )}
+    </>
+  );
+}
+
+// ─── ExpenseRow ──────────────────────────────────────────────────────────
+function ExpenseRow({ expense, onTap }) {
+  const cat = EXPENSE_CATEGORIES[expense.category] || { label: expense.category };
+  const dateLabel = expense.spentOn
+    ? new Date(expense.spentOn).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+    : '';
+
+  return (
+    <button onClick={onTap} className="salus-btn" style={{
+      width: '100%', textAlign: 'left',
+      padding: '14px 4px', borderBottom: `1px solid ${COLOR.bone}`,
+      background: 'transparent', border: 'none', borderRadius: 0,
+      fontFamily: 'inherit', cursor: 'pointer',
+      display: 'flex', alignItems: 'center', gap: 12,
+    }}>
+      {expense.receiptUrl && (
+        <div style={{
+          width: 40, height: 40, borderRadius: 8,
+          backgroundImage: `url(${expense.receiptUrl})`,
+          backgroundSize: 'cover', backgroundPosition: 'center',
+          flexShrink: 0, border: `0.5px solid ${COLOR.bone}`,
+        }} />
+      )}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          ...TYPE.itemTitle,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {expense.supplier || cat.label}
+        </div>
+        <div style={{ ...TYPE.metaSmall, marginTop: 3 }}>
+          {dateLabel} · {cat.label}
+        </div>
+      </div>
+      <div style={{
+        ...TYPE.itemTitle, fontFamily: COLOR.sans, fontVariantNumeric: 'tabular-nums',
+        flexShrink: 0,
+      }}>
+        {formatGbp(expense.amountPence)}
+      </div>
+    </button>
+  );
+}
+
+// ─── CaptureReceiptModal — snap + AI extract + review + save ────────────
+function CaptureReceiptModal({ currentUserId, sessionToken, onClose, onSaved }) {
+  const [photoBase64, setPhotoBase64] = useState(null);
+  const [photoMediaType, setPhotoMediaType] = useState('image/jpeg');
+  const [extracting, setExtracting] = useState(false);
+  const [aiHint, setAiHint] = useState(null); // 'high' | 'medium' | 'low' | null
+
+  // Form fields (filled by AI or by hand)
+  const [supplier, setSupplier] = useState('');
+  const [spentOn, setSpentOn] = useState(() => new Date().toISOString().slice(0, 10));
+  const [amount, setAmount] = useState(''); // string in pounds.pence
+  const [vat, setVat] = useState('');       // string in pounds.pence
+  const [category, setCategory] = useState('other');
+  const [paymentMethod, setPaymentMethod] = useState('card');
+  const [description, setDescription] = useState('');
+
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handlePhoto = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      setError('Photo too large (8MB max).');
+      return;
+    }
+    setError(null);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const dataUrl = reader.result;
+      setPhotoBase64(dataUrl);
+      setPhotoMediaType(file.type || 'image/jpeg');
+      // Kick off AI extraction
+      setExtracting(true);
+      setAiHint(null);
+      try {
+        const resp = await fetch('/api/extract-receipt', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${sessionToken}`,
+          },
+          body: JSON.stringify({ imageBase64: dataUrl, mediaType: file.type }),
+        });
+        if (!resp.ok) throw new Error(`Extract failed (${resp.status})`);
+        const result = await resp.json();
+        if (result.supplier) setSupplier(result.supplier);
+        if (result.spentOn) setSpentOn(result.spentOn);
+        if (result.amountPence) setAmount((result.amountPence / 100).toFixed(2));
+        if (result.vatPence) setVat((result.vatPence / 100).toFixed(2));
+        if (result.suggestedCategory) setCategory(result.suggestedCategory);
+        setAiHint(result.confidence || 'medium');
+      } catch (e) {
+        console.error('Extraction failed:', e);
+        setAiHint('low');
+        // Soft fail — user can still fill in manually
+      } finally {
+        setExtracting(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const save = async () => {
+    const amountPence = Math.round(parseFloat(amount || '0') * 100);
+    const vatPence = vat.trim() ? Math.round(parseFloat(vat) * 100) : null;
+
+    if (!amountPence || amountPence <= 0) {
+      setError('Amount is required.');
+      return;
+    }
+    if (!spentOn) {
+      setError('Date is required.');
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    try {
+      let receiptUrl = null;
+      let receiptPath = null;
+
+      // Upload the photo if there is one
+      if (photoBase64) {
+        const blob = await (await fetch(photoBase64)).blob();
+        const ext = (photoMediaType.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+        const path = `${currentUserId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+        const { error: upErr } = await supabase.storage
+          .from('receipts').upload(path, blob, { cacheControl: '3600', upsert: false, contentType: photoMediaType });
+        if (upErr) throw upErr;
+        receiptPath = path;
+        // Signed URL — receipts bucket is private
+        const { data: signed } = await supabase.storage.from('receipts').createSignedUrl(path, 60 * 60 * 24 * 365);
+        receiptUrl = signed?.signedUrl || null;
+      }
+
+      const { error: insertErr } = await supabase.from('expenses').insert({
+        user_id: currentUserId,
+        supplier: supplier.trim() || null,
+        amount_pence: amountPence,
+        vat_pence: vatPence,
+        spent_on: spentOn,
+        category,
+        payment_method: paymentMethod,
+        description: description.trim() || null,
+        receipt_url: receiptUrl,
+        receipt_path: receiptPath,
+        ai_extracted: aiHint != null,
+      });
+      if (insertErr) throw insertErr;
+      onSaved();
+    } catch (e) {
+      setError(`Save failed: ${e.message || e}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return createPortal(
+    <>
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.55)', zIndex: 9998,
+        touchAction: 'none',
+      }} />
+      <div style={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        background: COLOR.cream, zIndex: 9999,
+        display: 'flex', flexDirection: 'column',
+      }}>
+        <ModalHeader
+          eyebrow="Expenses"
+          title="New receipt"
+          subtitle="Snap or upload — we'll read it for you."
+          onClose={onClose}
+        />
+        <ModalBody>
+          {/* Photo area */}
+          {!photoBase64 ? (
+            <label style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              height: 160, gap: 8, marginBottom: 18,
+              background: COLOR.sand, borderRadius: 12,
+              border: `1px dashed ${COLOR.shell}`, cursor: 'pointer',
+            }}>
+              <div style={{ fontSize: 32, color: COLOR.brown }}>📷</div>
+              <div style={{ ...TYPE.capsLabel, color: COLOR.brown }}>Snap or upload receipt</div>
+              <input type="file" accept="image/*" capture="environment"
+                onChange={handlePhoto} style={{ display: 'none' }} />
+            </label>
+          ) : (
+            <div style={{ position: 'relative', marginBottom: 14 }}>
+              <img src={photoBase64} alt="Receipt" style={{
+                width: '100%', maxHeight: 220, objectFit: 'contain',
+                borderRadius: 10, background: COLOR.sand,
+              }} />
+              <button onClick={() => { setPhotoBase64(null); setAiHint(null); }}
+                className="salus-btn" style={{
+                  position: 'absolute', top: 8, right: 8,
+                  background: 'rgba(26, 38, 32, 0.7)', color: COLOR.cream,
+                  border: 'none', borderRadius: '50%', width: 30, height: 30,
+                  fontSize: 16, lineHeight: 1, cursor: 'pointer', padding: 0,
+                }}>×</button>
+            </div>
+          )}
+
+          {extracting && (
+            <div style={{
+              padding: '10px 14px', background: '#f0ede0', borderRadius: 8,
+              marginBottom: 14, fontSize: 12, color: COLOR.brown, fontStyle: 'italic',
+              textAlign: 'center',
+            }}>
+              ✨ Reading receipt with AI…
+            </div>
+          )}
+
+          {aiHint && !extracting && (
+            <div style={{
+              padding: '10px 14px',
+              background: aiHint === 'low' ? '#fef0ec' : '#eef0e3',
+              borderRadius: 8, marginBottom: 14, fontSize: 12,
+              color: COLOR.brown, lineHeight: 1.5,
+            }}>
+              {aiHint === 'high' && 'Filled in from the receipt. Please double-check the amount and date.'}
+              {aiHint === 'medium' && 'Filled in best-guess values — please review.'}
+              {aiHint === 'low' && 'Couldn\'t read clearly — please fill in by hand.'}
+            </div>
+          )}
+
+          {/* Form */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <FormField label="Supplier">
+              <input value={supplier} onChange={e => setSupplier(e.target.value)}
+                style={styles.loginInput} placeholder="Bookers Wholesale" />
+            </FormField>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <FormField label="Date">
+                <input type="date" value={spentOn} onChange={e => setSpentOn(e.target.value)}
+                  style={styles.loginInput} />
+              </FormField>
+              <FormField label="Amount (£)">
+                <input type="number" step="0.01" min="0" value={amount}
+                  onChange={e => setAmount(e.target.value)}
+                  style={styles.loginInput} placeholder="0.00" inputMode="decimal" />
+              </FormField>
+            </div>
+
+            <FormField label="VAT (£, optional)">
+              <input type="number" step="0.01" min="0" value={vat}
+                onChange={e => setVat(e.target.value)}
+                style={styles.loginInput} placeholder="Leave blank if not VAT-registered" inputMode="decimal" />
+            </FormField>
+
+            <FormField label="Category">
+              <select value={category} onChange={e => setCategory(e.target.value)} style={styles.loginInput}>
+                {Object.entries(EXPENSE_CATEGORIES).map(([k, v]) => (
+                  <option key={k} value={k}>{v.label}</option>
+                ))}
+              </select>
+            </FormField>
+
+            <FormField label="Payment method">
+              <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} style={styles.loginInput}>
+                {Object.entries(PAYMENT_METHODS).map(([k, v]) => (
+                  <option key={k} value={k}>{v}</option>
+                ))}
+              </select>
+            </FormField>
+
+            <FormField label="Description (optional)">
+              <input value={description} onChange={e => setDescription(e.target.value)}
+                style={styles.loginInput} placeholder="Towels for the changing room" />
+            </FormField>
+
+            {error && (
+              <div style={{
+                padding: 12, background: '#fef0ec', color: COLOR.brown,
+                borderRadius: 8, fontSize: 13,
+              }}>{error}</div>
+            )}
+          </div>
+        </ModalBody>
+        <ModalFooter>
+          <button onClick={save} disabled={saving || extracting} className="salus-btn" style={{
+            ...styles.btnPrimary, width: '100%', justifyContent: 'center',
+            padding: '14px 22px', fontSize: 14,
+          }}>
+            {saving ? 'Saving…' : 'Save expense'}
+          </button>
+        </ModalFooter>
+      </div>
+    </>
+  , document.body);
+}
+
+// ─── ExpenseDetailModal — view / edit / delete a single expense ─────────
+function ExpenseDetailModal({ expense, currentUserId, onClose, onUpdated }) {
+  const [editing, setEditing] = useState(false);
+  const [supplier, setSupplier] = useState(expense.supplier || '');
+  const [spentOn, setSpentOn] = useState(expense.spentOn || '');
+  const [amount, setAmount] = useState((expense.amountPence / 100).toFixed(2));
+  const [vat, setVat] = useState(expense.vatPence != null ? (expense.vatPence / 100).toFixed(2) : '');
+  const [category, setCategory] = useState(expense.category);
+  const [paymentMethod, setPaymentMethod] = useState(expense.paymentMethod || 'card');
+  const [description, setDescription] = useState(expense.description || '');
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    const amountPence = Math.round(parseFloat(amount || '0') * 100);
+    const vatPence = vat.trim() ? Math.round(parseFloat(vat) * 100) : null;
+    setSaving(true);
+    try {
+      const { error } = await supabase.from('expenses').update({
+        supplier: supplier.trim() || null,
+        amount_pence: amountPence,
+        vat_pence: vatPence,
+        spent_on: spentOn,
+        category,
+        payment_method: paymentMethod,
+        description: description.trim() || null,
+        updated_at: new Date().toISOString(),
+      }).eq('id', expense.id);
+      if (error) throw error;
+      onUpdated();
+    } catch (e) {
+      alert('Update failed: ' + (e.message || e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!confirm('Delete this expense? This cannot be undone.')) return;
+    setSaving(true);
+    try {
+      if (expense.receiptPath) {
+        await supabase.storage.from('receipts').remove([expense.receiptPath]);
+      }
+      const { error } = await supabase.from('expenses').delete().eq('id', expense.id);
+      if (error) throw error;
+      onUpdated();
+    } catch (e) {
+      alert('Delete failed: ' + (e.message || e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return createPortal(
+    <>
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.55)', zIndex: 9998,
+        touchAction: 'none',
+      }} />
+      <div style={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        background: COLOR.cream, zIndex: 9999,
+        display: 'flex', flexDirection: 'column',
+      }}>
+        <ModalHeader
+          eyebrow={EXPENSE_CATEGORIES[expense.category]?.label || 'Expense'}
+          title={editing ? 'Edit expense' : (expense.supplier || formatGbp(expense.amountPence))}
+          subtitle={!editing && expense.spentOn ? new Date(expense.spentOn).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : null}
+          onClose={onClose}
+        />
+        <ModalBody>
+          {expense.receiptUrl && !editing && (
+            <a href={expense.receiptUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'block', marginBottom: 18 }}>
+              <img src={expense.receiptUrl} alt="Receipt" style={{
+                width: '100%', maxHeight: 300, objectFit: 'contain',
+                borderRadius: 10, background: COLOR.sand,
+              }} />
+            </a>
+          )}
+
+          {!editing ? (
+            <>
+              <div style={{
+                fontFamily: COLOR.serif, fontSize: 36, fontWeight: 400,
+                color: COLOR.forest, letterSpacing: '-0.015em', marginBottom: 4,
+              }}>
+                {formatGbp(expense.amountPence)}
+              </div>
+              {expense.vatPence != null && (
+                <div style={{ ...TYPE.metaSmall, marginBottom: 18 }}>
+                  inc. {formatGbp(expense.vatPence)} VAT
+                </div>
+              )}
+
+              <SectionDivider>Details</SectionDivider>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <DetailRow label="Supplier" value={expense.supplier || '—'} />
+                <DetailRow label="Category" value={EXPENSE_CATEGORIES[expense.category]?.label || expense.category} />
+                <DetailRow label="Payment" value={PAYMENT_METHODS[expense.paymentMethod] || '—'} />
+                {expense.description && <DetailRow label="Notes" value={expense.description} />}
+                {expense.aiExtracted && <DetailRow label="Pre-filled" value="By AI from receipt photo" />}
+              </div>
+            </>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <FormField label="Supplier">
+                <input value={supplier} onChange={e => setSupplier(e.target.value)} style={styles.loginInput} />
+              </FormField>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <FormField label="Date">
+                  <input type="date" value={spentOn} onChange={e => setSpentOn(e.target.value)} style={styles.loginInput} />
+                </FormField>
+                <FormField label="Amount (£)">
+                  <input type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} style={styles.loginInput} inputMode="decimal" />
+                </FormField>
+              </div>
+              <FormField label="VAT (£, optional)">
+                <input type="number" step="0.01" value={vat} onChange={e => setVat(e.target.value)} style={styles.loginInput} inputMode="decimal" />
+              </FormField>
+              <FormField label="Category">
+                <select value={category} onChange={e => setCategory(e.target.value)} style={styles.loginInput}>
+                  {Object.entries(EXPENSE_CATEGORIES).map(([k, v]) => (
+                    <option key={k} value={k}>{v.label}</option>
+                  ))}
+                </select>
+              </FormField>
+              <FormField label="Payment method">
+                <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} style={styles.loginInput}>
+                  {Object.entries(PAYMENT_METHODS).map(([k, v]) => (
+                    <option key={k} value={k}>{v}</option>
+                  ))}
+                </select>
+              </FormField>
+              <FormField label="Description">
+                <input value={description} onChange={e => setDescription(e.target.value)} style={styles.loginInput} />
+              </FormField>
+            </div>
+          )}
+        </ModalBody>
+        <ModalFooter>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {!editing ? (
+              <>
+                <button onClick={() => setEditing(true)} className="salus-btn" style={{
+                  ...styles.btnSecondary, flex: 1, padding: '12px 18px', fontSize: 13,
+                }}>
+                  Edit
+                </button>
+                <button onClick={remove} disabled={saving} className="salus-btn" style={{
+                  ...styles.btnDanger, padding: '12px 18px', fontSize: 13,
+                }}>
+                  Delete
+                </button>
+              </>
+            ) : (
+              <button onClick={save} disabled={saving} className="salus-btn" style={{
+                ...styles.btnPrimary, width: '100%', justifyContent: 'center',
+                padding: '14px 22px', fontSize: 14,
+              }}>
+                {saving ? 'Saving…' : 'Save changes'}
+              </button>
+            )}
+          </div>
+        </ModalFooter>
+      </div>
+    </>
+  , document.body);
+}
+
+// ─── DetailRow — for the expense view ────────────────────────────────────
+function DetailRow({ label, value }) {
+  return (
+    <div style={{
+      display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+      gap: 14, padding: '8px 0',
+    }}>
+      <span style={{ ...TYPE.eyebrow, flexShrink: 0 }}>{label}</span>
+      <span style={{ ...TYPE.body, color: COLOR.brown, textAlign: 'right' }}>{value}</span>
+    </div>
+  );
+}
+
+// ─── exportExpensesCsv — download a CSV file of expenses ─────────────────
+function exportExpensesCsv(expenses, filter, taxYearStartIso, monthStartIso, currentUser) {
+  let visible = expenses;
+  if (filter === 'month')    visible = expenses.filter(e => e.spentOn >= monthStartIso);
+  if (filter === 'tax_year') visible = expenses.filter(e => e.spentOn >= taxYearStartIso);
+
+  const rows = [
+    ['Date', 'Supplier', 'Category', 'Amount (£)', 'VAT (£)', 'Net (£)', 'Payment', 'Description', 'Receipt URL']
+  ];
+  visible.forEach(e => {
+    const amount = (e.amountPence / 100).toFixed(2);
+    const vat = e.vatPence != null ? (e.vatPence / 100).toFixed(2) : '';
+    const net = e.vatPence != null ? ((e.amountPence - e.vatPence) / 100).toFixed(2) : amount;
+    rows.push([
+      e.spentOn,
+      e.supplier || '',
+      EXPENSE_CATEGORIES[e.category]?.label || e.category,
+      amount, vat, net,
+      PAYMENT_METHODS[e.paymentMethod] || '',
+      e.description || '',
+      e.receiptUrl || '',
+    ]);
+  });
+  const csv = rows.map(r => r.map(cell => {
+    const s = String(cell ?? '');
+    return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+  }).join(',')).join('\n');
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const today = new Date().toISOString().slice(0, 10);
+  const name = (currentUser?.name || 'expenses').toLowerCase().replace(/[^a-z0-9]/g, '-');
+  a.download = `${name}-expenses-${filter}-${today}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ─── ExpensesModal — full-screen wrapper around ExpensesPage ─────────────
+function ExpensesModal({ data, currentUser, sessionToken, onClose, onReload }) {
+  return createPortal(
+    <>
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.55)', zIndex: 9998,
+        touchAction: 'none',
+      }} />
+      <div style={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        background: COLOR.cream, zIndex: 9999,
+        display: 'flex', flexDirection: 'column',
+      }}>
+        <div style={{
+          padding: '14px 22px',
+          paddingTop: 'calc(14px + env(safe-area-inset-top, 0px))',
+          borderBottom: `1px solid ${COLOR.bone}`,
+          flexShrink: 0, background: COLOR.cream,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          <div style={{ ...TYPE.eyebrow }}>Expenses</div>
+          <CloseButton onClick={onClose} />
+        </div>
+        <div style={{
+          flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch',
+          overscrollBehavior: 'contain',
+          padding: '18px 22px 32px',
+        }}>
+          <ExpensesPage
+            data={data}
+            currentUser={currentUser}
+            sessionToken={sessionToken}
+            onReload={onReload}
+          />
+        </div>
+      </div>
+    </>
+  , document.body);
+}
+
 function StockItemRow({ item, busy, isManager, onDecrement, onIncrement, onEdit }) {
   const isLow = item.currentQty <= item.lowThreshold;
   const isOut = item.currentQty === 0;
@@ -11238,7 +12036,7 @@ const RATE_PER_SESSION = 30; // £ per class taught
 // ME — personal hub: profile, stats, settings link
 // ──────────────────────────────────────────────────────────────────────────────
 
-function MePage({ data, currentUser, isManager, emailIntegration, onOpenSettings, onSignOut, onShowInvoices, onShowTimeOff, onShowTeam, onConnectGmail, onDisconnectGmail }) {
+function MePage({ data, currentUser, isManager, emailIntegration, onOpenSettings, onSignOut, onShowInvoices, onShowTimeOff, onShowTeam, onShowExpenses, onConnectGmail, onDisconnectGmail }) {
   const myClasses = data.classes.filter(c => c.coachId === currentUser.id);
   const sessionCount = myClasses.length;
   const totalMinutes = myClasses.reduce((acc, c) => acc + c.dur, 0);
@@ -11327,6 +12125,25 @@ function MePage({ data, currentUser, isManager, emailIntegration, onOpenSettings
       {/* Push notifications — inline, not in a modal */}
       <section style={styles.homeSection}>
         <PushNotificationsSection />
+      </section>
+
+      {/* Your money */}
+      <section style={styles.homeSection}>
+        <div style={styles.homeSectionHead}>
+          <div style={styles.homeSectionTitle}>Your money</div>
+        </div>
+        <div style={styles.meActionsList}>
+          <button onClick={onShowExpenses} className="salus-btn" style={styles.meActionRow}>
+            <FileText size={18} color="#5c4a38" />
+            <div style={{ flex: 1, textAlign: 'left' }}>
+              <div style={{ fontSize: 14, color: '#1a2620' }}>Expenses</div>
+              <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
+                {data.expenses?.length || 0} receipts · for your tax return
+              </div>
+            </div>
+            <ChevronRight size={16} color="#a59478" />
+          </button>
+        </div>
       </section>
 
       {/* Time off & bank holidays */}
