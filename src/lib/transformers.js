@@ -336,3 +336,20 @@ export const onboardingStepFromDb = (row) => ({
   completedAt: row.completed_at ? new Date(row.completed_at).getTime() : 0,
   data: row.data || null,
 });
+
+export const expenseFromDb = (row) => ({
+  id: row.id,
+  userId: row.user_id,
+  supplier: row.supplier || '',
+  amountPence: row.amount_pence || 0,
+  vatPence: row.vat_pence,           // null if not tracked
+  spentOn: row.spent_on || null,
+  category: row.category || 'other',
+  paymentMethod: row.payment_method || '',
+  description: row.description || '',
+  receiptUrl: row.receipt_url || null,
+  receiptPath: row.receipt_path || null,
+  aiExtracted: !!row.ai_extracted,
+  createdAt: row.created_at ? new Date(row.created_at).getTime() : 0,
+  updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : 0,
+});
