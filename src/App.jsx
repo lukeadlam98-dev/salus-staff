@@ -4268,29 +4268,57 @@ function EmailCard({ msg, busy, density, expanded, onToggleExpand, onMarkHandled
         </div>
       )}
 
-      {/* Quiet action row */}
-      <div style={{ display: 'flex', gap: 18, marginTop: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+      {/* Action row — bigger tap targets with icons */}
+      <div style={{
+        display: 'flex', gap: 8, marginTop: 16,
+        paddingTop: 14, borderTop: '1px solid #efe7d2',
+      }}>
         {isHandled ? (
-          <button onClick={onUnmarkHandled} disabled={busy} className="salus-btn"
-            style={{ background: 'transparent', padding: 0, color: '#a59478', fontSize: 12, letterSpacing: '0.02em' }}>
-            Unmark as done
+          <button onClick={onUnmarkHandled} disabled={busy} className="salus-btn" style={{
+            background: 'transparent', border: '1px solid #efe7d2',
+            padding: '10px 14px', borderRadius: 999,
+            color: '#a59478', fontSize: 12, fontWeight: 500, letterSpacing: '0.02em',
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            fontFamily: 'inherit', cursor: 'pointer',
+            minHeight: 40,
+          }}>
+            <RotateCcw size={13} /> Unmark
           </button>
         ) : (
           <>
             {onDraftReply && (
-              <button onClick={onDraftReply} className="salus-btn"
-                style={{ background: 'transparent', padding: 0, color: '#1a2620', fontSize: 12, fontWeight: 600, letterSpacing: '0.02em' }}>
-                Draft reply
+              <button onClick={onDraftReply} className="salus-btn" style={{
+                background: '#1a2620', border: '1px solid #1a2620',
+                padding: '10px 16px', borderRadius: 999,
+                color: '#fffdf7', fontSize: 12, fontWeight: 500, letterSpacing: '0.04em',
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                fontFamily: 'inherit', cursor: 'pointer',
+                flex: 1, justifyContent: 'center',
+                minHeight: 40,
+              }}>
+                <Sparkles size={13} /> Draft reply
               </button>
             )}
-            <button onClick={onMarkHandled} disabled={busy} className="salus-btn"
-              style={{ background: 'transparent', padding: 0, color: '#5b7245', fontSize: 12, fontWeight: 500, letterSpacing: '0.02em' }}>
-              Mark as replied
+            <button onClick={onMarkHandled} disabled={busy} className="salus-btn" style={{
+              background: 'transparent', border: '1px solid #cdd9bc',
+              padding: '10px 14px', borderRadius: 999,
+              color: '#5b7245', fontSize: 12, fontWeight: 500, letterSpacing: '0.02em',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              fontFamily: 'inherit', cursor: 'pointer',
+              minHeight: 40,
+            }}>
+              <Check size={13} /> Done
             </button>
             {onNudge && (
-              <button onClick={onNudge} className="salus-btn"
-                style={{ background: 'transparent', padding: 0, color: '#7a8270', fontSize: 12, letterSpacing: '0.02em' }}>
-                Pass to teammate
+              <button onClick={onNudge} className="salus-btn" style={{
+                background: 'transparent', border: '1px solid #efe7d2',
+                padding: '10px 14px', borderRadius: 999,
+                color: '#7a8270', fontSize: 12, fontWeight: 500, letterSpacing: '0.02em',
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                fontFamily: 'inherit', cursor: 'pointer',
+                minHeight: 40,
+              }} aria-label="Pass to teammate">
+                <Users size={13} />
               </button>
             )}
           </>
@@ -4423,99 +4451,129 @@ function DraftReplyModal({ msg, onClose, onMarkHandled }) {
         zIndex: 200,
       }} />
       <div style={{
-        position: 'fixed', left: 0, right: 0, bottom: 0,
-        background: '#fffdf7', borderRadius: '20px 20px 0 0',
-        zIndex: 201, padding: '20px 22px 28px',
-        paddingBottom: 'calc(28px + env(safe-area-inset-bottom))',
-        maxHeight: '92vh', overflowY: 'auto',
+        position: 'fixed', left: 0, right: 0, top: 'env(safe-area-inset-top, 0px)', bottom: 0,
+        background: '#fffdf7', borderRadius: '24px 24px 0 0',
+        zIndex: 201,
+        display: 'flex', flexDirection: 'column',
         boxShadow: '0 -10px 40px rgba(26, 38, 32, 0.2)',
       }}>
-        {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }}>
-          <div>
-            <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 4 }}>
-              Draft reply
+        {/* Header — fixed at top */}
+        <div style={{
+          padding: '18px 22px 14px',
+          borderBottom: '1px solid #efe7d2',
+          flexShrink: 0,
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 4 }}>
+                Draft reply
+              </div>
+              <div style={{
+                fontFamily: '"Playfair Display", serif',
+                fontSize: 20, fontWeight: 400, color: '#1a2620', letterSpacing: '-0.005em',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>
+                To {replyTo}
+              </div>
+              <div style={{ fontSize: 12, color: '#7a8270', marginTop: 4, fontStyle: 'italic',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {subject}
+              </div>
             </div>
-            <div style={{
-              fontFamily: '"Playfair Display", serif',
-              fontSize: 20, fontWeight: 400, color: '#1a2620', letterSpacing: '-0.005em',
-            }}>
-              To {replyTo}
-            </div>
+            <button onClick={onClose} className="salus-btn" style={{
+              background: 'transparent', border: 'none', padding: '8px 4px 8px 12px', marginLeft: 8,
+              color: '#a59478', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
+              flexShrink: 0,
+            }}>Close</button>
           </div>
-          <button onClick={onClose} className="salus-btn" style={{
-            background: 'transparent', border: 'none', padding: 4,
-            color: '#a59478', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
-          }}>Close</button>
         </div>
 
-        <div style={{ fontSize: 12, color: '#7a8270', marginBottom: 12, fontStyle: 'italic' }}>
-          {subject}
+        {/* Body — scrollable */}
+        <div style={{
+          flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch',
+          padding: '18px 22px',
+        }}>
+          {loading && (
+            <div style={{ padding: '40px 0', textAlign: 'center' }}>
+              <div style={{
+                fontFamily: '"Playfair Display", serif', fontSize: 16, color: '#5c4a38',
+                fontStyle: 'italic',
+              }}>
+                {regenerating ? 'Rewriting…' : 'Drafting your reply…'}
+              </div>
+            </div>
+          )}
+
+          {error && !loading && (
+            <div style={{
+              padding: 14, background: '#fef0ec', color: '#5c4a38', borderRadius: 8,
+              fontSize: 13,
+            }}>
+              {error}
+            </div>
+          )}
+
+          {!loading && draft && (
+            <>
+              <textarea
+                id="salus-draft-textarea"
+                value={draft}
+                onChange={e => setDraft(e.target.value)}
+                style={{
+                  width: '100%', minHeight: 280, padding: '16px 18px',
+                  borderRadius: 14, border: '1px solid #efe7d2', background: '#fffdf7',
+                  fontFamily: 'inherit', fontSize: 15, lineHeight: 1.6, color: '#1a2620',
+                  resize: 'vertical', boxSizing: 'border-box',
+                }}
+              />
+              <div style={{
+                fontSize: 11, color: '#a59478', marginTop: 12, textAlign: 'center',
+                lineHeight: 1.5,
+              }}>
+                AI draft — edit before sending.
+              </div>
+            </>
+          )}
         </div>
 
-        {loading && (
-          <div style={{ padding: '30px 0', textAlign: 'center' }}>
-            <div style={{
-              fontFamily: '"Playfair Display", serif', fontSize: 16, color: '#5c4a38',
-              fontStyle: 'italic',
-            }}>
-              {regenerating ? 'Rewriting…' : 'Drafting your reply…'}
-            </div>
-          </div>
-        )}
-
-        {error && !loading && (
-          <div style={{
-            padding: 14, background: '#fef0ec', color: '#5c4a38', borderRadius: 8,
-            fontSize: 13, marginBottom: 16,
-          }}>
-            {error}
-          </div>
-        )}
-
+        {/* Sticky footer — actions always visible */}
         {!loading && draft && (
-          <textarea
-            id="salus-draft-textarea"
-            value={draft}
-            onChange={e => setDraft(e.target.value)}
-            style={{
-              width: '100%', minHeight: 220, padding: '14px 16px',
-              borderRadius: 12, border: '1px solid #efe7d2', background: '#fffdf7',
-              fontFamily: 'inherit', fontSize: 14, lineHeight: 1.6, color: '#1a2620',
-              resize: 'vertical', boxSizing: 'border-box',
-            }}
-          />
-        )}
-
-        {!loading && (
-          <div style={{ display: 'flex', gap: 10, marginTop: 18, flexWrap: 'wrap' }}>
+          <div style={{
+            padding: '14px 18px',
+            paddingBottom: 'calc(14px + env(safe-area-inset-bottom))',
+            borderTop: '1px solid #efe7d2',
+            background: '#fffdf7',
+            flexShrink: 0,
+            display: 'flex', flexDirection: 'column', gap: 10,
+          }}>
             <button onClick={openGmail} className="salus-btn" style={{
-              ...styles.btnPrimary, flex: 1, justifyContent: 'center',
+              ...styles.btnPrimary, width: '100%', justifyContent: 'center',
+              padding: '14px 22px', fontSize: 14,
             }}>
               {copied ? 'Copied — paste in Gmail' : 'Copy & open Gmail'}
             </button>
-            <button onClick={copyToClipboard} className="salus-btn" style={styles.btnGhost}>
-              {copied ? 'Copied' : 'Copy only'}
-            </button>
-            <button onClick={regenerate} className="salus-btn" style={styles.btnGhost}>
-              Rewrite
-            </button>
-            {onMarkHandled && (
-              <button onClick={() => { onMarkHandled(); onClose(); }} className="salus-btn" style={{
-                ...styles.btnGhost, color: '#5b7245',
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={copyToClipboard} className="salus-btn" style={{
+                ...styles.btnGhost, flex: 1, justifyContent: 'center',
+                padding: '10px 12px',
               }}>
-                Mark as replied
+                {copied ? 'Copied' : 'Copy only'}
               </button>
-            )}
-          </div>
-        )}
-
-        {!loading && draft && (
-          <div style={{
-            fontSize: 11, color: '#a59478', marginTop: 14, textAlign: 'center',
-            lineHeight: 1.5,
-          }}>
-            AI draft. Edit before sending. Tap <em>Copy &amp; open Gmail</em>, paste, review, send.
+              <button onClick={regenerate} className="salus-btn" style={{
+                ...styles.btnGhost, flex: 1, justifyContent: 'center',
+                padding: '10px 12px',
+              }}>
+                Rewrite
+              </button>
+              {onMarkHandled && (
+                <button onClick={() => { onMarkHandled(); onClose(); }} className="salus-btn" style={{
+                  ...styles.btnGhost, flex: 1, justifyContent: 'center',
+                  padding: '10px 12px', color: '#5b7245',
+                }}>
+                  Done
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -7928,12 +7986,20 @@ function WeekViewBody({ items, allItems, weekOffset, setWeekOffset, getDate, get
       })}
 
       {visible.length === 0 && (
-        <div style={{ padding: 40, textAlign: 'center', color: '#7a8270' }}>
-          {filter === 'needsCover'
-            ? 'Nothing needs cover this week.'
-            : filter === 'mine'
-              ? `You have no ${totalLabel} this week.`
-              : `No ${totalLabel} scheduled for this week.`}
+        <div style={{ padding: '60px 20px', textAlign: 'center' }}>
+          <div style={{
+            fontFamily: '"Playfair Display", serif', fontSize: 18, color: '#5c4a38',
+            fontStyle: 'italic', letterSpacing: '-0.005em',
+          }}>
+            {filter === 'needsCover'
+              ? 'Nothing needs cover.'
+              : filter === 'mine'
+                ? `You have no ${totalLabel} this week.`
+                : `No ${totalLabel} this week.`}
+          </div>
+          {filter === 'needsCover' && (
+            <div style={{ fontSize: 12, color: '#a59478', marginTop: 8 }}>The team is covered.</div>
+          )}
         </div>
       )}
     </>
@@ -8057,78 +8123,122 @@ function MonthGrid({ items, monthOffset, setMonthOffset, getDate, isCover, onDay
 
 // Shared subcomponents used by both Timetable and FOHSchedule
 function ScheduleWeekNav({ weekStart, weekOffset, setWeekOffset }) {
+  const startLabel = weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  const endLabel = addDays(weekStart, 6).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
   return (
-    <div style={styles.weekNav}>
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 14,
+      padding: '14px 0 18px', justifyContent: 'space-between',
+    }}>
       <button
         onClick={() => setWeekOffset(w => Math.max(w - 1, -2))}
         className="salus-btn"
-        style={styles.weekNavBtn}
+        style={{
+          background: 'transparent', border: 'none', padding: 4,
+          color: weekOffset <= -2 ? '#d4cdb8' : '#7a8270',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
         disabled={weekOffset <= -2}
       >
-        <ChevronLeft size={18} />
+        <ChevronLeft size={20} />
       </button>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <div style={styles.weekNavLabel}>
-          {weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} – {
-            addDays(weekStart, 6).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
-          }
+
+      <div style={{ flex: 1, textAlign: 'center' }}>
+        <div style={{
+          fontFamily: '"Playfair Display", serif',
+          fontSize: 18, fontWeight: 400, color: '#1a2620',
+          letterSpacing: '-0.005em', lineHeight: 1.1,
+        }}>
+          {startLabel} – {endLabel}
         </div>
         {weekOffset !== 0 && (
-          <button
-            onClick={() => setWeekOffset(0)}
-            className="salus-btn"
-            style={styles.weekTodayLink}
-          >
-            Jump to this week
+          <button onClick={() => setWeekOffset(0)} className="salus-btn" style={{
+            background: 'transparent', border: 'none', padding: '4px 0 0',
+            color: '#a59478', fontSize: 10, letterSpacing: '0.12em',
+            textTransform: 'uppercase', fontWeight: 500, cursor: 'pointer',
+          }}>
+            Back to this week
           </button>
         )}
       </div>
+
       <button
         onClick={() => setWeekOffset(w => Math.min(w + 1, 12))}
         className="salus-btn"
-        style={styles.weekNavBtn}
+        style={{
+          background: 'transparent', border: 'none', padding: 4,
+          color: weekOffset >= 12 ? '#d4cdb8' : '#7a8270',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
         disabled={weekOffset >= 12}
       >
-        <ChevronRight size={18} />
+        <ChevronRight size={20} />
       </button>
     </div>
   );
 }
 
 function ScheduleStatsRow({ coverCount, totalCount, totalLabel }) {
+  if (coverCount === 0 && totalCount === 0) return null;
   return (
-    <div style={styles.scheduleStatsRow}>
-      <div style={{ flex: 1 }}>
+    <div style={{
+      display: 'flex', alignItems: 'baseline', gap: 20,
+      padding: '0 4px 18px',
+    }}>
+      <div>
         <div style={{
-          fontSize: 32, fontWeight: 700, lineHeight: 1,
-          color: coverCount > 0 ? '#c8442a' : '#5c8a5a',
-          fontFamily: '"Playfair Display", Georgia, serif',
+          fontFamily: '"Playfair Display", serif',
+          fontSize: 28, fontWeight: 400,
+          color: coverCount > 0 ? '#c8442a' : '#1a2620',
+          lineHeight: 1, letterSpacing: '-0.02em',
         }}>
-          {coverCount}
+          {totalCount}
         </div>
-        <div style={{ fontSize: 11, color: '#7a8270', marginTop: 4, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6 }}>
-          {coverCount === 0 ? 'all filled this week' : `${coverCount === 1 ? 'needs' : 'need'} cover`}
-        </div>
-      </div>
-      <div style={{ textAlign: 'right' }}>
-        <div style={{ fontSize: 11, color: '#7a8270', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6 }}>
-          Total
-        </div>
-        <div style={{ fontSize: 14, color: '#5c4a38', marginTop: 4, fontWeight: 600 }}>
-          {totalCount} {totalLabel}
+        <div style={{
+          fontSize: 10, color: '#a59478', marginTop: 6,
+          fontWeight: 500, textTransform: 'uppercase', letterSpacing: 2,
+        }}>
+          {totalLabel}
         </div>
       </div>
+      {coverCount > 0 && (
+        <div>
+          <div style={{
+            fontFamily: '"Playfair Display", serif',
+            fontSize: 28, fontWeight: 400, color: '#c8442a',
+            lineHeight: 1, letterSpacing: '-0.02em',
+          }}>
+            {coverCount}
+          </div>
+          <div style={{
+            fontSize: 10, color: '#c8442a', marginTop: 6,
+            fontWeight: 500, textTransform: 'uppercase', letterSpacing: 2,
+          }}>
+            {coverCount === 1 ? 'needs cover' : 'need cover'}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 function ScheduleFilterRow({ filter, setFilter, isManager }) {
   return (
-    <div style={styles.scheduleFilterRow}>
+    <div style={{
+      display: 'flex', gap: 20, padding: '0 4px 8px',
+      borderBottom: '1px solid #efe7d2', marginBottom: 4,
+    }}>
       <button
         onClick={() => setFilter('all')}
         className="salus-btn"
-        style={{ ...styles.scheduleFilterPill, ...(filter === 'all' ? styles.scheduleFilterPillActive : {}) }}
+        style={{
+          padding: '6px 0', background: 'transparent', border: 'none',
+          borderBottom: filter === 'all' ? '1.5px solid #1a2620' : '1.5px solid transparent',
+          fontSize: 11, fontWeight: filter === 'all' ? 600 : 500,
+          color: filter === 'all' ? '#1a2620' : '#a59478',
+          letterSpacing: '0.08em', textTransform: 'uppercase',
+          fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1,
+        }}
       >
         All
       </button>
@@ -8136,10 +8246,12 @@ function ScheduleFilterRow({ filter, setFilter, isManager }) {
         onClick={() => setFilter('needsCover')}
         className="salus-btn"
         style={{
-          ...styles.scheduleFilterPill,
-          ...(filter === 'needsCover'
-            ? { background: '#c8442a', color: '#fff', borderColor: '#c8442a' }
-            : {}),
+          padding: '6px 0', background: 'transparent', border: 'none',
+          borderBottom: filter === 'needsCover' ? '1.5px solid #c8442a' : '1.5px solid transparent',
+          fontSize: 11, fontWeight: filter === 'needsCover' ? 600 : 500,
+          color: filter === 'needsCover' ? '#c8442a' : '#a59478',
+          letterSpacing: '0.08em', textTransform: 'uppercase',
+          fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1,
         }}
       >
         Needs cover
@@ -8148,7 +8260,14 @@ function ScheduleFilterRow({ filter, setFilter, isManager }) {
         <button
           onClick={() => setFilter('mine')}
           className="salus-btn"
-          style={{ ...styles.scheduleFilterPill, ...(filter === 'mine' ? styles.scheduleFilterPillActive : {}) }}
+          style={{
+            padding: '6px 0', background: 'transparent', border: 'none',
+            borderBottom: filter === 'mine' ? '1.5px solid #1a2620' : '1.5px solid transparent',
+            fontSize: 11, fontWeight: filter === 'mine' ? 600 : 500,
+            color: filter === 'mine' ? '#1a2620' : '#a59478',
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1,
+          }}
         >
           Mine
         </button>
@@ -8158,17 +8277,20 @@ function ScheduleFilterRow({ filter, setFilter, isManager }) {
 }
 
 function ScheduleCard({ onClick, timeLeft, timeBottom, title, subtitle, person, needsCover, isMine, isManager }) {
-  const open = !person;
   return (
     <button
       onClick={onClick}
       className="salus-btn"
-      style={{
-        ...styles.scheduleCard,
-        ...(needsCover ? styles.scheduleCardCover : {}),
-        ...(isMine ? styles.scheduleCardMine : {}),
-      }}
+      style={styles.scheduleCard}
     >
+      {/* Left accent indicator — sage for mine, coral for cover */}
+      {(isMine || needsCover) && (
+        <span style={{
+          position: 'absolute', left: -2, top: 14, bottom: 14, width: 2,
+          background: needsCover ? '#c8442a' : '#7a8c5c', borderRadius: 1,
+        }} />
+      )}
+
       <div style={styles.scheduleCardTime}>
         <div style={styles.scheduleCardTimeMain}>{timeLeft}</div>
         {timeBottom && <div style={styles.scheduleCardTimeSub}>{timeBottom}</div>}
@@ -8179,10 +8301,13 @@ function ScheduleCard({ onClick, timeLeft, timeBottom, title, subtitle, person, 
       </div>
       <div style={styles.scheduleCardRight}>
         {needsCover ? (
-          <span style={styles.scheduleCoverChip}>Cover</span>
+          <span style={styles.scheduleCoverChip}>
+            <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#c8442a' }} />
+            Cover
+          </span>
         ) : person ? (
           <>
-            <UserAvatar user={person} size={26} fontSize={11} />
+            <UserAvatar user={person} size={24} fontSize={10} />
             <span style={styles.scheduleCardName}>{person.name?.split(' ')[0]}</span>
           </>
         ) : (
@@ -9869,6 +9994,38 @@ function PushNotificationsSection() {
     }
   };
 
+  const handleDisable = async () => {
+    if (!confirm('Turn off push notifications? You can turn them back on anytime.')) return;
+    setWorking(true);
+    setErrorMsg('');
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        // Tell the server to delete the subscription first
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user?.id) {
+            await supabase
+              .from('push_subscriptions')
+              .delete()
+              .eq('user_id', session.user.id)
+              .eq('endpoint', sub.endpoint);
+          }
+        } catch (e) {
+          console.warn('Failed to delete server subscription record:', e);
+        }
+        // Then unsubscribe locally
+        await sub.unsubscribe();
+      }
+      setStatus('supported');
+    } catch (e) {
+      setErrorMsg(`Couldn't turn off: ${e.message || 'unknown error'}`);
+    } finally {
+      setWorking(false);
+    }
+  };
+
   return (
     <>
       <h2 style={{ ...styles.h2, marginTop: 30, marginBottom: 4 }}>Push notifications</h2>
@@ -9914,10 +10071,24 @@ function PushNotificationsSection() {
       )}
       {status === 'subscribed' && (
         <div style={{ ...styles.pushBox, background: '#e8efe1', borderColor: '#c4d1b8' }}>
-          <strong style={{ color: '#5c4a38' }}>✓ Notifications are on.</strong>
-          <p style={{ fontSize: 12, color: '#5c4a38', marginTop: 6 }}>
-            You'll get a banner when cover is needed or someone messages the team.
-          </p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+            <div style={{ flex: 1 }}>
+              <strong style={{ color: '#5c4a38' }}>Notifications are on.</strong>
+              <p style={{ fontSize: 12, color: '#5c4a38', marginTop: 6 }}>
+                You'll get a banner when cover is needed or someone messages the team.
+              </p>
+            </div>
+            <button onClick={handleDisable} disabled={working} className="salus-btn" style={{
+              background: 'transparent', border: 'none', padding: 4,
+              color: '#7a8270', fontSize: 10, letterSpacing: '0.12em',
+              textTransform: 'uppercase', fontWeight: 500, whiteSpace: 'nowrap',
+            }}>
+              {working ? 'Turning off…' : 'Turn off'}
+            </button>
+          </div>
+          {errorMsg && (
+            <p style={{ fontSize: 12, color: '#c8442a', marginTop: 10, lineHeight: 1.5 }}>{errorMsg}</p>
+          )}
         </div>
       )}
       {status === 'denied' && (
@@ -13468,17 +13639,25 @@ const styles = {
   },
   fohStatNumber: { fontSize: 22, fontWeight: 700, color: '#5c4a38', lineHeight: 1 },
   fohStatLabel: { fontSize: 10, color: '#7a8270', fontWeight: 600, marginTop: 4, textTransform: 'uppercase', letterSpacing: 0.4 },
-  fohDayBlock: { padding: '14px 14px 0' },
+  fohDayBlock: { padding: '20px 0 4px' },
   fohDayHeader: {
-    display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8,
-    padding: '6px 10px', borderRadius: 8, background: '#fffdf7',
+    display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 4,
+    padding: '0 4px 10px', background: 'transparent',
+    borderBottom: '1px solid #efe7d2',
   },
-  fohDayHeaderToday: { background: '#fef0ea' },
-  fohDayName: { fontSize: 13, fontWeight: 700, color: '#5c4a38' },
-  fohDayDate: { fontSize: 12, color: '#7a8270' },
+  fohDayHeaderToday: { background: 'transparent' },
+  fohDayName: {
+    fontFamily: '"Playfair Display", serif',
+    fontSize: 20, fontWeight: 400, color: '#1a2620',
+    letterSpacing: '-0.01em',
+  },
+  fohDayDate: {
+    fontSize: 11, color: '#a59478', letterSpacing: '0.05em',
+    textTransform: 'uppercase', fontWeight: 500,
+  },
   fohTodayBadge: {
-    background: '#c8442a', color: '#fff', fontSize: 9, fontWeight: 700,
-    padding: '2px 6px', borderRadius: 4, textTransform: 'uppercase', letterSpacing: 0.4,
+    background: 'transparent', color: '#c8442a', fontSize: 10, fontWeight: 600,
+    padding: 0, borderRadius: 0, textTransform: 'uppercase', letterSpacing: 2,
     marginLeft: 'auto',
   },
   fohShiftList: { display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 6 },
@@ -13528,71 +13707,89 @@ const styles = {
     background: '#5c4a38', color: '#fff', borderColor: '#5c4a38',
   },
   scheduleCard: {
-    display: 'flex', alignItems: 'center', gap: 10,
-    padding: '10px 12px', borderRadius: 10,
-    background: '#fffdf7', border: '1px solid #efe7d2',
+    display: 'flex', alignItems: 'center', gap: 14,
+    padding: '14px 4px', borderRadius: 0,
+    background: 'transparent', border: 'none',
+    borderBottom: '1px solid #efe7d2',
     fontFamily: 'inherit', cursor: 'pointer', width: '100%',
     textAlign: 'left',
+    position: 'relative',
   },
   scheduleCardCover: {
-    background: '#fef0ea', borderColor: '#e8b8a8',
-    borderLeftWidth: 4, borderLeftColor: '#c8442a',
+    background: 'transparent', borderColor: '#efe7d2',
   },
   scheduleCardMine: {
-    background: '#f3f5ed', borderColor: '#7a8c5c', borderWidth: 2,
+    background: 'transparent', borderColor: '#efe7d2',
   },
   scheduleCardTime: {
     display: 'flex', flexDirection: 'column', gap: 2,
-    minWidth: 78, flexShrink: 0,
+    minWidth: 64, flexShrink: 0,
   },
   scheduleCardTimeMain: {
-    fontSize: 13, fontWeight: 700, color: '#5c4a38',
-    textTransform: 'uppercase', letterSpacing: 0.4,
+    fontFamily: '"Playfair Display", serif',
+    fontSize: 17, fontWeight: 500, color: '#1a2620',
+    letterSpacing: '-0.01em',
   },
-  scheduleCardTimeSub: { fontSize: 11, color: '#7a8270' },
+  scheduleCardTimeSub: {
+    fontSize: 10, color: '#a59478', letterSpacing: '0.05em',
+    textTransform: 'uppercase', fontWeight: 500,
+  },
   scheduleCardMid: { flex: 1, minWidth: 0 },
   scheduleCardTitle: {
-    fontSize: 13, fontWeight: 600, color: '#1a2620',
+    fontSize: 14, fontWeight: 500, color: '#1a2620',
     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+    letterSpacing: '-0.005em',
   },
-  scheduleCardSub: { fontSize: 11, color: '#7a8270', marginTop: 2 },
+  scheduleCardSub: {
+    fontSize: 11, color: '#a59478', marginTop: 3,
+    letterSpacing: '0.02em',
+  },
   scheduleCardRight: {
-    display: 'flex', alignItems: 'center', gap: 6,
+    display: 'flex', alignItems: 'center', gap: 8,
     flexShrink: 0,
   },
   scheduleCardName: {
-    fontSize: 12, fontWeight: 600, color: '#1a2620',
+    fontSize: 12, fontWeight: 500, color: '#5c4a38',
   },
   scheduleCoverChip: {
-    background: '#c8442a', color: '#fff',
-    fontSize: 10, fontWeight: 700, padding: '4px 10px',
-    borderRadius: 999, textTransform: 'uppercase', letterSpacing: 0.6,
+    background: 'transparent', color: '#c8442a',
+    fontSize: 10, fontWeight: 600, padding: 0,
+    borderRadius: 0, textTransform: 'uppercase', letterSpacing: 2,
+    display: 'inline-flex', alignItems: 'center', gap: 5,
   },
-  scheduleUnassigned: { fontSize: 11, color: '#a59478', fontStyle: 'italic' },
+  scheduleUnassigned: {
+    fontSize: 11, color: '#a59478', fontStyle: 'italic',
+    letterSpacing: '0.02em',
+  },
   scheduleFab: {
-    position: 'fixed', right: 16,
-    bottom: 'calc(80px + env(safe-area-inset-bottom, 0px))',
-    background: '#5c4a38', color: '#fff', border: 'none',
-    padding: '12px 18px', borderRadius: 999,
-    fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
-    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
-    boxShadow: '0 4px 16px rgba(92,74,56,0.25)',
+    position: 'fixed', right: 20,
+    bottom: 'calc(86px + env(safe-area-inset-bottom, 0px))',
+    background: '#1a2620', color: '#fffdf7', border: 'none',
+    width: 52, height: 52, borderRadius: '50%',
+    fontFamily: 'inherit', fontSize: 22, fontWeight: 400,
+    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    boxShadow: '0 6px 20px rgba(26, 38, 32, 0.3)',
     zIndex: 50,
   },
 
   // ─── PERIOD TOGGLE (Day/Week/Month) ───
   periodToggleRow: {
-    display: 'flex', gap: 4, padding: '10px 14px 6px',
-    background: '#fffdf7',
+    display: 'flex', gap: 20, padding: '0 4px 12px',
+    background: 'transparent',
+    borderBottom: '1px solid #efe7d2', marginBottom: 4,
   },
   periodToggleBtn: {
-    flex: 1, padding: '7px 12px', borderRadius: 8,
-    background: 'transparent', border: '1px solid transparent',
-    fontSize: 12, fontWeight: 600, color: '#7a8270',
+    padding: '6px 0', borderRadius: 0,
+    background: 'transparent', border: 'none',
+    borderBottom: '1.5px solid transparent',
+    fontSize: 11, fontWeight: 500, color: '#a59478',
     fontFamily: 'inherit', cursor: 'pointer',
+    letterSpacing: '0.08em', textTransform: 'uppercase',
+    marginBottom: -1,
   },
   periodToggleBtnActive: {
-    background: '#5c4a38', color: '#fff',
+    background: 'transparent', color: '#1a2620',
+    borderBottomColor: '#1a2620', fontWeight: 600,
   },
 
   // ─── MONTH GRID ───
