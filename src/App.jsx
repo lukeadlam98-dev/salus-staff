@@ -3749,7 +3749,7 @@ function generateRecurringDates(startIso, endIso, days /* 0=Mon..6=Sun */) {
 // ============================================================
 function AdminPage({ data, currentUser, isManager, emailIntegration, onCreate, onOpenBooking, onConnectGmail, onCreateTask, onReload }) {
   const canSeeAdminSections = isManager || currentUser.isFoh;
-  const [section, setSection] = useState(canSeeAdminSections ? 'inbox' : 'bookings');
+  const [section, setSection] = useState(canSeeAdminSections ? 'reports' : 'bookings');
 
   // If the user can't see admin sections, just show bookings.
   if (!canSeeAdminSections) {
@@ -3768,13 +3768,13 @@ function AdminPage({ data, currentUser, isManager, emailIntegration, onCreate, o
     <div style={styles.homeContainer}>
       {/* Section tabs */}
       <div style={styles.adminTabRow}>
-        <button onClick={() => setSection('inbox')} className="salus-btn"
-          style={{ ...styles.adminTab, ...(section === 'inbox' ? styles.adminTabActive : {}) }}>
-          <Inbox size={14} /> Inbox
-        </button>
         <button onClick={() => setSection('reports')} className="salus-btn"
           style={{ ...styles.adminTab, ...(section === 'reports' ? styles.adminTabActive : {}) }}>
           <BarChart3 size={14} /> Reports
+        </button>
+        <button onClick={() => setSection('inbox')} className="salus-btn"
+          style={{ ...styles.adminTab, ...(section === 'inbox' ? styles.adminTabActive : {}) }}>
+          <Inbox size={14} /> Inbox
         </button>
         <button onClick={() => setSection('cancellations')} className="salus-btn"
           style={{ ...styles.adminTab, ...(section === 'cancellations' ? styles.adminTabActive : {}) }}>
@@ -7605,13 +7605,13 @@ function CloseButton({ onClick, variant }) {
       className="salus-btn"
       aria-label="Close"
       style={{
-        background: 'transparent',
-        border: `1px solid ${dark ? 'rgba(255, 253, 247, 0.25)' : '#efe7d2'}`,
+        background: dark ? 'rgba(255, 253, 247, 0.08)' : '#f5f1e8',
+        border: `1px solid ${dark ? 'rgba(255, 253, 247, 0.3)' : '#d4cdb8'}`,
         borderRadius: '50%',
-        width: 36, height: 36, padding: 0,
-        color: dark ? 'rgba(255, 253, 247, 0.85)' : '#5c4a38',
+        width: 38, height: 38, padding: 0,
+        color: dark ? '#fffdf7' : '#1a2620',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 20, fontWeight: 300, lineHeight: 1, flexShrink: 0,
+        fontSize: 22, fontWeight: 400, lineHeight: 1, flexShrink: 0,
         cursor: 'pointer', fontFamily: 'inherit',
       }}
     >
@@ -7623,18 +7623,16 @@ function CloseButton({ onClick, variant }) {
 function LoadingLogo() {
   return (
     <div style={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
       background: '#f5f1e8', fontFamily: "'Inter', sans-serif",
       flexDirection: 'column', gap: 24,
+      zIndex: 1,
     }}>
       <style>{`
         @keyframes salus-breathe {
           0%, 100% { transform: scale(1); opacity: 0.45; }
           50% { transform: scale(1.12); opacity: 1; }
-        }
-        @keyframes salus-rotate {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
         }
       `}</style>
       <div style={{
@@ -7647,7 +7645,7 @@ function LoadingLogo() {
           style={{
             width: '100%', height: '100%',
             objectFit: 'contain',
-            filter: 'brightness(0) invert(0.25)', // dark forest tone
+            filter: 'brightness(0) invert(0.25)',
           }}
         />
       </div>
@@ -7851,12 +7849,22 @@ function ScheduleView({
               ...(view === 'foh' ? styles.viewToggleBtnActive : {}),
             }}
           >
-            Front of House
+            FOH
+          </button>
+          <button
+            onClick={() => setScheduleView('hire')}
+            className="salus-btn"
+            style={{
+              ...styles.viewToggleBtn,
+              ...(view === 'hire' ? { ...styles.viewToggleBtnActive, color: '#c6926a', borderBottomColor: '#c6926a' } : {}),
+            }}
+          >
+            Hire
           </button>
         </div>
       )}
 
-      {view === 'studio' ? (
+      {view === 'studio' && (
         <Timetable
           data={data}
           currentUser={currentUser}
@@ -7865,15 +7873,25 @@ function ScheduleView({
           onClassClick={onClassClick}
           onAddClass={onAddClass}
           onDayClick={onDayClick}
-          onBookingClick={onBookingClick}
         />
-      ) : (
+      )}
+      {view === 'foh' && (
         <FOHSchedule
           data={data}
           currentUser={currentUser}
           isManager={isManager}
           isMobile={isMobile}
           onShiftClick={onShiftClick}
+        />
+      )}
+      {view === 'hire' && (
+        <HireSchedule
+          data={data}
+          currentUser={currentUser}
+          isManager={isManager}
+          isMobile={isMobile}
+          onBookingClick={onBookingClick}
+          onCreate={() => setScheduleView('hire')}
         />
       )}
     </>
@@ -7961,6 +7979,119 @@ function FOHSchedule({ data, currentUser, isManager, isMobile, onShiftClick }) {
           setMonthOffset={setMonthOffset}
           getDate={(s) => s.date}
           isCover={(s) => !s.staffId}
+          onDayTap={(iso) => {
+            const targetDate = new Date(iso);
+            const today = new Date(); today.setHours(0,0,0,0);
+            const days = Math.round((targetDate - today) / 86400000);
+            setDayOffset(days);
+            setViewMode('day');
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// HIRE SCHEDULE — calendar for private events / 1:1s / studio hires
+// ──────────────────────────────────────────────────────────────────────────────
+
+function HireSchedule({ data, currentUser, isManager, isMobile, onBookingClick }) {
+  const [viewMode, setViewMode] = useState('week');
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [dayOffset, setDayOffset] = useState(0);
+  const [monthOffset, setMonthOffset] = useState(0);
+  const [filter, setFilter] = useState('all');
+
+  // Hires = studio bookings, not cancelled. Format into class-like items.
+  const hireItems = useMemo(() => {
+    return (data.bookings || [])
+      .filter(b => b.status !== 'cancelled')
+      .map(b => ({
+        id: b.id,
+        date: b.date,
+        time: b.startTime,
+        endTime: b.endTime,
+        type: b.title || (b.hireType === '1on1' ? '1:1 hire' : 'Private hire'),
+        studio: b.studio,
+        coachId: b.hostUserId,
+        guestName: b.guestName,
+        hireType: b.hireType,
+        dur: b.startTime && b.endTime ? minutesBetween(b.startTime, b.endTime) : null,
+      }));
+  }, [data.bookings]);
+
+  const renderCard = (item) => {
+    const userById = Object.fromEntries(data.users.map(u => [u.id, u]));
+    const host = item.coachId ? userById[item.coachId] : null;
+    return (
+      <ScheduleCard
+        key={item.id}
+        onClick={() => onBookingClick?.(item.id)}
+        timeLeft={item.time}
+        timeBottom={item.endTime ? `to ${item.endTime}` : (item.dur ? `${item.dur} min` : null)}
+        title={item.type}
+        subtitle={item.guestName || (item.hireType === '1on1' ? 'Private session' : 'Studio hire')}
+        person={host}
+        needsCover={false}
+        isMine={item.coachId === currentUser.id}
+        isManager={isManager}
+        kindLabel="HIRE"
+        kindColor="#c6926a"
+      />
+    );
+  };
+
+  const filterFn = (item) => {
+    if (filter === 'mine') return item.coachId === currentUser.id;
+    return true;
+  };
+
+  return (
+    <div style={styles.timetable}>
+      <SchedulePeriodToggle viewMode={viewMode} setViewMode={setViewMode} />
+
+      {viewMode === 'day' && (
+        <DayView
+          items={hireItems.filter(filterFn)}
+          allItems={hireItems}
+          dayOffset={dayOffset}
+          setDayOffset={setDayOffset}
+          getDate={(c) => c.date}
+          getTime={(c) => c.time}
+          isCover={() => false}
+          totalLabel="hires"
+          filter={filter}
+          setFilter={setFilter}
+          isManager={isManager}
+          renderCard={renderCard}
+        />
+      )}
+
+      {viewMode === 'week' && (
+        <WeekViewBody
+          items={hireItems.filter(filterFn)}
+          allItems={hireItems}
+          weekOffset={weekOffset}
+          setWeekOffset={setWeekOffset}
+          getDate={(c) => c.date}
+          getTime={(c) => c.time}
+          isCover={() => false}
+          totalLabel="hires"
+          filter={filter}
+          setFilter={setFilter}
+          isManager={isManager}
+          renderCard={renderCard}
+        />
+      )}
+
+      {viewMode === 'month' && (
+        <MonthGrid
+          items={hireItems}
+          monthOffset={monthOffset}
+          setMonthOffset={setMonthOffset}
+          getDate={(b) => b.date}
+          isCover={() => false}
           onDayTap={(iso) => {
             const targetDate = new Date(iso);
             const today = new Date(); today.setHours(0,0,0,0);
@@ -8208,90 +8339,36 @@ function ShiftDetailModal({ shift, data, currentUser, isManager, onClose, onAssi
   );
 }
 
-function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAddClass, onDayClick, onBookingClick }) {
+function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAddClass, onDayClick }) {
   const [viewMode, setViewMode] = useState('week');  // 'day' | 'week' | 'month'
   const [weekOffset, setWeekOffset] = useState(0);
   const [dayOffset, setDayOffset] = useState(0);     // days from today
   const [monthOffset, setMonthOffset] = useState(0); // months from current
   const [filter, setFilter] = useState('all');
 
-  // ── Merge classes + studio bookings into one timeline ───────────────────
-  // Each item is tagged with _kind so we can render and link appropriately.
-  const mergedItems = useMemo(() => {
-    const classItems = (data.classes || []).map(c => ({
-      ...c,
-      _kind: 'class',
-      _sortTime: c.time,
-    }));
-    // Bookings: only show non-cancelled, future or recent
-    const bookingItems = (data.bookings || [])
-      .filter(b => b.status !== 'cancelled')
-      .map(b => ({
-        id: b.id,
-        date: b.date,
-        time: b.startTime,
-        endTime: b.endTime,
-        type: b.title || (b.hireType === '1on1' ? '1:1 hire' : 'Private hire'),
-        studio: b.studio,
-        coachId: b.hostUserId,
-        guestName: b.guestName,
-        hireType: b.hireType,
-        _kind: 'booking',
-        _booking: b,
-        _sortTime: b.startTime,
-        // compute duration in minutes from start–end
-        dur: b.startTime && b.endTime ? minutesBetween(b.startTime, b.endTime) : null,
-      }));
-    return [...classItems, ...bookingItems];
-  }, [data.classes, data.bookings]);
-
-  const renderCard = (item) => {
+  const renderCard = (cls) => {
     const userById = Object.fromEntries(data.users.map(u => [u.id, u]));
-
-    if (item._kind === 'booking') {
-      const host = item.coachId ? userById[item.coachId] : null;
-      return (
-        <ScheduleCard
-          key={`booking-${item.id}`}
-          onClick={() => onBookingClick?.(item.id)}
-          timeLeft={item.time}
-          timeBottom={item.endTime ? `to ${item.endTime}` : null}
-          title={item.type}
-          subtitle={item.guestName || (item.hireType === '1on1' ? 'Private session' : 'Studio hire')}
-          person={host}
-          needsCover={false}
-          isMine={item.coachId === currentUser.id}
-          isManager={isManager}
-          kindLabel="HIRE"
-          kindColor="#c6926a"
-        />
-      );
-    }
-
-    // Default: a class
-    const coach = item.coachId ? userById[item.coachId] : null;
-    const needsCover = item.status === 'needsCover';
+    const coach = cls.coachId ? userById[cls.coachId] : null;
+    const needsCover = cls.status === 'needsCover';
     return (
       <ScheduleCard
-        key={`class-${item.id}`}
-        onClick={() => onClassClick(item.id)}
-        timeLeft={item.time}
-        timeBottom={`${item.dur} min`}
-        title={item.type}
-        subtitle={STUDIOS[item.studio]?.short || item.studio}
+        key={cls.id}
+        onClick={() => onClassClick(cls.id)}
+        timeLeft={cls.time}
+        timeBottom={`${cls.dur} min`}
+        title={cls.type}
+        subtitle={STUDIOS[cls.studio]?.short || cls.studio}
         person={coach}
         needsCover={needsCover}
-        isMine={item.coachId === currentUser.id}
+        isMine={cls.coachId === currentUser.id}
         isManager={isManager}
       />
     );
   };
 
-  const filterFn = (item) => {
-    if (filter === 'mine')       return item.coachId === currentUser.id;
-    if (filter === 'needsCover') return item._kind === 'class' && item.status === 'needsCover';
-    if (filter === 'classes')    return item._kind === 'class';
-    if (filter === 'hires')      return item._kind === 'booking';
+  const filterFn = (cls) => {
+    if (filter === 'mine')       return cls.coachId === currentUser.id;
+    if (filter === 'needsCover') return cls.status === 'needsCover';
     return true;
   };
 
@@ -8301,13 +8378,13 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
 
       {viewMode === 'day' && (
         <DayView
-          items={mergedItems.filter(filterFn)}
-          allItems={mergedItems}
+          items={data.classes.filter(filterFn)}
+          allItems={data.classes}
           dayOffset={dayOffset}
           setDayOffset={setDayOffset}
           getDate={(c) => c.date}
-          getTime={(c) => c._sortTime || c.time}
-          isCover={(c) => c._kind === 'class' && c.status === 'needsCover'}
+          getTime={(c) => c.time}
+          isCover={(c) => c.status === 'needsCover'}
           totalLabel="classes"
           filter={filter}
           setFilter={setFilter}
@@ -8318,13 +8395,13 @@ function Timetable({ data, currentUser, isManager, isMobile, onClassClick, onAdd
 
       {viewMode === 'week' && (
         <WeekViewBody
-          items={mergedItems.filter(filterFn)}
-          allItems={mergedItems}
+          items={data.classes.filter(filterFn)}
+          allItems={data.classes}
           weekOffset={weekOffset}
           setWeekOffset={setWeekOffset}
           getDate={(c) => c.date}
-          getTime={(c) => c._sortTime || c.time}
-          isCover={(c) => c._kind === 'class' && c.status === 'needsCover'}
+          getTime={(c) => c.time}
+          isCover={(c) => c.status === 'needsCover'}
           totalLabel="classes"
           filter={filter}
           setFilter={setFilter}
@@ -8811,7 +8888,7 @@ function ScheduleStatsRow({ coverCount, totalCount, totalLabel }) {
 function ScheduleFilterRow({ filter, setFilter, isManager }) {
   return (
     <div style={{
-      display: 'flex', gap: 20, padding: '0 4px 8px',
+      display: 'flex', gap: 22, padding: '0 4px 8px',
       borderBottom: '1px solid #efe7d2', marginBottom: 4,
       overflowX: 'auto', WebkitOverflowScrolling: 'touch',
       scrollbarWidth: 'none',
@@ -8829,34 +8906,6 @@ function ScheduleFilterRow({ filter, setFilter, isManager }) {
         }}
       >
         All
-      </button>
-      <button
-        onClick={() => setFilter('classes')}
-        className="salus-btn"
-        style={{
-          padding: '6px 0', background: 'transparent', border: 'none',
-          borderBottom: filter === 'classes' ? '1.5px solid #1a2620' : '1.5px solid transparent',
-          fontSize: 11, fontWeight: filter === 'classes' ? 600 : 500,
-          color: filter === 'classes' ? '#1a2620' : '#a59478',
-          letterSpacing: '0.08em', textTransform: 'uppercase',
-          fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap',
-        }}
-      >
-        Classes
-      </button>
-      <button
-        onClick={() => setFilter('hires')}
-        className="salus-btn"
-        style={{
-          padding: '6px 0', background: 'transparent', border: 'none',
-          borderBottom: filter === 'hires' ? '1.5px solid #c6926a' : '1.5px solid transparent',
-          fontSize: 11, fontWeight: filter === 'hires' ? 600 : 500,
-          color: filter === 'hires' ? '#c6926a' : '#a59478',
-          letterSpacing: '0.08em', textTransform: 'uppercase',
-          fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap',
-        }}
-      >
-        Hires
       </button>
       <button
         onClick={() => setFilter('needsCover')}
@@ -8897,24 +8946,39 @@ function ScheduleCard({ onClick, timeLeft, timeBottom, title, subtitle, person, 
     <button
       onClick={onClick}
       className="salus-btn"
-      style={styles.scheduleCard}
+      style={{
+        ...styles.scheduleCard,
+        ...(needsCover ? {
+          background: '#fbe5dd',
+          borderBottom: '1px solid #f0c6b6',
+          padding: '14px 12px',
+          marginBottom: 1,
+        } : {}),
+      }}
     >
-      {/* Left accent indicator — sage for mine, coral for cover, amber for hire */}
+      {/* Left accent indicator — bold red for cover, sage for mine, amber for hire */}
       {(isMine || needsCover || kindLabel) && (
         <span style={{
-          position: 'absolute', left: -2, top: 14, bottom: 14, width: 2,
+          position: 'absolute', left: -2, top: 0, bottom: 0,
+          width: needsCover ? 4 : 2,
           background: needsCover ? '#c8442a' : kindLabel ? (kindColor || '#c6926a') : '#7a8c5c',
           borderRadius: 1,
         }} />
       )}
 
       <div style={styles.scheduleCardTime}>
-        <div style={styles.scheduleCardTimeMain}>{timeLeft}</div>
+        <div style={{
+          ...styles.scheduleCardTimeMain,
+          ...(needsCover ? { color: '#c8442a' } : {}),
+        }}>{timeLeft}</div>
         {timeBottom && <div style={styles.scheduleCardTimeSub}>{timeBottom}</div>}
       </div>
       <div style={styles.scheduleCardMid}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-          <div style={styles.scheduleCardTitle}>{title}</div>
+          <div style={{
+            ...styles.scheduleCardTitle,
+            ...(needsCover ? { color: '#1a2620', fontWeight: 600 } : {}),
+          }}>{title}</div>
           {kindLabel && (
             <span style={{
               fontSize: 9, fontWeight: 600, color: kindColor || '#c6926a',
@@ -8922,13 +8986,23 @@ function ScheduleCard({ onClick, timeLeft, timeBottom, title, subtitle, person, 
             }}>{kindLabel}</span>
           )}
         </div>
-        {subtitle && <div style={styles.scheduleCardSub}>{subtitle}</div>}
+        {subtitle && (
+          <div style={{
+            ...styles.scheduleCardSub,
+            ...(needsCover ? { color: '#5c4a38' } : {}),
+          }}>{subtitle}</div>
+        )}
       </div>
       <div style={styles.scheduleCardRight}>
         {needsCover ? (
-          <span style={styles.scheduleCoverChip}>
-            <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#c8442a' }} />
-            Cover
+          <span style={{
+            background: '#c8442a', color: '#fffdf7',
+            fontSize: 10, fontWeight: 600, padding: '6px 12px',
+            borderRadius: 999, textTransform: 'uppercase', letterSpacing: 1.5,
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            whiteSpace: 'nowrap',
+          }}>
+            Needs cover
           </span>
         ) : person ? (
           <>
