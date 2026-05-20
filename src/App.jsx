@@ -6839,6 +6839,12 @@ function ExpensesPage({ data, currentUser, sessionToken, onReload }) {
   const [filter, setFilter] = useState('month'); // month | tax_year | all
   const [captureOpen, setCaptureOpen] = useState(false);
   const [detail, setDetail] = useState(null);
+  const [savedToast, setSavedToast] = useState(false);
+
+  const showSavedToast = () => {
+    setSavedToast(true);
+    setTimeout(() => setSavedToast(false), 2500);
+  };
 
   const expenses = data.expenses || [];
 
@@ -6997,7 +7003,11 @@ function ExpensesPage({ data, currentUser, sessionToken, onReload }) {
           currentUserId={currentUser.id}
           sessionToken={sessionToken}
           onClose={() => setCaptureOpen(false)}
-          onSaved={() => { setCaptureOpen(false); onReload?.(); }}
+          onSaved={() => {
+            setCaptureOpen(false);
+            showSavedToast();
+            onReload?.(true);  // silent reload — no loading flash
+          }}
         />
       )}
       {detail && (
@@ -7005,8 +7015,27 @@ function ExpensesPage({ data, currentUser, sessionToken, onReload }) {
           expense={detail}
           currentUserId={currentUser.id}
           onClose={() => setDetail(null)}
-          onUpdated={() => { setDetail(null); onReload?.(); }}
+          onUpdated={() => { setDetail(null); onReload?.(true); }}
         />
+      )}
+
+      {/* Success toast — auto-dismisses after a couple of seconds */}
+      {savedToast && createPortal(
+        <div style={{
+          position: 'fixed',
+          top: 'calc(20px + env(safe-area-inset-top, 0px))',
+          left: '50%', transform: 'translateX(-50%)',
+          background: COLOR.forest, color: COLOR.cream,
+          padding: '12px 22px', borderRadius: 999,
+          fontSize: 13, fontWeight: 500, letterSpacing: '0.04em',
+          zIndex: 99999, pointerEvents: 'none',
+          boxShadow: '0 8px 24px rgba(26, 38, 32, 0.25)',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <span>✓</span>
+          <span>Receipt saved</span>
+        </div>,
+        document.body
       )}
     </>
   );
@@ -7168,7 +7197,8 @@ function CaptureReceiptModal({ currentUserId, sessionToken, onClose, onSaved }) 
       if (insertErr) throw insertErr;
       onSaved();
     } catch (e) {
-      setError(`Save failed: ${e.message || e}`);
+      console.error('Expense save error:', e);
+      setError(`Save failed: ${e.message || e.error_description || JSON.stringify(e)}`);
     } finally {
       setSaving(false);
     }
@@ -7289,16 +7319,16 @@ function CaptureReceiptModal({ currentUserId, sessionToken, onClose, onSaved }) 
               <input value={description} onChange={e => setDescription(e.target.value)}
                 style={styles.loginInput} placeholder="Towels for the changing room" />
             </FormField>
-
-            {error && (
-              <div style={{
-                padding: 12, background: '#fef0ec', color: COLOR.brown,
-                borderRadius: 8, fontSize: 13,
-              }}>{error}</div>
-            )}
           </div>
         </ModalBody>
         <ModalFooter>
+          {error && (
+            <div style={{
+              padding: 12, background: '#fef0ec', color: COLOR.coral,
+              borderRadius: 8, fontSize: 13, marginBottom: 10,
+              lineHeight: 1.4,
+            }}>{error}</div>
+          )}
           <button onClick={save} disabled={saving || extracting} className="salus-btn" style={{
             ...styles.btnPrimary, width: '100%', justifyContent: 'center',
             padding: '14px 22px', fontSize: 14,
