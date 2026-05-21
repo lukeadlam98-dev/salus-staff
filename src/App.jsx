@@ -9341,18 +9341,30 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
 
   const firstName = currentUser.name?.split(' ')[0] || 'there';
 
-  // Widget config — fallback to defaults if user hasn't set anything
-  const widgets = currentUser.homeWidgets && currentUser.homeWidgets.length > 0
+  // Widget config — fallback to role-appropriate defaults
+  const defaultWidgets = isManager ? DEFAULT_WIDGETS_MANAGER : DEFAULT_WIDGETS_STAFF;
+  const rawWidgets = currentUser.homeWidgets && currentUser.homeWidgets.length > 0
     ? currentUser.homeWidgets
-    : ['cover', 'upcoming', 'tours', 'tasks', 'request_cover', 'hire_studio'];
+    : defaultWidgets;
+  // Filter out manager-only widgets if the user is currently in staff mode
+  const widgets = rawWidgets.filter(key => {
+    const meta = ALL_WIDGETS.find(w => w.key === key);
+    if (meta?.managerOnly && !isManager) return false;
+    return true;
+  });
   const has = (key) => widgets.includes(key);
   const [showCustomize, setShowCustomize] = useState(false);
 
-  // Brand photos rotate — one is shown each session, gives a fresh feeling
+  // Brand photos rotate — only used if manager AND no personal photo set
   const brandPhoto = useMemo(() => {
     const photos = ['/brand/cardio.jpg', '/brand/reformer.jpg', '/brand/exterior.jpg', '/brand/sign.jpg'];
     return photos[Math.floor(Math.random() * photos.length)];
   }, []);
+
+  // Photo to show on Home — personal upload wins, otherwise brand rotation for managers, else nothing
+  const homePhoto = currentUser.homePhotoUrl
+    ? currentUser.homePhotoUrl
+    : (isManager ? brandPhoto : null);
 
   return (
     <div style={styles.homeContainer}>
@@ -9372,13 +9384,15 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
         onMarkRead={onMarkBroadcastRead}
       />
 
-      {/* Brand photo — rotates each session */}
-      <div style={{
-        height: 140, borderRadius: 20, overflow: 'hidden', marginBottom: 4, position: 'relative',
-        backgroundImage: `url(${brandPhoto})`,
-        backgroundSize: 'cover', backgroundPosition: 'center',
-        boxShadow: '0 1px 0 rgba(92, 74, 56, 0.06)',
-      }} />
+      {/* Photo — personal upload wins, brand rotation for managers, hidden for staff */}
+      {homePhoto && (
+        <div style={{
+          height: 140, borderRadius: 20, overflow: 'hidden', marginBottom: 4, position: 'relative',
+          backgroundImage: `url(${homePhoto})`,
+          backgroundSize: 'cover', backgroundPosition: 'center',
+          boxShadow: '0 1px 0 rgba(92, 74, 56, 0.06)',
+        }} />
+      )}
 
       {/* Render widgets in user's chosen order */}
       {widgets.map(widgetKey => {
@@ -9694,17 +9708,21 @@ function ChatPreviewWidget({ data, currentUser, onViewChat }) {
 
 // ─── Widget registry — used by the customize modal ───
 // Groups: 'attention' (urgent today) | 'day' (your day) | 'actions' (quick actions) | 'extras'
+// managerOnly: true means this widget is hidden from non-manager staff entirely
 const ALL_WIDGETS = [
   { key: 'cover',         group: 'attention', label: 'Cover requests',        Icon: CoverIcon,     desc: 'Classes and shifts that need cover' },
-  { key: 'tasks',         group: 'attention', label: 'Tasks',                 Icon: ListChecks,    desc: 'Your task list' },
+  { key: 'tasks',         group: 'attention', label: 'Tasks',                 Icon: ListChecks,    desc: 'Your task list',                              managerOnly: true },
   { key: 'upcoming',      group: 'day',       label: 'Your upcoming classes', Icon: Calendar,      desc: 'Your next teaching slots' },
   { key: 'total_hours',   group: 'day',       label: 'Hours this week',       Icon: Clock,         desc: 'Your scheduled hours (classes plus FOH)' },
-  { key: 'tours',         group: 'day',       label: 'Tours',                 Icon: MapPin,        desc: 'Upcoming tours from Google Calendar' },
+  { key: 'tours',         group: 'day',       label: 'Tours',                 Icon: MapPin,        desc: 'Upcoming tours from Google Calendar',         managerOnly: true },
   { key: 'request_cover', group: 'actions',   label: 'Request cover',         Icon: Plus,          desc: 'Quick button to post a cover request' },
   { key: 'hire_studio',   group: 'actions',   label: 'Hire a studio',         Icon: Building2,     desc: 'Quick button to book the studio' },
   { key: 'chat_preview',  group: 'extras',    label: 'Team chat preview',     Icon: MessageCircle, desc: 'Latest messages from team chat' },
   { key: 'quote',         group: 'extras',    label: 'Quote of the day',      Icon: Quote,         desc: 'A different quote each day' },
 ];
+
+const DEFAULT_WIDGETS_MANAGER = ['cover', 'upcoming', 'tours', 'tasks', 'request_cover', 'hire_studio'];
+const DEFAULT_WIDGETS_STAFF   = ['upcoming', 'request_cover', 'hire_studio'];
 
 const WIDGET_GROUPS = [
   { key: 'attention', label: 'Needs your attention' },
@@ -9765,7 +9783,69 @@ function CustomizeHomeModal({ currentWidgets, isManager, currentUser, onReload, 
     await persist(next);
   };
 
-  const inactive = ALL_WIDGETS.filter(w => !selected.includes(w.key));
+  // Filter out manager-only widgets for non-managers
+  const availableWidgets = ALL_WIDGETS.filter(w => isManager || !w.managerOnly);
+  const inactive = availableWidgets.filter(w => !selected.includes(w.key));
+
+  // ─── Home photo upload ─────────────────────────────────────────────
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoError, setPhotoError] = useState(null);
+
+  const uploadHomePhoto = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      setPhotoError('Photo too large (8MB max).');
+      return;
+    }
+    setPhotoBusy(true);
+    setPhotoError(null);
+    try {
+      // Remove previous photo if any
+      if (currentUser.homePhotoPath) {
+        await supabase.storage.from('home-photos').remove([currentUser.homePhotoPath]);
+      }
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+      const path = `${currentUser.id}/${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from('home-photos').upload(path, file, { cacheControl: '3600', upsert: false, contentType: file.type });
+      if (upErr) throw upErr;
+      const { data: urlData } = supabase.storage.from('home-photos').getPublicUrl(path);
+      const publicUrl = urlData?.publicUrl;
+      const { error: updErr } = await supabase.from('profiles').update({
+        home_photo_url: publicUrl,
+        home_photo_path: path,
+      }).eq('id', currentUser.id);
+      if (updErr) throw updErr;
+      onReload?.(true);
+    } catch (err) {
+      console.error('home photo upload:', err);
+      setPhotoError(err.message || 'Upload failed');
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
+  const removeHomePhoto = async () => {
+    setPhotoBusy(true);
+    setPhotoError(null);
+    try {
+      if (currentUser.homePhotoPath) {
+        await supabase.storage.from('home-photos').remove([currentUser.homePhotoPath]);
+      }
+      const { error: updErr } = await supabase.from('profiles').update({
+        home_photo_url: null,
+        home_photo_path: null,
+      }).eq('id', currentUser.id);
+      if (updErr) throw updErr;
+      onReload?.(true);
+    } catch (err) {
+      console.error('home photo remove:', err);
+      setPhotoError(err.message || 'Remove failed');
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
 
   return createPortal(
     <>
@@ -9792,6 +9872,56 @@ function CustomizeHomeModal({ currentWidgets, isManager, currentUser, onReload, 
         />
 
         <ModalBody>
+          {/* Personal home photo */}
+          <div style={{ marginBottom: 28 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: '#a59478', textTransform: 'uppercase', letterSpacing: 2, marginBottom: 12 }}>
+              Home photo
+            </div>
+            {currentUser.homePhotoUrl ? (
+              <div style={{
+                position: 'relative', borderRadius: 14, overflow: 'hidden',
+                height: 140, background: COLOR.sand,
+              }}>
+                <img src={currentUser.homePhotoUrl} alt="Home photo"
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                <button onClick={removeHomePhoto} disabled={photoBusy} className="salus-btn"
+                  style={{
+                    position: 'absolute', top: 10, right: 10,
+                    background: 'rgba(26, 38, 32, 0.7)', color: COLOR.cream,
+                    border: 'none', borderRadius: 999, padding: '6px 14px',
+                    fontSize: 11, fontWeight: 500, letterSpacing: '0.08em',
+                    textTransform: 'uppercase', cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}>
+                  {photoBusy ? '…' : 'Remove'}
+                </button>
+              </div>
+            ) : (
+              <label style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                height: 110, gap: 6,
+                background: COLOR.sand, borderRadius: 12,
+                border: `1px dashed ${COLOR.shell}`, cursor: photoBusy ? 'wait' : 'pointer',
+              }}>
+                <div style={{ fontSize: 24, color: COLOR.brown }}>📷</div>
+                <div style={{ ...TYPE.capsLabel, color: COLOR.brown }}>
+                  {photoBusy ? 'Uploading…' : 'Add a personal photo'}
+                </div>
+                <div style={{ ...TYPE.metaSmall, color: COLOR.taupe }}>
+                  Optional · Shows at the top of your Home
+                </div>
+                <input type="file" accept="image/*" capture="environment"
+                  onChange={uploadHomePhoto} disabled={photoBusy} style={{ display: 'none' }} />
+              </label>
+            )}
+            {photoError && (
+              <div style={{
+                marginTop: 8, padding: 10, background: '#fef0ec', color: COLOR.coral,
+                borderRadius: 8, fontSize: 12,
+              }}>{photoError}</div>
+            )}
+          </div>
+
           {/* Active widgets in order */}
           {selected.length > 0 && (
             <>
