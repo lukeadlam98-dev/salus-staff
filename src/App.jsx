@@ -121,95 +121,20 @@ const STUDIOS = {
 };
 
 // ─── DESIGN SYSTEM — single source of truth for typography & colors ──────
-// ─── ThemeApplier — sets the data-theme attribute on <html> when theme changes ─
-function ThemeApplier({ theme }) {
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    if (theme && theme !== 'nude') {
-      document.documentElement.setAttribute('data-theme', theme);
-    } else {
-      document.documentElement.removeAttribute('data-theme');
-    }
-  }, [theme]);
-  return null;
-}
-
-// ─── Themes ──────────────────────────────────────────────────────────────
-// COLOR values are CSS variables so they swap instantly when the theme changes.
-// The themes are defined as a stylesheet injected at the root of the app —
-// see <style id="salus-theme"> in SalusStaff().
 const COLOR = {
-  forest:   'var(--c-forest)',  // primary text, primary buttons
-  brown:    'var(--c-brown)',   // secondary text, decorative
-  amber:    'var(--c-amber)',   // accent (hires, warm)
-  sage:     'var(--c-sage)',    // accent (mine, internal)
-  coral:    'var(--c-coral)',   // urgency only — cover needed, errors
-  cream:    'var(--c-cream)',   // primary background
-  sand:     'var(--c-sand)',    // recessed surfaces
-  bone:     'var(--c-bone)',    // dividers, subtle borders
-  shell:    'var(--c-shell)',   // stronger dividers
-  taupe:    'var(--c-taupe)',   // tertiary text, meta
-  moss:     'var(--c-moss)',    // body grey
+  forest:   '#1a2620',  // primary text, primary buttons
+  brown:    '#5c4a38',  // secondary text, decorative
+  amber:    '#c6926a',  // accent (hires, warm)
+  sage:     '#7a8c5c',  // accent (mine, internal)
+  coral:    '#c8442a',  // urgency only — cover needed, errors
+  cream:    '#fffdf7',  // primary background
+  sand:     '#f5f1e8',  // app background, recessed surfaces
+  bone:     '#efe7d2',  // dividers, subtle borders
+  shell:    '#d4cdb8',  // stronger dividers
+  taupe:    '#a59478',  // tertiary text, meta
+  moss:     '#7a8270',  // body grey
   serif:    '"Playfair Display", Georgia, serif',
   sans:     "'Inter', -apple-system, sans-serif",
-};
-
-// Theme definitions — used both for the picker UI and for the injected stylesheet
-const THEMES = {
-  nude: {
-    label: 'Nude',
-    description: 'Our signature editorial cream',
-    swatch: ['#fffdf7', '#1a2620', '#c6926a'],
-    vars: {
-      '--c-forest': '#1a2620',
-      '--c-brown':  '#5c4a38',
-      '--c-amber':  '#c6926a',
-      '--c-sage':   '#7a8c5c',
-      '--c-coral':  '#c8442a',
-      '--c-cream':  '#fffdf7',
-      '--c-sand':   '#f5f1e8',
-      '--c-bone':   '#efe7d2',
-      '--c-shell':  '#d4cdb8',
-      '--c-taupe':  '#a59478',
-      '--c-moss':   '#7a8270',
-    },
-  },
-  dark: {
-    label: 'Dark',
-    description: 'Forest night',
-    swatch: ['#1a2620', '#fffdf7', '#c6926a'],
-    vars: {
-      '--c-forest': '#fffdf7',
-      '--c-brown':  '#d4cdb8',
-      '--c-amber':  '#d4a47f',
-      '--c-sage':   '#9eb38a',
-      '--c-coral':  '#e07a5f',
-      '--c-cream':  '#1a2620',
-      '--c-sand':   '#232f29',
-      '--c-bone':   '#2d3a32',
-      '--c-shell':  '#3a4a40',
-      '--c-taupe':  '#a59478',
-      '--c-moss':   '#c8c4b8',
-    },
-  },
-  sage: {
-    label: 'Sage',
-    description: 'Pastel green, like summer',
-    swatch: ['#f7faf2', '#2c4636', '#9eb38a'],
-    vars: {
-      '--c-forest': '#2c4636',
-      '--c-brown':  '#5e7152',
-      '--c-amber':  '#d6a06a',
-      '--c-sage':   '#9eb38a',
-      '--c-coral':  '#d97757',
-      '--c-cream':  '#f7faf2',
-      '--c-sand':   '#e8efde',
-      '--c-bone':   '#d6e0c8',
-      '--c-shell':  '#c0ceac',
-      '--c-taupe':  '#8a9b76',
-      '--c-moss':   '#6f8264',
-    },
-  },
 };
 
 const TYPE = {
@@ -402,20 +327,6 @@ export default function SalusStaff() {
       }
       return next;
     });
-  };
-
-  // Theme — 'nude' | 'dark' | 'sage'
-  const [theme, setTheme] = useState(() => {
-    if (typeof localStorage === 'undefined') return 'nude';
-    const stored = localStorage.getItem('salus_theme');
-    return (stored && THEMES[stored]) ? stored : 'nude';
-  });
-  const pickTheme = (name) => {
-    if (!THEMES[name]) return;
-    setTheme(name);
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('salus_theme', name);
-    }
   };
 
   // Load lastViewed from localStorage when the logged-in user is known
@@ -1647,26 +1558,11 @@ export default function SalusStaff() {
 
   return (
     <div style={styles.app}>
-      {/* Theme stylesheet — drives CSS variables that all COLOR.* values reference */}
-      <style id="salus-theme">{`
-        :root {
-${Object.entries(THEMES.nude.vars).map(([k, v]) => `          ${k}: ${v};`).join('\n')}
-        }
-        [data-theme="dark"] {
-${Object.entries(THEMES.dark.vars).map(([k, v]) => `          ${k}: ${v};`).join('\n')}
-        }
-        [data-theme="sage"] {
-${Object.entries(THEMES.sage.vars).map(([k, v]) => `          ${k}: ${v};`).join('\n')}
-        }
-        body { background: var(--c-sand); transition: background 240ms ease; }
-      `}</style>
-      <ThemeApplier theme={theme} />
-
       <style>{`
         /* Fonts loaded via index.html */
         * { box-sizing: border-box; }
         body {
-          margin: 0;
+          margin: 0; background: #f5f1e8;
           /* App feels native — text is not user-selectable */
           -webkit-user-select: none;
           user-select: none;
@@ -1885,6 +1781,10 @@ ${Object.entries(THEMES.sage.vars).map(([k, v]) => `          ${k}: ${v};`).join
             onConnectGmail={handleConnectGmail}
             onCreateTask={createTask}
             onReload={reloadData}
+            onShowExpenses={() => setModal({ type: 'expenses' })}
+            onShowFlows={() => setModal({ type: 'flows' })}
+            onShowTimeOff={() => setModal({ type: 'timeOff' })}
+            onShowInvoices={() => setModal({ type: 'invoices' })}
           />
         )}
         {tab === 'me' && (
@@ -1895,8 +1795,6 @@ ${Object.entries(THEMES.sage.vars).map(([k, v]) => `          ${k}: ${v};`).join
             realIsManager={realIsManager}
             viewAsStaff={viewAsStaff}
             onToggleViewAsStaff={toggleViewAsStaff}
-            theme={theme}
-            onPickTheme={pickTheme}
             emailIntegration={data.emailIntegration}
             onOpenSettings={() => setModal({ type: 'settings' })}
             onShowInvoices={() => setModal({ type: 'invoices' })}
@@ -4031,168 +3929,147 @@ function generateRecurringDates(startIso, endIso, days /* 0=Mon..6=Sun */) {
 // ─── StaffAdminPage — simplified personal-tools page for non-managers ────
 // Coaches and FOH see this instead of the full Admin tab bar. Focused on
 // their own personal integrations and studio bookings.
-function StaffAdminPage({ data, currentUser, emailIntegration, onCreate, onOpenBooking, onConnectGmail, onReload }) {
-  const [section, setSection] = useState('personal'); // 'personal' | 'bookings'
-  const isFoh = !!currentUser.isFoh;
-
+// ─── StaffAdminPage — your personal admin tools ──────────────────────────
+// Calendar & email integrations · Expenses · Flows · Time off.
+// No Studio Bookings (that's a manager concern).
+function StaffAdminPage({ data, currentUser, emailIntegration, onConnectGmail, onShowExpenses, onShowFlows, onShowTimeOff }) {
   return (
     <div style={styles.homeContainer}>
       <PageHeader
         eyebrow="Your tools"
         title="Admin"
-        subtitle="Connect your calendar and inbox, see studio bookings."
+        subtitle="Your personal admin — calendar, inbox, expenses, time off."
         compact
       />
 
-      {/* Compact tab row — just two sections */}
+      {/* Integrations */}
+      <SectionLabel>Integrations</SectionLabel>
+
       <div style={{
-        display: 'flex', gap: 22, padding: '0 4px 8px',
-        borderBottom: `1px solid ${COLOR.bone}`, marginBottom: 22, marginTop: 12,
+        background: '#fffdf7', border: '1px solid #efe7d2',
+        borderRadius: 14, padding: '18px 18px 16px', marginBottom: 14,
       }}>
-        {[
-          ['personal', 'Personal'],
-          ['bookings', 'Studio bookings'],
-        ].map(([key, label]) => (
-          <button key={key}
-            onClick={() => setSection(key)}
-            className="salus-btn"
-            style={{
-              padding: '6px 0', background: 'transparent', border: 'none',
-              borderBottom: section === key ? `1.5px solid ${COLOR.forest}` : '1.5px solid transparent',
-              ...(section === key ? TYPE.capsLabelActive : TYPE.capsLabel),
-              fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap',
-            }}
-          >
-            {label}
-          </button>
-        ))}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 8 }}>
+          <div style={{
+            width: 36, height: 36, borderRadius: 10,
+            background: '#f5f1e8', color: '#5c4a38',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 18, flexShrink: 0,
+          }}>
+            <Calendar size={18} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ ...TYPE.itemTitle }}>Google Calendar</div>
+            <div style={{ ...TYPE.metaSmall, marginTop: 4, lineHeight: 1.5 }}>
+              Your Salus classes appear in your personal calendar. Cover changes update automatically.
+            </div>
+          </div>
+        </div>
+        <button
+          disabled
+          className="salus-btn"
+          style={{
+            width: '100%', marginTop: 8, padding: '10px 16px',
+            background: 'transparent', color: '#a59478',
+            border: '1px solid #efe7d2', borderRadius: 10,
+            fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase',
+            fontFamily: 'inherit', cursor: 'not-allowed', fontWeight: 500,
+          }}
+        >
+          Coming soon
+        </button>
       </div>
 
-      {section === 'personal' && (
-        <div>
-          {/* Calendar integration — Phase 2 */}
-          <SectionLabel>Calendar</SectionLabel>
+      <div style={{
+        background: '#fffdf7', border: '1px solid #efe7d2',
+        borderRadius: 14, padding: '18px 18px 16px', marginBottom: 22,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 8 }}>
           <div style={{
-            background: COLOR.cream, border: `1px solid ${COLOR.bone}`,
-            borderRadius: 14, padding: '18px 18px 16px', marginBottom: 18,
+            width: 36, height: 36, borderRadius: 10,
+            background: '#f5f1e8', color: '#5c4a38',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 18, flexShrink: 0,
           }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 8 }}>
-              <div style={{
-                width: 36, height: 36, borderRadius: 10,
-                background: COLOR.sand, color: COLOR.brown,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 18, flexShrink: 0,
-              }}>
-                <Calendar size={18} />
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ ...TYPE.itemTitle }}>Google Calendar</div>
-                <div style={{ ...TYPE.metaSmall, marginTop: 4, lineHeight: 1.5 }}>
-                  Your Salus classes appear in your personal calendar. Cover changes update automatically.
-                </div>
-              </div>
-            </div>
-            <button
-              disabled
-              className="salus-btn"
-              style={{
-                width: '100%', marginTop: 8, padding: '10px 16px',
-                background: 'transparent', color: COLOR.taupe,
-                border: `1px solid ${COLOR.bone}`, borderRadius: 10,
-                fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase',
-                fontFamily: 'inherit', cursor: 'not-allowed',
-                fontWeight: 500,
-              }}
-            >
-              Coming soon
-            </button>
+            <Mail size={18} />
           </div>
-
-          {/* Personal email — Phase 2 */}
-          <SectionLabel>Personal inbox</SectionLabel>
-          <div style={{
-            background: COLOR.cream, border: `1px solid ${COLOR.bone}`,
-            borderRadius: 14, padding: '18px 18px 16px', marginBottom: 18,
-          }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 8 }}>
-              <div style={{
-                width: 36, height: 36, borderRadius: 10,
-                background: COLOR.sand, color: COLOR.brown,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 18, flexShrink: 0,
-              }}>
-                <Mail size={18} />
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ ...TYPE.itemTitle }}>Gmail</div>
-                {emailIntegration ? (
-                  <div style={{ ...TYPE.metaSmall, marginTop: 4, lineHeight: 1.5 }}>
-                    Connected as {emailIntegration.emailAddress || 'your Gmail account'}.
-                  </div>
-                ) : (
-                  <div style={{ ...TYPE.metaSmall, marginTop: 4, lineHeight: 1.5 }}>
-                    Connect your personal Gmail so member messages can be triaged inside Salus.
-                  </div>
-                )}
-              </div>
-            </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ ...TYPE.itemTitle }}>Gmail</div>
             {emailIntegration ? (
-              <div style={{
-                marginTop: 8, padding: '10px 16px',
-                background: 'transparent', color: COLOR.sage,
-                border: `1px solid ${COLOR.bone}`, borderRadius: 10,
-                fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase',
-                fontFamily: 'inherit', textAlign: 'center',
-                fontWeight: 500,
-              }}>
-                ✓ Connected
+              <div style={{ ...TYPE.metaSmall, marginTop: 4, lineHeight: 1.5 }}>
+                Connected as {emailIntegration.emailAddress || 'your Gmail account'}.
               </div>
             ) : (
-              <button
-                onClick={onConnectGmail}
-                className="salus-btn"
-                style={{
-                  width: '100%', marginTop: 8, padding: '10px 16px',
-                  background: COLOR.forest, color: COLOR.cream,
-                  border: 'none', borderRadius: 10,
-                  fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase',
-                  fontFamily: 'inherit', cursor: 'pointer', fontWeight: 500,
-                }}
-              >
-                Connect Gmail
-              </button>
+              <div style={{ ...TYPE.metaSmall, marginTop: 4, lineHeight: 1.5 }}>
+                Connect your personal Gmail so member messages can be triaged inside Salus.
+              </div>
             )}
           </div>
-
-          {/* FOH-only stub: tour log */}
-          {isFoh && (
-            <>
-              <SectionLabel>For FOH</SectionLabel>
-              <div style={{
-                ...TYPE.metaSmall, padding: '14px 18px',
-                background: COLOR.sand, borderRadius: 12, lineHeight: 1.6, marginBottom: 18,
-              }}>
-                Studio tours and incidents have moved into their dedicated tabs and Schedule view.
-              </div>
-            </>
-          )}
         </div>
-      )}
+        {emailIntegration ? (
+          <div style={{
+            marginTop: 8, padding: '10px 16px',
+            color: '#7a8c5c',
+            border: '1px solid #efe7d2', borderRadius: 10,
+            fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase',
+            fontFamily: 'inherit', textAlign: 'center', fontWeight: 500,
+          }}>
+            ✓ Connected
+          </div>
+        ) : (
+          <button
+            onClick={onConnectGmail}
+            className="salus-btn"
+            style={{
+              width: '100%', marginTop: 8, padding: '10px 16px',
+              background: '#1a2620', color: '#fffdf7',
+              border: 'none', borderRadius: 10,
+              fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase',
+              fontFamily: 'inherit', cursor: 'pointer', fontWeight: 500,
+            }}
+          >
+            Connect Gmail
+          </button>
+        )}
+      </div>
 
-      {section === 'bookings' && (
-        <StudioBookingsView
-          data={data}
-          currentUser={currentUser}
-          isManager={false}
-          onCreate={onCreate}
-          onOpenBooking={onOpenBooking}
-        />
-      )}
+      {/* Personal admin tools */}
+      <SectionLabel>Personal admin</SectionLabel>
+      <div style={styles.meActionsList}>
+        <button onClick={onShowExpenses} className="salus-btn" style={styles.meActionRow}>
+          <FileText size={18} color="#5c4a38" />
+          <div style={{ flex: 1, textAlign: 'left' }}>
+            <div style={{ fontSize: 14, color: '#1a2620' }}>Expenses</div>
+            <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
+              {data.expenses?.length || 0} receipts · for your tax return
+            </div>
+          </div>
+          <ChevronRight size={16} color="#a59478" />
+        </button>
+        <button onClick={onShowFlows} className="salus-btn" style={styles.meActionRow}>
+          <Bookmark size={18} color="#5c4a38" />
+          <div style={{ flex: 1, textAlign: 'left' }}>
+            <div style={{ fontSize: 14, color: '#1a2620' }}>Flows</div>
+            <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
+              {(data.flows || []).filter(f => !f.archived).length} active · session library
+            </div>
+          </div>
+          <ChevronRight size={16} color="#a59478" />
+        </button>
+        <button onClick={onShowTimeOff} className="salus-btn" style={{ ...styles.meActionRow, borderBottom: 'none' }}>
+          <Calendar size={18} color="#5c4a38" />
+          <div style={{ flex: 1, textAlign: 'left' }}>
+            <div style={{ fontSize: 14, color: '#1a2620' }}>Time off & bank holidays</div>
+            <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Upcoming UK bank holidays</div>
+          </div>
+          <ChevronRight size={16} color="#a59478" />
+        </button>
+      </div>
     </div>
   );
 }
 
-function AdminPage({ data, currentUser, isManager, emailIntegration, sessionToken, onCreate, onOpenBooking, onConnectGmail, onCreateTask, onReload }) {
+function AdminPage({ data, currentUser, isManager, emailIntegration, sessionToken, onCreate, onOpenBooking, onConnectGmail, onCreateTask, onReload, onShowExpenses, onShowFlows, onShowTimeOff, onShowInvoices }) {
   // Non-managers see a simplified personal admin — focused on their own tools, not running the studio.
   if (!isManager) {
     return (
@@ -4200,10 +4077,10 @@ function AdminPage({ data, currentUser, isManager, emailIntegration, sessionToke
         data={data}
         currentUser={currentUser}
         emailIntegration={emailIntegration}
-        onCreate={onCreate}
-        onOpenBooking={onOpenBooking}
         onConnectGmail={onConnectGmail}
-        onReload={onReload}
+        onShowExpenses={onShowExpenses}
+        onShowFlows={onShowFlows}
+        onShowTimeOff={onShowTimeOff}
       />
     );
   }
@@ -4243,6 +4120,10 @@ function AdminPage({ data, currentUser, isManager, emailIntegration, sessionToke
         <button onClick={() => setSection('incidents')} className="salus-btn"
           style={{ ...styles.adminTab, ...(section === 'incidents' ? styles.adminTabActive : {}) }}>
           <AlertCircle size={14} /> Incidents
+        </button>
+        <button onClick={() => setSection('invoices')} className="salus-btn"
+          style={{ ...styles.adminTab, ...(section === 'invoices' ? styles.adminTabActive : {}) }}>
+          <FileText size={14} /> Invoices
         </button>
       </div>
 
@@ -4303,6 +4184,33 @@ function AdminPage({ data, currentUser, isManager, emailIntegration, sessionToke
           isManager={isManager}
           onReload={onReload}
         />
+      )}
+
+      {section === 'invoices' && (
+        <div>
+          <SectionLabel>Pay run</SectionLabel>
+          <div style={{
+            background: '#fffdf7', border: '1px solid #efe7d2',
+            borderRadius: 14, padding: '18px 18px 16px', marginBottom: 14,
+          }}>
+            <div style={{ ...TYPE.itemTitle, marginBottom: 6 }}>Generate invoices</div>
+            <div style={{ ...TYPE.metaSmall, marginBottom: 14, lineHeight: 1.5 }}>
+              Build CSV invoices for all coaches based on classes taught.
+              £30 per session by default, override per-coach via Team settings.
+            </div>
+            <button onClick={() => setBroadcastOpen(false) || onShowInvoices?.()} className="salus-btn"
+              style={{
+                width: '100%', padding: '12px 16px',
+                background: '#1a2620', color: '#fffdf7',
+                border: 'none', borderRadius: 10,
+                fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase',
+                fontFamily: 'inherit', cursor: 'pointer', fontWeight: 500,
+              }}
+            >
+              Open pay run
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Broadcast composer */}
@@ -11310,15 +11218,20 @@ function CoverHomeCard({ req, users, interested, urgent, pending, onClick, onCla
 // SCHEDULE VIEW — wraps Timetable (Studio) and FOHSchedule with a manager toggle
 // ──────────────────────────────────────────────────────────────────────────────
 
-// ─── StaffScheduleView — clean personal-schedule for non-managers ────────
-// No FOH / Hire tabs, no stats numbers. Just your classes laid out by day.
+
+// ─── StaffScheduleView — schedule built around cover ─────────────────────
+// Three views:
+//   • Mine — just your own classes (default)
+//   • Everyone — all classes, yours emphasised — pick up cover by tapping
+//   • Cover board — only classes that need cover, sorted by date
 function StaffScheduleView({ data, currentUser, onClassClick }) {
+  const [view, setView] = useState('mine'); // 'mine' | 'everyone' | 'cover'
   const [weekOffset, setWeekOffset] = useState(0);
 
   // Week math — Monday start (UK convention)
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const dow = (today.getDay() + 6) % 7; // 0=Mon ... 6=Sun
+  const dow = (today.getDay() + 6) % 7;
   const weekStart = new Date(today);
   weekStart.setDate(weekStart.getDate() - dow + weekOffset * 7);
   const weekDates = Array.from({ length: 7 }, (_, i) => {
@@ -11328,83 +11241,169 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
   });
   const toIso = (d) => d.toISOString().slice(0, 10);
   const todayIso = toIso(today);
-
-  // Group THIS user's classes by date for the visible week
   const weekStartIso = toIso(weekDates[0]);
   const weekEndIso = toIso(weekDates[6]);
-  const myWeekClasses = data.classes
-    .filter(c => c.coachId === currentUser.id && c.date >= weekStartIso && c.date <= weekEndIso)
-    .sort((a, b) => (a.date + ' ' + a.time).localeCompare(b.date + ' ' + b.time));
 
-  const byDate = {};
-  myWeekClasses.forEach(c => {
-    if (!byDate[c.date]) byDate[c.date] = [];
-    byDate[c.date].push(c);
-  });
+  // Open covers (status='open') excluding own
+  const openCovers = (data.coverRequests || [])
+    .filter(r => r.status === 'open' && r.requestedBy !== currentUser.id)
+    .map(r => ({ ...r, cls: data.classes.find(c => c.id === r.classId) }))
+    .filter(r => r.cls)
+    .sort((a, b) => (a.cls.date + ' ' + a.cls.time).localeCompare(b.cls.date + ' ' + b.cls.time));
 
-  // Class accent color (mirrors MyDayHero)
+  const coverCount = openCovers.length;
+
   const classColor = (cls) => {
     const meta = (CLASS_TYPES && CLASS_TYPES[cls.type]) || {};
     return meta.color || COLOR.amber;
   };
 
-  // Range label e.g. "18 – 24 May"
+  const studioLabel = (s) => {
+    if (s === 'reformer') return 'Reformer studio';
+    if (s === 'hybrid') return 'Hybrid studio';
+    return 'Studio';
+  };
+
+  const coachName = (id) => {
+    const u = data.users.find(u => u.id === id);
+    return u?.name?.split(' ')[0] || '';
+  };
+
   const rangeLabel = (() => {
     const a = weekDates[0], b = weekDates[6];
     const sameMonth = a.getMonth() === b.getMonth();
-    const sameYear = a.getFullYear() === b.getFullYear();
-    const aFmt = a.toLocaleDateString('en-GB', { day: 'numeric', month: sameMonth ? undefined : 'short' });
-    const bFmt = b.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-    if (sameMonth && sameYear) {
+    if (sameMonth) {
       return `${a.getDate()} – ${b.getDate()} ${b.toLocaleDateString('en-GB', { month: 'long' })}`;
     }
-    return `${aFmt} – ${bFmt}`;
+    return `${a.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} – ${b.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`;
   })();
+
+  const eyebrowLabel = weekOffset === 0 ? 'This week' : weekOffset === 1 ? 'Next week' : weekOffset === -1 ? 'Last week' : 'Week';
+
+  // Filter classes for the current view
+  const visibleClasses = (() => {
+    if (view === 'cover') {
+      return openCovers.map(r => r.cls);
+    }
+    const weekClasses = data.classes.filter(c => c.date >= weekStartIso && c.date <= weekEndIso);
+    if (view === 'mine') {
+      return weekClasses.filter(c => c.coachId === currentUser.id);
+    }
+    return weekClasses;
+  })();
+
+  const byDate = {};
+  visibleClasses.forEach(c => {
+    if (!byDate[c.date]) byDate[c.date] = [];
+    byDate[c.date].push(c);
+  });
+  Object.keys(byDate).forEach(d => byDate[d].sort((a, b) => (a.time || '').localeCompare(b.time || '')));
+
+  const sortedDates = Object.keys(byDate).sort();
+  const datesToShow = view === 'cover' ? sortedDates : weekDates.map(toIso);
 
   return (
     <>
       <PageHeader
-        eyebrow={weekOffset === 0 ? 'This week' : weekOffset === 1 ? 'Next week' : weekOffset === -1 ? 'Last week' : 'Week'}
-        title="Your schedule"
+        eyebrow={view === 'cover' ? 'Help your team' : eyebrowLabel}
+        title={view === 'cover' ? 'Cover board' : 'Schedule'}
         compact
       />
 
-      {/* Week navigation — minimal */}
+      {/* View tabs — Mine / Everyone / Cover */}
       <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '6px 4px 22px',
+        display: 'flex', gap: 22, padding: '4px 4px 8px',
+        borderBottom: '1px solid #efe7d2', marginBottom: 16,
       }}>
-        <button onClick={() => setWeekOffset(o => o - 1)} className="salus-btn" style={{
-          background: 'transparent', border: 'none', padding: '6px 8px',
-          color: COLOR.brown, cursor: 'pointer', fontFamily: 'inherit',
-          display: 'flex', alignItems: 'center',
-        }}>
-          <ChevronLeft size={18} />
-        </button>
-        <div style={{
-          fontFamily: COLOR.serif, fontSize: 16, color: COLOR.forest,
-          letterSpacing: '-0.005em',
-        }}>
-          {rangeLabel}
-        </div>
-        <button onClick={() => setWeekOffset(o => o + 1)} className="salus-btn" style={{
-          background: 'transparent', border: 'none', padding: '6px 8px',
-          color: COLOR.brown, cursor: 'pointer', fontFamily: 'inherit',
-          display: 'flex', alignItems: 'center',
-        }}>
-          <ChevronRight size={18} />
-        </button>
+        {[
+          ['mine', 'Mine'],
+          ['everyone', 'Everyone'],
+          ['cover', `Cover${coverCount > 0 ? ` (${coverCount})` : ''}`],
+        ].map(([key, label]) => {
+          const isActive = view === key;
+          const isCoverWithCount = key === 'cover' && coverCount > 0;
+          return (
+            <button key={key}
+              onClick={() => setView(key)}
+              className="salus-btn"
+              style={{
+                padding: '6px 0', background: 'transparent', border: 'none',
+                borderBottom: isActive
+                  ? `1.5px solid ${isCoverWithCount ? '#c8442a' : '#1a2620'}`
+                  : '1.5px solid transparent',
+                fontSize: 11, fontWeight: isActive ? 600 : 500,
+                color: isActive ? (isCoverWithCount ? '#c8442a' : '#1a2620') : (isCoverWithCount ? '#c8442a' : '#a59478'),
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+                fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap',
+              }}
+            >
+              {label}
+            </button>
+          );
+        })}
       </div>
 
-      {myWeekClasses.length === 0 ? (
-        <EmptyState sub={weekOffset === 0 ? 'Enjoy the quiet week.' : ' '}>
-          No classes this week.
+      {/* Week nav — hidden on cover board */}
+      {view !== 'cover' && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0 4px 18px',
+        }}>
+          <button onClick={() => setWeekOffset(o => o - 1)} className="salus-btn" style={{
+            background: 'transparent', border: 'none', padding: '6px 8px',
+            color: '#5c4a38', cursor: 'pointer', fontFamily: 'inherit',
+            display: 'flex', alignItems: 'center',
+          }}>
+            <ChevronLeft size={18} />
+          </button>
+          <button onClick={() => setWeekOffset(0)} className="salus-btn" style={{
+            background: 'transparent', border: 'none',
+            fontFamily: '"Playfair Display", Georgia, serif', fontSize: 16,
+            color: '#1a2620', letterSpacing: '-0.005em', cursor: 'pointer',
+            padding: '6px 12px',
+          }}>
+            {rangeLabel}
+          </button>
+          <button onClick={() => setWeekOffset(o => o + 1)} className="salus-btn" style={{
+            background: 'transparent', border: 'none', padding: '6px 8px',
+            color: '#5c4a38', cursor: 'pointer', fontFamily: 'inherit',
+            display: 'flex', alignItems: 'center',
+          }}>
+            <ChevronRight size={18} />
+          </button>
+        </div>
+      )}
+
+      {/* Jump to today */}
+      {view !== 'cover' && weekOffset !== 0 && (
+        <button onClick={() => setWeekOffset(0)} className="salus-btn" style={{
+          background: 'transparent', border: 'none',
+          color: '#c8442a', fontSize: 11, fontWeight: 500,
+          letterSpacing: '0.08em', textTransform: 'uppercase',
+          fontFamily: 'inherit', cursor: 'pointer',
+          padding: '0 4px 14px',
+          textAlign: 'left',
+        }}>
+          ← Jump to this week
+        </button>
+      )}
+
+      {/* Body */}
+      {visibleClasses.length === 0 ? (
+        <EmptyState sub={
+          view === 'cover' ? 'When a teammate needs cover, it shows up here.' :
+          view === 'mine'  ? 'A quiet week — enjoy.' :
+                             'Nothing on the studio schedule.'
+        }>
+          {view === 'cover' ? 'No cover needed right now.' :
+           view === 'mine'  ? 'No classes this week.' :
+                              'Empty week.'}
         </EmptyState>
       ) : (
-        weekDates.map((d, idx) => {
-          const iso = toIso(d);
+        datesToShow.map(iso => {
           const dayClasses = byDate[iso] || [];
-          if (dayClasses.length === 0) return null; // Skip empty days
+          if (dayClasses.length === 0) return null;
+          const d = new Date(iso);
           const isToday = iso === todayIso;
           const dayName = d.toLocaleDateString('en-GB', { weekday: 'long' });
           const dayNum = d.getDate();
@@ -11412,22 +11411,22 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
 
           return (
             <div key={iso} style={{ marginBottom: 28 }}>
-              {/* Day header — big, calm */}
               <div style={{
                 display: 'flex', alignItems: 'baseline', gap: 10,
                 padding: '0 4px 12px',
-                borderBottom: `1px solid ${COLOR.bone}`,
+                borderBottom: '1px solid #efe7d2',
                 marginBottom: 12,
               }}>
                 <div style={{
-                  fontFamily: COLOR.serif, fontSize: 20, fontWeight: 400,
-                  color: isToday ? COLOR.coral : COLOR.forest,
+                  fontFamily: '"Playfair Display", Georgia, serif',
+                  fontSize: 20, fontWeight: 400,
+                  color: isToday ? '#c8442a' : '#1a2620',
                   letterSpacing: '-0.005em',
                 }}>
                   {dayName}
                 </div>
                 <div style={{
-                  fontSize: 11, color: COLOR.taupe,
+                  fontSize: 11, color: '#a59478',
                   letterSpacing: '0.08em', textTransform: 'uppercase',
                 }}>
                   {dayNum} {monthAbbr}
@@ -11435,7 +11434,7 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
                 {isToday && (
                   <div style={{
                     marginLeft: 'auto',
-                    fontSize: 10, color: COLOR.coral, fontWeight: 600,
+                    fontSize: 10, color: '#c8442a', fontWeight: 600,
                     letterSpacing: '0.12em', textTransform: 'uppercase',
                   }}>
                     Today
@@ -11443,13 +11442,14 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
                 )}
               </div>
 
-              {/* Classes for this day */}
               {dayClasses.map(c => {
-                const studioLabel = c.studio === 'reformer' ? 'Reformer studio' :
-                                    c.studio === 'hybrid' ? 'Hybrid studio' : 'Studio';
-                const needsCover = data.coverRequests.some(r =>
+                const isMine = c.coachId === currentUser.id;
+                const needsCover = (data.coverRequests || []).some(r =>
                   r.classId === c.id && (r.status === 'open' || r.status === 'pending')
                 );
+                const isDimmed = view === 'everyone' && !isMine && !needsCover;
+                const coverReq = (data.coverRequests || []).find(r => r.classId === c.id && r.status === 'open');
+                const requesterFirstName = coverReq ? coachName(coverReq.requestedBy) : '';
 
                 return (
                   <button
@@ -11458,47 +11458,57 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
                     className="salus-btn"
                     style={{
                       display: 'flex', gap: 14, padding: '14px 16px',
-                      background: needsCover ? '#fef0ec' : COLOR.cream,
-                      border: `1px solid ${needsCover ? '#f0c8b8' : COLOR.bone}`,
+                      background: needsCover ? '#fef0ec' : '#fffdf7',
+                      border: `1px solid ${needsCover ? '#f0c8b8' : '#efe7d2'}`,
                       borderRadius: 12,
                       marginBottom: 8,
                       cursor: 'pointer', textAlign: 'left',
                       width: '100%', fontFamily: 'inherit',
+                      opacity: isDimmed ? 0.55 : 1,
                     }}
                   >
-                    {/* Big time */}
                     <div style={{ flexShrink: 0, minWidth: 60 }}>
                       <div style={{
-                        fontFamily: COLOR.serif, fontSize: 20, fontWeight: 400,
-                        color: COLOR.forest, lineHeight: 1, fontVariantNumeric: 'tabular-nums',
+                        fontFamily: '"Playfair Display", Georgia, serif',
+                        fontSize: 20, fontWeight: 400,
+                        color: '#1a2620', lineHeight: 1, fontVariantNumeric: 'tabular-nums',
                       }}>
                         {c.time}
                       </div>
                       {c.durationMin ? (
-                        <div style={{ fontSize: 10, color: COLOR.taupe, marginTop: 6, letterSpacing: '0.05em' }}>
+                        <div style={{ fontSize: 10, color: '#a59478', marginTop: 6, letterSpacing: '0.05em' }}>
                           {c.durationMin} min
                         </div>
                       ) : null}
                     </div>
 
-                    {/* Accent bar */}
                     <div style={{
                       width: 3, background: classColor(c), borderRadius: 2, alignSelf: 'stretch',
                       minHeight: 36,
                     }} />
 
-                    {/* Class details */}
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ ...TYPE.itemTitle }}>{c.type}</div>
-                      <div style={{ fontSize: 12, color: COLOR.moss, marginTop: 4 }}>
-                        {studioLabel}
+                      <div style={{
+                        fontFamily: '"Playfair Display", Georgia, serif',
+                        fontSize: 15, fontWeight: 500, color: '#1a2620', letterSpacing: '-0.005em',
+                      }}>
+                        {c.type}
+                      </div>
+                      <div style={{ fontSize: 12, color: '#7a8270', marginTop: 4 }}>
+                        {studioLabel(c.studio)}
+                        {view !== 'mine' && c.coachId && (
+                          <> · <span style={{ color: isMine ? '#7a8c5c' : '#a59478' }}>
+                            {isMine ? 'You' : coachName(c.coachId)}
+                          </span></>
+                        )}
                       </div>
                       {needsCover && (
                         <div style={{
-                          fontSize: 11, color: COLOR.coral, marginTop: 6,
+                          fontSize: 11, color: '#c8442a', marginTop: 6,
                           fontWeight: 500, letterSpacing: '0.05em',
                         }}>
-                          Cover requested
+                          {requesterFirstName ? `${requesterFirstName} needs cover` : 'Needs cover'}
+                          {view === 'cover' && ' — tap to take it'}
                         </div>
                       )}
                     </div>
@@ -13699,7 +13709,7 @@ const RATE_PER_SESSION = 30; // £ per class taught
 // ME — personal hub: profile, stats, settings link
 // ──────────────────────────────────────────────────────────────────────────────
 
-function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onToggleViewAsStaff, theme, onPickTheme, emailIntegration, onOpenSettings, onSignOut, onShowInvoices, onShowTimeOff, onShowTeam, onShowExpenses, onShowFlows, onConnectGmail, onDisconnectGmail }) {
+function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onToggleViewAsStaff, emailIntegration, onOpenSettings, onSignOut, onShowInvoices, onShowTimeOff, onShowTeam, onShowExpenses, onShowFlows, onConnectGmail, onDisconnectGmail }) {
   const myClasses = data.classes.filter(c => c.coachId === currentUser.id);
   const sessionCount = myClasses.length;
   const totalMinutes = myClasses.reduce((acc, c) => acc + c.dur, 0);
@@ -13790,61 +13800,6 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
         <PushNotificationsSection />
       </section>
 
-      {/* Your work */}
-      <section style={styles.homeSection}>
-        <div style={styles.homeSectionHead}>
-          <div style={styles.homeSectionTitle}>Your work</div>
-        </div>
-        <div style={styles.meActionsList}>
-          <button onClick={onShowFlows} className="salus-btn" style={styles.meActionRow}>
-            <Bookmark size={18} color="#5c4a38" />
-            <div style={{ flex: 1, textAlign: 'left' }}>
-              <div style={{ fontSize: 14, color: '#1a2620' }}>Flows</div>
-              <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
-                {(data.flows || []).filter(f => !f.archived).length} active · session library
-              </div>
-            </div>
-            <ChevronRight size={16} color="#a59478" />
-          </button>
-        </div>
-      </section>
-
-      {/* Your money */}
-      <section style={styles.homeSection}>
-        <div style={styles.homeSectionHead}>
-          <div style={styles.homeSectionTitle}>Your money</div>
-        </div>
-        <div style={styles.meActionsList}>
-          <button onClick={onShowExpenses} className="salus-btn" style={styles.meActionRow}>
-            <FileText size={18} color="#5c4a38" />
-            <div style={{ flex: 1, textAlign: 'left' }}>
-              <div style={{ fontSize: 14, color: '#1a2620' }}>Expenses</div>
-              <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
-                {data.expenses?.length || 0} receipts · for your tax return
-              </div>
-            </div>
-            <ChevronRight size={16} color="#a59478" />
-          </button>
-        </div>
-      </section>
-
-      {/* Time off & bank holidays */}
-      <section style={styles.homeSection}>
-        <div style={styles.homeSectionHead}>
-          <div style={styles.homeSectionTitle}>Calendar</div>
-        </div>
-        <div style={styles.meActionsList}>
-          <button onClick={onShowTimeOff} className="salus-btn" style={styles.meActionRow}>
-            <Calendar size={18} color="#5c4a38" />
-            <div style={{ flex: 1, textAlign: 'left' }}>
-              <div style={{ fontSize: 14, color: '#1a2620' }}>Time off & bank holidays</div>
-              <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Upcoming UK bank holidays</div>
-            </div>
-            <ChevronRight size={16} color="#a59478" />
-          </button>
-        </div>
-      </section>
-
       {/* Your team */}
       <section style={styles.homeSection}>
         <div style={styles.homeSectionHead}>
@@ -13885,25 +13840,6 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
         </button>
       </section>
 
-      {/* Manager tools */}
-      {isManager && (
-        <section style={styles.homeSection}>
-          <div style={styles.homeSectionHead}>
-            <div style={styles.homeSectionTitle}>Manager tools</div>
-          </div>
-          <div style={styles.meActionsList}>
-            <button onClick={onShowInvoices} className="salus-btn" style={styles.meActionRow}>
-              <FileText size={18} color="#5c4a38" />
-              <div style={{ flex: 1, textAlign: 'left' }}>
-                <div style={{ fontSize: 14, color: '#1a2620' }}>Generate invoices</div>
-                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>£30 per session, this week</div>
-              </div>
-              <ChevronRight size={16} color="#a59478" />
-            </button>
-          </div>
-        </section>
-      )}
-
       {/* View-as-staff toggle — only shown to real managers, always visible (even when previewing) */}
       {realIsManager && (
         <section style={styles.homeSection}>
@@ -13940,55 +13876,6 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
           </div>
         </section>
       )}
-
-      {/* Theme picker — for everyone */}
-      <section style={styles.homeSection}>
-        <div style={styles.homeSectionHead}>
-          <div style={styles.homeSectionTitle}>Theme</div>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-          {Object.entries(THEMES).map(([key, t]) => {
-            const isActive = theme === key;
-            return (
-              <button
-                key={key}
-                onClick={() => onPickTheme?.(key)}
-                className="salus-btn"
-                style={{
-                  display: 'flex', flexDirection: 'column', alignItems: 'stretch',
-                  padding: 10, gap: 8,
-                  background: isActive ? 'var(--c-cream)' : 'transparent',
-                  border: `1.5px solid ${isActive ? 'var(--c-forest)' : 'var(--c-bone)'}`,
-                  borderRadius: 12, cursor: 'pointer',
-                  fontFamily: 'inherit',
-                  transition: 'border-color 120ms ease, background 120ms ease',
-                }}
-              >
-                <div style={{
-                  display: 'flex', height: 36, borderRadius: 8, overflow: 'hidden',
-                  border: '0.5px solid rgba(0,0,0,0.04)',
-                }}>
-                  {t.swatch.map((c, i) => (
-                    <div key={i} style={{ flex: 1, background: c }} />
-                  ))}
-                </div>
-                <div style={{
-                  fontSize: 12, fontWeight: 500, color: 'var(--c-forest)',
-                  textAlign: 'left',
-                }}>
-                  {t.label}
-                </div>
-                <div style={{
-                  fontSize: 10, color: 'var(--c-taupe)', textAlign: 'left',
-                  letterSpacing: '0.02em', lineHeight: 1.3,
-                }}>
-                  {t.description}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </section>
 
       {/* Email integration — managers + FOH staff */}
       {(isManager || currentUser.isFoh) && (
@@ -17846,9 +17733,9 @@ function Modal({ children, onClose }) {
 const styles = {
   app: {
     height: '100%',
-    background: 'var(--c-sand)',
+    background: '#f5f1e8',
     fontFamily: "'Inter', -apple-system, sans-serif",
-    color: 'var(--c-forest)',
+    color: '#1a2620',
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
@@ -17858,7 +17745,7 @@ const styles = {
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: '12px 18px',
-    background: 'var(--c-sand)',
+    background: '#f5f1e8',
   },
   headerLeft: { display: 'flex', alignItems: 'center', gap: 10 },
   headerRight: { display: 'flex', alignItems: 'center', gap: 8 },
@@ -18100,13 +17987,13 @@ const styles = {
   meStatCell: { textAlign: 'center', padding: '8px 4px' },
   meStatNum: { fontFamily: '"Playfair Display", serif', fontSize: 24, fontWeight: 500, color: '#1a2620' },
   meStatLabel: { fontSize: 10, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 0.8, marginTop: 4, fontWeight: 600 },
-  meActionsList: { background: 'var(--c-cream)', borderRadius: 14, border: '1px solid var(--c-bone)', overflow: 'hidden' },
+  meActionsList: { background: '#fffdf7', borderRadius: 14, border: '1px solid #efe7d2', overflow: 'hidden' },
   meActionRow: {
     display: 'flex', alignItems: 'center', gap: 12,
     padding: '14px 16px', width: '100%',
     background: 'none', border: 'none', fontFamily: 'inherit',
-    fontSize: 14, color: 'var(--c-forest)', cursor: 'pointer',
-    borderBottom: '1px solid var(--c-bone)',
+    fontSize: 14, color: '#1a2620', cursor: 'pointer',
+    borderBottom: '1px solid #f5f0e0',
   },
   meBankCard: {
     width: '100%', display: 'flex', alignItems: 'center', gap: 12,
@@ -19224,19 +19111,19 @@ const styles = {
   // ─── BOTTOM NAV ───
   bottomNav: {
     position: 'fixed', bottom: 0, left: 0, right: 0,
-    background: 'var(--c-cream)', backdropFilter: 'blur(12px)',
-    borderTop: '1px solid var(--c-bone)',
+    background: 'rgba(255, 253, 247, 0.95)', backdropFilter: 'blur(12px)',
+    borderTop: '1px solid #efe7d2',
     display: 'flex', padding: '10px 12px 8px',
     paddingBottom: 'calc(10px + env(safe-area-inset-bottom))',
     zIndex: 100,
   },
   bottomTab: {
     flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-    padding: 4, color: 'var(--c-taupe)', background: 'none', border: 'none',
+    padding: 4, color: '#a59478', background: 'none', border: 'none',
     fontFamily: 'inherit', cursor: 'pointer', position: 'relative',
     transition: 'color 0.15s ease',
   },
-  bottomTabActive: { color: 'var(--c-forest)' },
+  bottomTabActive: { color: '#1a2620' },
   bottomTabLabel: { fontSize: 10, fontWeight: 500, letterSpacing: '0.05em' },
   bottomTabLabelActive: { fontWeight: 600 },
   bottomTabBadge: {
@@ -19326,7 +19213,7 @@ const styles = {
     display: 'flex', flexDirection: 'column',
     overflow: 'hidden',
     boxSizing: 'border-box',
-    background: 'var(--c-sand)',
+    background: '#f5f1e8',
   },
 
   sectionHeader: {
@@ -19489,13 +19376,13 @@ const styles = {
 
   // Chat
   chatContainer: {
-    background: 'var(--c-cream)', borderRadius: 12, border: '1px solid var(--c-bone)',
+    background: '#fffdf7', borderRadius: 12, border: '1px solid #e8e0cc',
     display: 'flex', flexDirection: 'column',
     flex: 1, minHeight: 0,
     overflow: 'hidden',
   },
   chatHeader: {
-    padding: '14px 18px', borderBottom: '1px solid var(--c-bone)',
+    padding: '14px 18px', borderBottom: '1px solid #e8e0cc',
     display: 'flex', alignItems: 'center', gap: 12,
   },
   chatTitle: {
