@@ -356,3 +356,17 @@ export const expenseFromDb = (row) => ({
   createdAt: row.created_at ? new Date(row.created_at).getTime() : 0,
   updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : 0,
 });
+
+export const flowFromDb = (row) => ({
+  id: row.id,
+  userId: row.user_id,
+  title: row.title || 'Untitled flow',
+  flowDate: row.flow_date || null,
+  classType: row.class_type || '',
+  durationMinutes: row.duration_minutes || null,
+  notes: row.notes || '',
+  sketches: Array.isArray(row.sketches) ? row.sketches : [],
+  archived: !!row.archived,
+  createdAt: row.created_at ? new Date(row.created_at).getTime() : 0,
+  updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : 0,
+});
