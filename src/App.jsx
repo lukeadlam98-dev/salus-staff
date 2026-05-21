@@ -663,7 +663,7 @@ export default function SalusStaff() {
 
   // ─── Onboarding gate — new hires complete the wizard before seeing the app ─
   const currentUserProfile = data.users.find(u => u.id === currentUserId);
-  if (currentUserProfile && !isOnboardingComplete(currentUserProfile)) {
+  if (currentUserProfile && currentUserProfile.role !== 'manager' && !isOnboardingComplete(currentUserProfile)) {
     return (
       <OnboardingScreen
         currentUser={currentUserProfile}
@@ -1447,8 +1447,8 @@ export default function SalusStaff() {
   const previewingAsStaff = realIsManager && viewAsStaff;
 
   // First-time onboarding — if the user hasn't picked any role yet, show the picker.
-  // Manager bypasses this entirely.
-  if (!isManager && !currentUser.isCoach && !currentUser.isFoh) {
+  // Manager bypasses this entirely. Use realIsManager so view-as-staff doesn't trigger the picker.
+  if (!realIsManager && !currentUser.isCoach && !currentUser.isFoh) {
     return (
       <RolePickerScreen
         currentUser={currentUser}
@@ -1468,7 +1468,7 @@ export default function SalusStaff() {
   // Then onboarding (after role is set, before they see Home).
   // Manager bypasses. Existing users are bypassed via the SQL migration that
   // backfilled their flags (or by completing it themselves).
-  if (!isManager && !currentUser.onboardingCompletedAt) {
+  if (!realIsManager && !currentUser.onboardingCompletedAt) {
     return (
       <OnboardingFlow
         currentUser={currentUser}
