@@ -11310,13 +11310,228 @@ function CoverHomeCard({ req, users, interested, urgent, pending, onClick, onCla
 // SCHEDULE VIEW — wraps Timetable (Studio) and FOHSchedule with a manager toggle
 // ──────────────────────────────────────────────────────────────────────────────
 
+// ─── StaffScheduleView — clean personal-schedule for non-managers ────────
+// No FOH / Hire tabs, no stats numbers. Just your classes laid out by day.
+function StaffScheduleView({ data, currentUser, onClassClick }) {
+  const [weekOffset, setWeekOffset] = useState(0);
+
+  // Week math — Monday start (UK convention)
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dow = (today.getDay() + 6) % 7; // 0=Mon ... 6=Sun
+  const weekStart = new Date(today);
+  weekStart.setDate(weekStart.getDate() - dow + weekOffset * 7);
+  const weekDates = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(weekStart);
+    d.setDate(d.getDate() + i);
+    return d;
+  });
+  const toIso = (d) => d.toISOString().slice(0, 10);
+  const todayIso = toIso(today);
+
+  // Group THIS user's classes by date for the visible week
+  const weekStartIso = toIso(weekDates[0]);
+  const weekEndIso = toIso(weekDates[6]);
+  const myWeekClasses = data.classes
+    .filter(c => c.coachId === currentUser.id && c.date >= weekStartIso && c.date <= weekEndIso)
+    .sort((a, b) => (a.date + ' ' + a.time).localeCompare(b.date + ' ' + b.time));
+
+  const byDate = {};
+  myWeekClasses.forEach(c => {
+    if (!byDate[c.date]) byDate[c.date] = [];
+    byDate[c.date].push(c);
+  });
+
+  // Class accent color (mirrors MyDayHero)
+  const classColor = (cls) => {
+    const meta = (CLASS_TYPES && CLASS_TYPES[cls.type]) || {};
+    return meta.color || COLOR.amber;
+  };
+
+  // Range label e.g. "18 – 24 May"
+  const rangeLabel = (() => {
+    const a = weekDates[0], b = weekDates[6];
+    const sameMonth = a.getMonth() === b.getMonth();
+    const sameYear = a.getFullYear() === b.getFullYear();
+    const aFmt = a.toLocaleDateString('en-GB', { day: 'numeric', month: sameMonth ? undefined : 'short' });
+    const bFmt = b.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    if (sameMonth && sameYear) {
+      return `${a.getDate()} – ${b.getDate()} ${b.toLocaleDateString('en-GB', { month: 'long' })}`;
+    }
+    return `${aFmt} – ${bFmt}`;
+  })();
+
+  return (
+    <>
+      <PageHeader
+        eyebrow={weekOffset === 0 ? 'This week' : weekOffset === 1 ? 'Next week' : weekOffset === -1 ? 'Last week' : 'Week'}
+        title="Your schedule"
+        compact
+      />
+
+      {/* Week navigation — minimal */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '6px 4px 22px',
+      }}>
+        <button onClick={() => setWeekOffset(o => o - 1)} className="salus-btn" style={{
+          background: 'transparent', border: 'none', padding: '6px 8px',
+          color: COLOR.brown, cursor: 'pointer', fontFamily: 'inherit',
+          display: 'flex', alignItems: 'center',
+        }}>
+          <ChevronLeft size={18} />
+        </button>
+        <div style={{
+          fontFamily: COLOR.serif, fontSize: 16, color: COLOR.forest,
+          letterSpacing: '-0.005em',
+        }}>
+          {rangeLabel}
+        </div>
+        <button onClick={() => setWeekOffset(o => o + 1)} className="salus-btn" style={{
+          background: 'transparent', border: 'none', padding: '6px 8px',
+          color: COLOR.brown, cursor: 'pointer', fontFamily: 'inherit',
+          display: 'flex', alignItems: 'center',
+        }}>
+          <ChevronRight size={18} />
+        </button>
+      </div>
+
+      {myWeekClasses.length === 0 ? (
+        <EmptyState sub={weekOffset === 0 ? 'Enjoy the quiet week.' : ' '}>
+          No classes this week.
+        </EmptyState>
+      ) : (
+        weekDates.map((d, idx) => {
+          const iso = toIso(d);
+          const dayClasses = byDate[iso] || [];
+          if (dayClasses.length === 0) return null; // Skip empty days
+          const isToday = iso === todayIso;
+          const dayName = d.toLocaleDateString('en-GB', { weekday: 'long' });
+          const dayNum = d.getDate();
+          const monthAbbr = d.toLocaleDateString('en-GB', { month: 'short' });
+
+          return (
+            <div key={iso} style={{ marginBottom: 28 }}>
+              {/* Day header — big, calm */}
+              <div style={{
+                display: 'flex', alignItems: 'baseline', gap: 10,
+                padding: '0 4px 12px',
+                borderBottom: `1px solid ${COLOR.bone}`,
+                marginBottom: 12,
+              }}>
+                <div style={{
+                  fontFamily: COLOR.serif, fontSize: 20, fontWeight: 400,
+                  color: isToday ? COLOR.coral : COLOR.forest,
+                  letterSpacing: '-0.005em',
+                }}>
+                  {dayName}
+                </div>
+                <div style={{
+                  fontSize: 11, color: COLOR.taupe,
+                  letterSpacing: '0.08em', textTransform: 'uppercase',
+                }}>
+                  {dayNum} {monthAbbr}
+                </div>
+                {isToday && (
+                  <div style={{
+                    marginLeft: 'auto',
+                    fontSize: 10, color: COLOR.coral, fontWeight: 600,
+                    letterSpacing: '0.12em', textTransform: 'uppercase',
+                  }}>
+                    Today
+                  </div>
+                )}
+              </div>
+
+              {/* Classes for this day */}
+              {dayClasses.map(c => {
+                const studioLabel = c.studio === 'reformer' ? 'Reformer studio' :
+                                    c.studio === 'hybrid' ? 'Hybrid studio' : 'Studio';
+                const needsCover = data.coverRequests.some(r =>
+                  r.classId === c.id && (r.status === 'open' || r.status === 'pending')
+                );
+
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => onClassClick?.(c.id)}
+                    className="salus-btn"
+                    style={{
+                      display: 'flex', gap: 14, padding: '14px 16px',
+                      background: needsCover ? '#fef0ec' : COLOR.cream,
+                      border: `1px solid ${needsCover ? '#f0c8b8' : COLOR.bone}`,
+                      borderRadius: 12,
+                      marginBottom: 8,
+                      cursor: 'pointer', textAlign: 'left',
+                      width: '100%', fontFamily: 'inherit',
+                    }}
+                  >
+                    {/* Big time */}
+                    <div style={{ flexShrink: 0, minWidth: 60 }}>
+                      <div style={{
+                        fontFamily: COLOR.serif, fontSize: 20, fontWeight: 400,
+                        color: COLOR.forest, lineHeight: 1, fontVariantNumeric: 'tabular-nums',
+                      }}>
+                        {c.time}
+                      </div>
+                      {c.durationMin ? (
+                        <div style={{ fontSize: 10, color: COLOR.taupe, marginTop: 6, letterSpacing: '0.05em' }}>
+                          {c.durationMin} min
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {/* Accent bar */}
+                    <div style={{
+                      width: 3, background: classColor(c), borderRadius: 2, alignSelf: 'stretch',
+                      minHeight: 36,
+                    }} />
+
+                    {/* Class details */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ ...TYPE.itemTitle }}>{c.type}</div>
+                      <div style={{ fontSize: 12, color: COLOR.moss, marginTop: 4 }}>
+                        {studioLabel}
+                      </div>
+                      {needsCover && (
+                        <div style={{
+                          fontSize: 11, color: COLOR.coral, marginTop: 6,
+                          fontWeight: 500, letterSpacing: '0.05em',
+                        }}>
+                          Cover requested
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })
+      )}
+    </>
+  );
+}
+
 function ScheduleView({
   data, currentUser, isManager, isMobile, scheduleView, setScheduleView,
   onClassClick, onShiftClick, onAddClass, onDayClick, onBookingClick,
 }) {
+  // Non-managers see a clean personal schedule — just their classes, no tabs, no stats.
+  if (!isManager) {
+    return (
+      <StaffScheduleView
+        data={data}
+        currentUser={currentUser}
+        onClassClick={onClassClick}
+      />
+    );
+  }
+
   const fohOnly = currentUser.isFoh && !currentUser.isCoach;
   const studioOnly = currentUser.isCoach && !currentUser.isFoh;
-  const canSeeBoth = isManager || (currentUser.isCoach && currentUser.isFoh);
+  // Only managers see the Studio / FOH / Hire toggle. Staff always see just their schedule.
+  const canSeeBoth = isManager;
 
   // Decide which view to render
   const view = fohOnly ? 'foh' :
@@ -19111,6 +19326,7 @@ const styles = {
     display: 'flex', flexDirection: 'column',
     overflow: 'hidden',
     boxSizing: 'border-box',
+    background: 'var(--c-sand)',
   },
 
   sectionHeader: {
@@ -19273,13 +19489,13 @@ const styles = {
 
   // Chat
   chatContainer: {
-    background: '#fffdf7', borderRadius: 12, border: '1px solid #e8e0cc',
+    background: 'var(--c-cream)', borderRadius: 12, border: '1px solid var(--c-bone)',
     display: 'flex', flexDirection: 'column',
     flex: 1, minHeight: 0,
     overflow: 'hidden',
   },
   chatHeader: {
-    padding: '14px 18px', borderBottom: '1px solid #e8e0cc',
+    padding: '14px 18px', borderBottom: '1px solid var(--c-bone)',
     display: 'flex', alignItems: 'center', gap: 12,
   },
   chatTitle: {
