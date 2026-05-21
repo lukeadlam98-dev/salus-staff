@@ -11823,8 +11823,15 @@ function CoverPage({ data, currentUser, isManager, onClassClick }) {
 //   2. Always-visible month grid for navigation (jump months ahead)
 //   3. View tabs (Mine / Everyone)
 //   4. Timeline of classes for the selected week
+
+
+// ─── StaffScheduleView — purpose-built ───────────────────────────────────
+// Inspired by the calendar-pill design: each day is a rounded rectangle
+// showing class count on top, day number below. Selected day filled forest.
+// Toggleable. Cover-needed surfaced by bottom-nav badge + coral indicators.
 function StaffScheduleView({ data, currentUser, onClassClick }) {
   const [view, setView] = useState('mine'); // 'mine' | 'everyone'
+  const [showCalendar, setShowCalendar] = useState(true);
 
   // Defensive
   const allClasses = data?.classes || [];
@@ -11852,16 +11859,13 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
   const weekStartIso = toIso(weekDates[0]);
   const weekEndIso = toIso(weekDates[6]);
 
-  // Cover requests this WEEK (excluding own)
+  // Cover requests (excluding own)
   const openCoversAll = allCovers
     .filter(r => r.status === 'open' && r.requestedBy !== currentUser.id)
     .map(r => ({ ...r, cls: allClasses.find(c => c.id === r.classId) }))
     .filter(r => r.cls);
-  const openCoversThisWeek = openCoversAll.filter(r =>
-    r.cls.date >= weekStartIso && r.cls.date <= weekEndIso
-  );
 
-  // Per-date metadata for the month grid
+  // Per-date metadata for month grid
   const dateMeta = useMemo(() => {
     const meta = {};
     allClasses.forEach(c => {
@@ -11889,38 +11893,28 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
     return u?.name?.split(' ')[0] || '';
   };
 
-  // Month grid math — display month containing selectedDate
+  // Month grid — 6 rows × 7 cols always
   const monthYear = selectedDate.getFullYear();
   const monthIdx = selectedDate.getMonth();
   const firstOfMonth = new Date(monthYear, monthIdx, 1);
-  const firstDow = (firstOfMonth.getDay() + 6) % 7; // 0=Mon
+  const firstDow = (firstOfMonth.getDay() + 6) % 7;
   const daysInMonth = new Date(monthYear, monthIdx + 1, 0).getDate();
-  // Build a 6-row grid (always 42 cells for consistent height)
   const gridCells = [];
-  // Leading days from previous month
   const prevMonthDays = new Date(monthYear, monthIdx, 0).getDate();
   for (let i = firstDow - 1; i >= 0; i--) {
     gridCells.push({ d: new Date(monthYear, monthIdx - 1, prevMonthDays - i), out: true });
   }
-  // Current month
   for (let i = 1; i <= daysInMonth; i++) {
     gridCells.push({ d: new Date(monthYear, monthIdx, i), out: false });
   }
-  // Trailing
   while (gridCells.length < 42) {
     const last = gridCells[gridCells.length - 1].d;
     const next = new Date(last); next.setDate(next.getDate() + 1);
     gridCells.push({ d: next, out: true });
   }
 
-  const goPrevMonth = () => {
-    const d = new Date(monthYear, monthIdx - 1, 1);
-    setSelectedDate(d);
-  };
-  const goNextMonth = () => {
-    const d = new Date(monthYear, monthIdx + 1, 1);
-    setSelectedDate(d);
-  };
+  const goPrevMonth = () => setSelectedDate(new Date(monthYear, monthIdx - 1, 1));
+  const goNextMonth = () => setSelectedDate(new Date(monthYear, monthIdx + 1, 1));
 
   // Filter classes for the visible week
   const visibleClasses = (() => {
@@ -11938,186 +11932,219 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
 
   const monthLabel = selectedDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 
+  // Stats for the selected day (for the pill below the calendar)
+  const selectedDayClasses = (byDate[selectedIso] || []);
+  const selectedDayMineCount = (allClasses.filter(c =>
+    c.date === selectedIso && c.coachId === currentUser.id
+  )).length;
+  const isTodaySelected = selectedIso === todayIso;
+  const selectedDayLabel = isTodaySelected
+    ? 'today'
+    : selectedDate.toLocaleDateString('en-GB', { weekday: 'long' });
+
+  // Unified colour palette for this view:
+  // forest #1a2620   primary text, time
+  // moss   #7a8270   secondary text (subtitle, durations)
+  // taupe  #a59478   tertiary / muted (day labels, out-of-month)
+  // sand   #f5f1e8   recessed surface
+  // bone   #efe7d2   border / divider
+  // coral  #c8442a   ONLY for cover-needed status
+
   return (
     <>
-      <PageHeader eyebrow="Your week" title="Schedule" compact />
-
-      {/* Cover needed — most important content, top of page */}
-      {openCoversThisWeek.length > 0 && (
-        <div style={{
-          marginBottom: 22,
-          marginLeft: -4, marginRight: -4,
-        }}>
+      {/* Title with calendar toggle */}
+      <div style={{
+        display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
+        padding: '12px 4px 18px',
+      }}>
+        <div>
           <div style={{
-            fontSize: 10, color: '#c8442a', fontWeight: 600,
-            letterSpacing: '0.18em', textTransform: 'uppercase',
-            padding: '0 8px 10px',
+            fontSize: 10, color: '#a59478', fontWeight: 600,
+            letterSpacing: '0.18em', textTransform: 'uppercase', marginBottom: 6,
           }}>
-            Cover needed
+            Your week
+          </div>
+          <h1 style={{
+            fontFamily: '"Playfair Display", Georgia, serif',
+            fontSize: 28, fontWeight: 400, margin: 0,
+            color: '#1a2620', lineHeight: 1.1, letterSpacing: '-0.015em',
+          }}>
+            Schedule
+          </h1>
+        </div>
+        <button onClick={() => setShowCalendar(s => !s)} className="salus-btn"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            background: '#f5f1e8',
+            border: '1px solid #efe7d2',
+            borderRadius: 999, padding: '6px 6px',
+            cursor: 'pointer', fontFamily: 'inherit',
+          }}>
+          <div style={{
+            padding: '4px 10px', borderRadius: 999,
+            background: showCalendar ? 'transparent' : '#fffdf7',
+            color: showCalendar ? '#a59478' : '#1a2620',
+            display: 'flex', alignItems: 'center',
+          }}>
+            <ListChecks size={14} />
           </div>
           <div style={{
-            overflowX: 'auto',
-            WebkitOverflowScrolling: 'touch',
-            scrollbarWidth: 'none',
+            padding: '4px 10px', borderRadius: 999,
+            background: showCalendar ? '#fffdf7' : 'transparent',
+            color: showCalendar ? '#1a2620' : '#a59478',
+            display: 'flex', alignItems: 'center',
           }}>
-            <div style={{ display: 'flex', gap: 10, padding: '0 4px 4px' }}>
-              {openCoversThisWeek.map(req => {
-                const cls = req.cls;
-                const requesterName = coachName(req.requestedBy);
-                const d = new Date(cls.date);
-                const dateLabel = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-                return (
-                  <button key={req.id} onClick={() => onClassClick?.(cls.id)} className="salus-btn"
-                    style={{
-                      flexShrink: 0, width: '76%', minWidth: 250,
-                      background: '#fef0ec',
-                      border: '1px solid #f0c8b8',
-                      borderLeft: '3px solid #c8442a',
-                      borderRadius: 12, padding: '14px 16px',
-                      cursor: 'pointer', textAlign: 'left',
-                      fontFamily: 'inherit',
-                    }}>
-                    <div style={{
-                      fontSize: 11, color: '#c8442a',
-                      fontWeight: 500,
-                      fontVariantNumeric: 'tabular-nums',
-                    }}>
-                      {dateLabel} · {cls.time}
-                    </div>
+            <Calendar size={14} />
+          </div>
+        </button>
+      </div>
+
+      {/* Month grid — pill cells with count on top, day below */}
+      {showCalendar && (
+        <div style={{
+          background: '#fffdf7',
+          border: '1px solid #efe7d2',
+          borderRadius: 16,
+          padding: '16px 14px 14px',
+          marginBottom: 18,
+        }}>
+          {/* Month nav */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            marginBottom: 14, padding: '0 4px',
+          }}>
+            <button onClick={goPrevMonth} className="salus-btn" style={{
+              background: 'transparent', border: 'none', padding: 4,
+              color: '#5c4a38', cursor: 'pointer',
+            }}>
+              <ChevronLeft size={18} />
+            </button>
+            <div style={{
+              fontFamily: '"Playfair Display", Georgia, serif',
+              fontSize: 16, fontWeight: 500, color: '#1a2620',
+              letterSpacing: '-0.005em',
+            }}>
+              {monthLabel}
+            </div>
+            <button onClick={goNextMonth} className="salus-btn" style={{
+              background: 'transparent', border: 'none', padding: 4,
+              color: '#5c4a38', cursor: 'pointer',
+            }}>
+              <ChevronRight size={18} />
+            </button>
+          </div>
+
+          {(monthYear !== today.getFullYear() || monthIdx !== today.getMonth()) && (
+            <button onClick={() => setSelectedDate(today)} className="salus-btn" style={{
+              background: 'transparent', border: 'none', padding: '0 0 10px',
+              color: '#c8442a', fontSize: 9, fontWeight: 600,
+              letterSpacing: '0.14em', textTransform: 'uppercase',
+              fontFamily: 'inherit', cursor: 'pointer',
+              display: 'block', margin: '0 auto',
+            }}>
+              ← Jump to today
+            </button>
+          )}
+
+          {/* Weekday header */}
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)',
+            gap: 4, marginBottom: 8,
+          }}>
+            {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
+              <div key={i} style={{
+                fontSize: 9, color: '#a59478',
+                letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
+                textAlign: 'center', padding: '2px 0',
+              }}>
+                {d}
+              </div>
+            ))}
+          </div>
+
+          {/* Day cells — pills */}
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)',
+            gap: 4,
+          }}>
+            {gridCells.map((cell, idx) => {
+              const iso = toIso(cell.d);
+              const isToday = iso === todayIso;
+              const isSelected = iso === selectedIso;
+              const m = dateMeta[iso] || { mine: 0, others: 0, cover: 0 };
+              const myCount = m.mine;
+              const hasCover = m.cover > 0;
+              const showCount = view === 'mine' ? myCount > 0 : (m.mine + m.others) > 0;
+              const countToShow = view === 'mine' ? myCount : (m.mine + m.others);
+
+              return (
+                <button
+                  key={idx}
+                  onClick={() => setSelectedDate(new Date(cell.d))}
+                  className="salus-btn"
+                  style={{
+                    aspectRatio: '0.95 / 1',
+                    display: 'flex', flexDirection: 'column',
+                    alignItems: 'center', justifyContent: 'center',
+                    gap: 2,
+                    background: isSelected ? '#1a2620' : '#f5f1e8',
+                    border: isToday && !isSelected ? '1.5px solid #1a2620' : '1px solid transparent',
+                    borderRadius: 10,
+                    cursor: 'pointer',
+                    padding: '4px 0',
+                    opacity: cell.out ? 0.35 : 1,
+                  }}>
+                  {showCount ? (
                     <div style={{
                       fontFamily: '"Playfair Display", Georgia, serif',
-                      fontSize: 17, fontWeight: 500, color: '#1a2620',
-                      marginTop: 8, letterSpacing: '-0.005em',
+                      fontSize: 13, fontWeight: 500,
+                      color: isSelected
+                        ? (hasCover ? '#f0c8b8' : '#fffdf7')
+                        : (hasCover ? '#c8442a' : '#1a2620'),
+                      lineHeight: 1,
+                      fontVariantNumeric: 'tabular-nums',
                     }}>
-                      {cls.type}
+                      {countToShow}
                     </div>
-                    <div style={{ fontSize: 12, color: '#5c4a38', marginTop: 4 }}>
-                      {requesterName ? `${requesterName} needs cover` : 'Needs cover'}
-                      {' · '}{studioLabel(cls.studio)}
-                    </div>
-                    <div style={{
-                      fontSize: 10, color: '#c8442a', fontWeight: 600,
-                      letterSpacing: '0.12em', textTransform: 'uppercase',
-                      marginTop: 12,
-                    }}>
-                      Tap to take it →
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+                  ) : (
+                    <div style={{ height: 13 }} />
+                  )}
+                  <div style={{
+                    fontSize: 11,
+                    fontWeight: isToday || isSelected ? 500 : 400,
+                    color: isSelected ? '#d4cdb8' : cell.out ? '#a59478' : '#7a8270',
+                    fontVariantNumeric: 'tabular-nums',
+                    lineHeight: 1,
+                  }}>
+                    {cell.d.getDate()}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
 
-      {/* Month grid — always visible, navigate forward/back to plan ahead */}
+      {/* "You've X classes today" — pill summary */}
       <div style={{
-        background: '#fffdf7',
-        border: '1px solid #efe7d2',
-        borderRadius: 16,
-        padding: '18px 16px 14px',
-        marginBottom: 22,
+        display: 'inline-flex', alignItems: 'baseline', gap: 8,
+        padding: '8px 14px',
+        background: '#f5f1e8', borderRadius: 999,
+        marginBottom: 18,
       }}>
-        {/* Month nav row */}
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          marginBottom: 14,
+        <span style={{
+          fontFamily: '"Playfair Display", Georgia, serif',
+          fontSize: 15, fontWeight: 500, color: '#1a2620',
         }}>
-          <button onClick={goPrevMonth} className="salus-btn" style={{
-            background: 'transparent', border: 'none', padding: 6,
-            color: '#5c4a38', cursor: 'pointer',
-          }}>
-            <ChevronLeft size={18} />
-          </button>
-          <div style={{
-            fontFamily: '"Playfair Display", Georgia, serif',
-            fontSize: 18, fontWeight: 500, color: '#1a2620',
-            letterSpacing: '-0.005em',
-          }}>
-            {monthLabel}
-          </div>
-          <button onClick={goNextMonth} className="salus-btn" style={{
-            background: 'transparent', border: 'none', padding: 6,
-            color: '#5c4a38', cursor: 'pointer',
-          }}>
-            <ChevronRight size={18} />
-          </button>
-        </div>
-
-        {/* "Today" link if not on current month */}
-        {(monthYear !== today.getFullYear() || monthIdx !== today.getMonth()) && (
-          <button onClick={() => setSelectedDate(today)} className="salus-btn" style={{
-            background: 'transparent', border: 'none', padding: '0 0 12px',
-            color: '#c8442a', fontSize: 10, fontWeight: 600,
-            letterSpacing: '0.14em', textTransform: 'uppercase',
-            fontFamily: 'inherit', cursor: 'pointer',
-            display: 'block', margin: '0 auto',
-          }}>
-            ← Jump to today
-          </button>
+          {selectedDayMineCount > 0
+            ? `You've ${selectedDayMineCount} ${selectedDayMineCount === 1 ? 'class' : 'classes'} ${selectedDayLabel}`
+            : `No classes ${selectedDayLabel}`}
+        </span>
+        {selectedDayMineCount > 0 && (
+          <span style={{ fontSize: 12, color: '#7a8270' }}>
+            · £{((currentUser.sessionRatePence || 3000) * selectedDayMineCount / 100).toFixed(0)} earned
+          </span>
         )}
-
-        {/* Weekday header */}
-        <div style={{
-          display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)',
-          gap: 0, marginBottom: 6,
-        }}>
-          {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
-            <div key={i} style={{
-              fontSize: 9, color: '#a59478',
-              letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
-              textAlign: 'center', padding: '4px 0',
-            }}>
-              {d}
-            </div>
-          ))}
-        </div>
-
-        {/* Day cells */}
-        <div style={{
-          display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)',
-          gap: 2,
-        }}>
-          {gridCells.map((cell, idx) => {
-            const iso = toIso(cell.d);
-            const isToday = iso === todayIso;
-            const isSelected = iso === selectedIso;
-            const isInSelectedWeek = iso >= weekStartIso && iso <= weekEndIso;
-            const m = dateMeta[iso] || { mine: 0, others: 0, cover: 0 };
-            const hasMine = m.mine > 0;
-            const hasCover = m.cover > 0;
-
-            return (
-              <button
-                key={idx}
-                onClick={() => setSelectedDate(new Date(cell.d))}
-                className="salus-btn"
-                style={{
-                  aspectRatio: '1 / 1',
-                  display: 'flex', flexDirection: 'column',
-                  alignItems: 'center', justifyContent: 'center',
-                  gap: 2,
-                  background: isSelected ? '#1a2620' : isInSelectedWeek ? '#f5f1e8' : 'transparent',
-                  border: isToday && !isSelected ? '1px solid #1a2620' : '1px solid transparent',
-                  borderRadius: 999,
-                  color: isSelected ? '#fffdf7' : cell.out ? '#d4cdb8' : '#1a2620',
-                  fontFamily: '"Playfair Display", Georgia, serif',
-                  fontSize: 14, fontWeight: isToday || isSelected ? 500 : 400,
-                  fontVariantNumeric: 'tabular-nums',
-                  cursor: 'pointer',
-                  padding: 0,
-                }}>
-                <div style={{ lineHeight: 1 }}>{cell.d.getDate()}</div>
-                <div style={{
-                  height: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2,
-                }}>
-                  {hasCover && <div style={{ width: 3, height: 3, borderRadius: 2, background: isSelected ? '#fffdf7' : '#c8442a' }} />}
-                  {!hasCover && hasMine && <div style={{ width: 3, height: 3, borderRadius: 2, background: isSelected ? '#fffdf7' : '#1a2620' }} />}
-                </div>
-              </button>
-            );
-          })}
-        </div>
       </div>
 
       {/* View tabs */}
@@ -12145,7 +12172,7 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
         })}
       </div>
 
-      {/* Timeline — classes for the selected week */}
+      {/* Timeline — week of selectedDate */}
       {visibleClasses.length === 0 ? (
         <EmptyState sub={view === 'mine' ? 'A quiet week — enjoy.' : 'Nothing on the studio schedule.'}>
           {view === 'mine' ? 'No classes this week.' : 'Empty week.'}
@@ -12160,12 +12187,13 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
           const dayNum = d.getDate();
 
           return (
-            <div key={iso} style={{ marginBottom: 30 }}>
+            <div key={iso} style={{ marginBottom: 28 }}>
               <div style={{
-                fontSize: 10, color: isToday ? '#c8442a' : '#a59478',
+                fontSize: 10,
+                color: isToday ? '#c8442a' : '#a59478',
                 letterSpacing: '0.18em', textTransform: 'uppercase',
                 fontWeight: 600,
-                padding: '0 4px 16px',
+                padding: '0 4px 14px',
               }}>
                 {dayName} {dayNum}
               </div>
@@ -12177,6 +12205,7 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
                 const coverReq = openCoversAll.find(r => r.cls.id === c.id);
                 const requesterFirstName = coverReq ? coachName(coverReq.requestedBy) : '';
 
+                // Unified colour: vertical bar carries the status, time stays forest
                 const barColor = needsCover ? '#c8442a' : isMine ? classColor(c) : '#d4cdb8';
                 const barWidth = needsCover ? 3 : isMine ? 2 : 1;
 
@@ -12194,10 +12223,10 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
                       borderBottom: idx === dayClasses.length - 1 ? 'none' : '1px solid #f5ecd6',
                       marginBottom: idx === dayClasses.length - 1 ? 0 : 4,
                     }}>
+                    {/* Time — always forest (unified palette) */}
                     <div style={{ flexShrink: 0, minWidth: 52, paddingTop: 4 }}>
                       <div style={{
-                        fontSize: 13, fontWeight: 500,
-                        color: needsCover ? '#c8442a' : '#1a2620',
+                        fontSize: 13, fontWeight: 500, color: '#1a2620',
                         fontVariantNumeric: 'tabular-nums', letterSpacing: '0.02em',
                       }}>
                         {c.time}
@@ -12238,12 +12267,11 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
                       }}>
                         {c.type}
                       </div>
+                      {/* Unified subtitle colour: moss for all secondary meta */}
                       <div style={{ fontSize: 12, color: '#7a8270', marginTop: 6, lineHeight: 1.4 }}>
                         {studioLabel(c.studio)}
                         {view !== 'mine' && c.coachId && (
-                          <> · <span style={{ color: isMine ? '#7a8c5c' : '#a59478' }}>
-                            {isMine ? 'You' : coachName(c.coachId)}
-                          </span></>
+                          <> · {isMine ? 'You' : coachName(c.coachId)}</>
                         )}
                       </div>
                       {needsCover && (
