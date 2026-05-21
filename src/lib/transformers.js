@@ -18,6 +18,7 @@ export const profileFromDb = (row, authEmail) => ({
   isCoach: row.is_coach === true,
   isFoh: row.is_foh === true,
   isManager: row.is_manager === true,
+  sessionRatePence: typeof row.session_rate_pence === 'number' ? row.session_rate_pence : 3000,
   codeOfConductAckedAt: row.code_of_conduct_acked_at,
   duringClassAckedAt: row.during_class_acked_at,
   afterClassAckedAt: row.after_class_acked_at,
