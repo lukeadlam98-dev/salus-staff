@@ -311,6 +311,22 @@ export default function SalusStaff() {
   const [urgentCoverDismissed, setUrgentCoverDismissed] = useState(false);
   const [showUrgentCover, setShowUrgentCover] = useState(false);
 
+  // View-as-staff toggle — lets managers preview the staff experience
+  const [viewAsStaff, setViewAsStaff] = useState(() => {
+    if (typeof localStorage === 'undefined') return false;
+    return localStorage.getItem('salus_view_as_staff') === '1';
+  });
+  const toggleViewAsStaff = () => {
+    setViewAsStaff(prev => {
+      const next = !prev;
+      if (typeof localStorage !== 'undefined') {
+        if (next) localStorage.setItem('salus_view_as_staff', '1');
+        else localStorage.removeItem('salus_view_as_staff');
+      }
+      return next;
+    });
+  };
+
   // Load lastViewed from localStorage when the logged-in user is known
   useEffect(() => {
     const uid = session?.user?.id;
@@ -1424,23 +1440,6 @@ export default function SalusStaff() {
 
   const currentUser = data.users.find(u => u.id === currentUserId);
   const realIsManager = currentUser.role === 'manager';
-
-  // ─── View-as-staff toggle ────────────────────────────────────────────
-  // Lets managers preview what regular staff see. Persists across reloads.
-  const [viewAsStaff, setViewAsStaff] = useState(() => {
-    if (typeof localStorage === 'undefined') return false;
-    return localStorage.getItem('salus_view_as_staff') === '1';
-  });
-  const toggleViewAsStaff = () => {
-    setViewAsStaff(prev => {
-      const next = !prev;
-      if (typeof localStorage !== 'undefined') {
-        if (next) localStorage.setItem('salus_view_as_staff', '1');
-        else localStorage.removeItem('salus_view_as_staff');
-      }
-      return next;
-    });
-  };
 
   // Effective manager flag — false when previewing staff view
   const isManager = realIsManager && !viewAsStaff;
