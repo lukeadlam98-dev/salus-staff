@@ -37,6 +37,7 @@ import {
   incidentFromDb,
   onboardingStepFromDb,
   expenseFromDb,
+  flowFromDb,
 } from './lib/transformers';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -94,6 +95,7 @@ const EMPTY_DATA = {
   incidents: [],
   onboardingSteps: [],
   expenses: [],
+  flows: [],
 };
 
 const CLASS_TYPES = {
@@ -484,7 +486,7 @@ export default function SalusStaff() {
     if (!session) return;
     if (!silent) setLoading(true);
     try {
-      const [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes, emailIntRes, stockRes, storeCardsRes, broadcastsRes, broadcastReadsRes, incidentsRes, onboardingStepsRes, expensesRes] = await Promise.all([
+      const [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes, emailIntRes, stockRes, storeCardsRes, broadcastsRes, broadcastReadsRes, incidentsRes, onboardingStepsRes, expensesRes, flowsRes] = await Promise.all([
         supabase.from('profiles').select('*'),
         supabase.from('classes').select('*'),
         supabase.from('cover_requests').select('*'),
@@ -510,6 +512,7 @@ export default function SalusStaff() {
         supabase.from('incidents').select('*').order('created_at', { ascending: false }),
         supabase.from('onboarding_steps').select('*'),
         supabase.from('expenses').select('*').eq('user_id', session.user?.id).order('spent_on', { ascending: false }),
+        supabase.from('flows').select('*').eq('user_id', session.user?.id).order('updated_at', { ascending: false }),
       ]);
 
       const errors = [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes]
@@ -546,6 +549,7 @@ export default function SalusStaff() {
         incidents: (incidentsRes.data || []).map(incidentFromDb),
         onboardingSteps: (onboardingStepsRes.data || []).map(onboardingStepFromDb),
         expenses: (expensesRes.data || []).map(expenseFromDb),
+        flows: (flowsRes.data || []).map(flowFromDb),
       });
     } catch (e) {
       console.error('Failed to load data:', e);
@@ -1661,7 +1665,19 @@ ${Object.entries(THEMES.sage.vars).map(([k, v]) => `          ${k}: ${v};`).join
       <style>{`
         /* Fonts loaded via index.html */
         * { box-sizing: border-box; }
-        body { margin: 0; background: #f5f1e8; }
+        body {
+          margin: 0; background: #f5f1e8;
+          /* Allow text selection / highlighting everywhere on iOS PWA */
+          -webkit-user-select: text;
+          user-select: text;
+          -webkit-touch-callout: default;
+        }
+        /* Interactive controls stay non-selectable so taps don't accidentally highlight */
+        .salus-btn, button, nav, header, [role="button"] {
+          -webkit-user-select: none;
+          user-select: none;
+          -webkit-touch-callout: none;
+        }
         .salus-btn { transition: all 0.15s ease; cursor: pointer; }
         .salus-btn:hover { transform: translateY(-1px); }
         .salus-card { transition: all 0.2s ease; }
@@ -1888,6 +1904,7 @@ ${Object.entries(THEMES.sage.vars).map(([k, v]) => `          ${k}: ${v};`).join
             onShowTimeOff={() => setModal({ type: 'timeOff' })}
             onShowTeam={() => setModal({ type: 'team' })}
             onShowExpenses={() => setModal({ type: 'expenses' })}
+            onShowFlows={() => setModal({ type: 'flows' })}
             onSignOut={handleLogout}
             onConnectGmail={handleConnectGmail}
             onDisconnectGmail={handleDisconnectGmail}
@@ -2235,6 +2252,14 @@ ${Object.entries(THEMES.sage.vars).map(([k, v]) => `          ${k}: ${v};`).join
           data={data}
           currentUser={currentUser}
           sessionToken={session?.access_token}
+          onClose={() => setModal(null)}
+          onReload={reloadData}
+        />
+      )}
+      {modal?.type === 'flows' && (
+        <FlowsModal
+          data={data}
+          currentUser={currentUser}
           onClose={() => setModal(null)}
           onReload={reloadData}
         />
@@ -7813,6 +7838,671 @@ function ExpensesModal({ data, currentUser, sessionToken, onClose, onReload }) {
   , document.body);
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// FLOWS — coach's personal session archive with sketching
+// ════════════════════════════════════════════════════════════════════════
+
+// ─── FlowsPage — list + archive ──────────────────────────────────────────
+function FlowsPage({ data, currentUser, onReload }) {
+  const [editing, setEditing] = useState(null); // null | 'new' | flowObj
+  const [showArchived, setShowArchived] = useState(false);
+
+  const allFlows = data.flows || [];
+  const visible = allFlows
+    .filter(f => showArchived ? f.archived : !f.archived)
+    .sort((a, b) => (b.flowDate || '').localeCompare(a.flowDate || '') || b.updatedAt - a.updatedAt);
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Personal"
+        title="Flows"
+        subtitle="Your session library. Private to you."
+        compact
+      />
+
+      <button onClick={() => setEditing('new')} className="salus-btn" style={{
+        ...styles.btnPrimary, width: '100%', justifyContent: 'center',
+        padding: '14px 22px', fontSize: 14, marginBottom: 16,
+      }}>
+        + New flow
+      </button>
+
+      {/* Active / Archive toggle */}
+      <div style={{
+        display: 'flex', gap: 22, padding: '0 4px 8px',
+        borderBottom: `1px solid ${COLOR.bone}`, marginBottom: 16,
+      }}>
+        {[
+          [false, 'Active'],
+          [true, 'Archived'],
+        ].map(([key, label]) => (
+          <button key={String(key)}
+            onClick={() => setShowArchived(key)}
+            className="salus-btn"
+            style={{
+              padding: '6px 0', background: 'transparent', border: 'none',
+              borderBottom: showArchived === key ? `1.5px solid ${COLOR.forest}` : '1.5px solid transparent',
+              ...(showArchived === key ? TYPE.capsLabelActive : TYPE.capsLabel),
+              fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap',
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {visible.length === 0 ? (
+        <EmptyState sub={showArchived ? 'Archive a flow to see it here.' : 'Tap "+ New flow" to start documenting.'}>
+          {showArchived ? 'No archived flows.' : 'No flows yet.'}
+        </EmptyState>
+      ) : (
+        visible.map(flow => (
+          <FlowRow key={flow.id} flow={flow} onTap={() => setEditing(flow)} />
+        ))
+      )}
+
+      {editing && (
+        <FlowEditor
+          flow={editing === 'new' ? null : editing}
+          currentUserId={currentUser.id}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); onReload?.(true); }}
+        />
+      )}
+    </>
+  );
+}
+
+// ─── FlowRow — single row in the list ────────────────────────────────────
+function FlowRow({ flow, onTap }) {
+  const dateLabel = flow.flowDate
+    ? new Date(flow.flowDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+    : new Date(flow.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const sketchCount = (flow.sketches || []).length;
+  const hasNotes = !!(flow.notes && flow.notes.trim());
+
+  return (
+    <button onClick={onTap} className="salus-btn" style={{
+      width: '100%', textAlign: 'left',
+      padding: '14px 4px',
+      borderBottom: `1px solid ${COLOR.bone}`,
+      background: 'transparent', border: 'none', borderRadius: 0,
+      fontFamily: 'inherit', cursor: 'pointer',
+      display: 'flex', alignItems: 'center', gap: 12,
+    }}>
+      {/* Sketch thumbnail if available */}
+      {sketchCount > 0 && flow.sketches[0]?.url ? (
+        <div style={{
+          width: 44, height: 44, borderRadius: 8, flexShrink: 0,
+          backgroundImage: `url(${flow.sketches[0].url})`,
+          backgroundSize: 'cover', backgroundPosition: 'center',
+          background: COLOR.sand, border: `0.5px solid ${COLOR.bone}`,
+        }} />
+      ) : (
+        <div style={{
+          width: 44, height: 44, borderRadius: 8, flexShrink: 0,
+          background: COLOR.sand,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 16, color: COLOR.taupe,
+        }}>
+          ✎
+        </div>
+      )}
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          ...TYPE.itemTitle,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {flow.title}
+        </div>
+        <div style={{ ...TYPE.metaSmall, marginTop: 3 }}>
+          {dateLabel}
+          {flow.classType ? ` · ${flow.classType}` : ''}
+          {sketchCount > 0 ? ` · ${sketchCount} sketch${sketchCount === 1 ? '' : 'es'}` : ''}
+          {hasNotes ? ' · notes' : ''}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+// ─── FlowEditor — full-screen edit modal ─────────────────────────────────
+function FlowEditor({ flow, currentUserId, onClose, onSaved }) {
+  const isNew = !flow;
+  const [title, setTitle] = useState(flow?.title || '');
+  const [flowDate, setFlowDate] = useState(flow?.flowDate || new Date().toISOString().slice(0, 10));
+  const [classType, setClassType] = useState(flow?.classType || '');
+  const [duration, setDuration] = useState(flow?.durationMinutes != null ? String(flow.durationMinutes) : '');
+  const [notes, setNotes] = useState(flow?.notes || '');
+  const [sketches, setSketches] = useState(flow?.sketches || []);
+  const [archived, setArchived] = useState(flow?.archived || false);
+
+  const [sketching, setSketching] = useState(false);
+  const [viewingSketch, setViewingSketch] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const save = async () => {
+    if (!title.trim()) {
+      setError('Give your flow a title.');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const payload = {
+        user_id: currentUserId,
+        title: title.trim(),
+        flow_date: flowDate || null,
+        class_type: classType.trim() || null,
+        duration_minutes: duration ? Number(duration) : null,
+        notes: notes.trim() || null,
+        sketches: sketches,
+        archived,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (isNew) {
+        const { error: insErr } = await supabase.from('flows').insert(payload);
+        if (insErr) throw insErr;
+      } else {
+        const { error: updErr } = await supabase.from('flows').update(payload).eq('id', flow.id);
+        if (updErr) throw updErr;
+      }
+      onSaved();
+    } catch (e) {
+      console.error('Flow save:', e);
+      setError(`Save failed: ${e.message || e}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!confirm('Delete this flow and all its sketches? This cannot be undone.')) return;
+    setSaving(true);
+    try {
+      // Delete sketches from storage first
+      const paths = (sketches || []).map(s => s.path).filter(Boolean);
+      if (paths.length > 0) {
+        await supabase.storage.from('flow-assets').remove(paths);
+      }
+      const { error: delErr } = await supabase.from('flows').delete().eq('id', flow.id);
+      if (delErr) throw delErr;
+      onSaved();
+    } catch (e) {
+      alert(`Delete failed: ${e.message || e}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onSketchSaved = async (dataUrl) => {
+    setSketching(false);
+    try {
+      // Upload to storage
+      const blob = await (await fetch(dataUrl)).blob();
+      const path = `${currentUserId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
+      const { error: upErr } = await supabase.storage
+        .from('flow-assets')
+        .upload(path, blob, { cacheControl: '3600', upsert: false, contentType: 'image/png' });
+      if (upErr) throw upErr;
+      const { data: signed } = await supabase.storage.from('flow-assets').createSignedUrl(path, 60 * 60 * 24 * 365);
+      setSketches(prev => [
+        ...prev,
+        { url: signed?.signedUrl || null, path, created_at: new Date().toISOString() },
+      ]);
+    } catch (e) {
+      console.error('Sketch upload:', e);
+      setError(`Sketch upload failed: ${e.message || e}`);
+    }
+  };
+
+  const deleteSketch = async (idx) => {
+    const sketch = sketches[idx];
+    if (sketch?.path) {
+      await supabase.storage.from('flow-assets').remove([sketch.path]).catch(() => {});
+    }
+    setSketches(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  return createPortal(
+    <>
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.55)', zIndex: 9998,
+        touchAction: 'none',
+      }} />
+      <div style={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        background: COLOR.cream, zIndex: 9999,
+        display: 'flex', flexDirection: 'column',
+      }}>
+        <ModalHeader
+          eyebrow={isNew ? 'New flow' : 'Edit flow'}
+          title={title || 'Untitled flow'}
+          onClose={onClose}
+        />
+        <ModalBody>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <FormField label="Title">
+              <input value={title} onChange={e => setTitle(e.target.value)}
+                style={styles.loginInput} placeholder="Reformer · Glutes & core" />
+            </FormField>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <FormField label="Date">
+                <input type="date" value={flowDate} onChange={e => setFlowDate(e.target.value)}
+                  style={styles.loginInput} />
+              </FormField>
+              <FormField label="Duration (min)">
+                <input type="number" min="0" value={duration} onChange={e => setDuration(e.target.value)}
+                  style={styles.loginInput} placeholder="45" inputMode="numeric" />
+              </FormField>
+            </div>
+
+            <FormField label="Class type (optional)">
+              <input value={classType} onChange={e => setClassType(e.target.value)}
+                style={styles.loginInput} placeholder="Signature, Reformer, Hybrid..." />
+            </FormField>
+
+            <FormField label="Notes">
+              <textarea value={notes} onChange={e => setNotes(e.target.value)}
+                rows={5}
+                style={{ ...styles.loginInput, resize: 'vertical', minHeight: 110, lineHeight: 1.5 }}
+                placeholder="Equipment used, sequence, cues, anything you want to remember..." />
+            </FormField>
+
+            <div>
+              <div style={{ ...TYPE.eyebrow, marginBottom: 10 }}>Sketches</div>
+              {sketches.length > 0 && (
+                <div style={{
+                  display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8,
+                  marginBottom: 10,
+                }}>
+                  {sketches.map((s, idx) => (
+                    <div key={idx} style={{ position: 'relative' }}>
+                      <button
+                        onClick={() => setViewingSketch(s)}
+                        className="salus-btn"
+                        style={{
+                          width: '100%', aspectRatio: '1 / 1',
+                          backgroundImage: `url(${s.url})`,
+                          backgroundSize: 'cover', backgroundPosition: 'center',
+                          background: COLOR.sand,
+                          border: `0.5px solid ${COLOR.bone}`,
+                          borderRadius: 8, cursor: 'pointer',
+                          padding: 0,
+                        }}
+                      />
+                      <button
+                        onClick={() => deleteSketch(idx)}
+                        className="salus-btn"
+                        style={{
+                          position: 'absolute', top: 4, right: 4,
+                          background: 'rgba(26, 38, 32, 0.7)', color: COLOR.cream,
+                          border: 'none', borderRadius: '50%', width: 22, height: 22,
+                          fontSize: 12, lineHeight: 1, cursor: 'pointer', padding: 0,
+                        }}>×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button
+                onClick={() => setSketching(true)}
+                className="salus-btn"
+                style={{
+                  width: '100%', padding: '12px 18px',
+                  background: 'transparent',
+                  border: `1px dashed ${COLOR.shell}`, borderRadius: 10,
+                  fontSize: 12, color: COLOR.brown, letterSpacing: '0.05em',
+                  textTransform: 'uppercase', cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}>
+                ✎ Add a sketch
+              </button>
+            </div>
+
+            {!isNew && (
+              <button
+                onClick={() => setArchived(a => !a)}
+                className="salus-btn"
+                style={{
+                  marginTop: 8, padding: '10px 16px',
+                  background: 'transparent',
+                  border: `1px solid ${COLOR.bone}`, borderRadius: 10,
+                  fontSize: 12, color: COLOR.brown,
+                  cursor: 'pointer', fontFamily: 'inherit',
+                }}>
+                {archived ? 'Restore from archive' : 'Move to archive'}
+              </button>
+            )}
+          </div>
+        </ModalBody>
+        <ModalFooter>
+          {error && (
+            <div style={{
+              padding: 12, background: '#fef0ec', color: COLOR.coral,
+              borderRadius: 8, fontSize: 13, marginBottom: 10,
+            }}>{error}</div>
+          )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            {!isNew && (
+              <button onClick={remove} disabled={saving} className="salus-btn"
+                style={{ ...styles.btnDanger, padding: '12px 18px', fontSize: 13 }}>
+                Delete
+              </button>
+            )}
+            <button onClick={save} disabled={saving} className="salus-btn"
+              style={{
+                ...styles.btnPrimary, flex: 1, justifyContent: 'center',
+                padding: '14px 22px', fontSize: 14,
+              }}>
+              {saving ? 'Saving…' : (isNew ? 'Create flow' : 'Save changes')}
+            </button>
+          </div>
+        </ModalFooter>
+      </div>
+
+      {sketching && (
+        <SketchCanvas onClose={() => setSketching(false)} onSave={onSketchSaved} />
+      )}
+      {viewingSketch && (
+        <div onClick={() => setViewingSketch(null)} style={{
+          position: 'fixed', inset: 0, zIndex: 10001,
+          background: 'rgba(26, 38, 32, 0.92)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 20,
+        }}>
+          <img src={viewingSketch.url} alt="Sketch"
+            style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 8, background: '#fff' }} />
+        </div>
+      )}
+    </>
+  , document.body);
+}
+
+// ─── SketchCanvas — finger-paint drawing tool ────────────────────────────
+function SketchCanvas({ onClose, onSave }) {
+  const canvasRef = useRef(null);
+  const ctxRef = useRef(null);
+  const [color, setColor] = useState('#1a2620');
+  const [strokeWidth, setStrokeWidth] = useState(3);
+  const [tool, setTool] = useState('pen'); // 'pen' | 'eraser'
+  const [history, setHistory] = useState([]);  // array of dataURLs for undo
+  const drawing = useRef(false);
+
+  const colors = ['#1a2620', '#c8442a', '#7a8c5c', '#c6926a', '#5c4a38'];
+  const widths = [1.5, 3, 6, 12];
+
+  // Initialise canvas at full size when mounted
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.fillStyle = '#fffdf7';
+    ctx.fillRect(0, 0, rect.width, rect.height);
+    ctxRef.current = ctx;
+    setHistory([canvas.toDataURL()]);
+  }, []);
+
+  const getPos = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    if (e.touches && e.touches[0]) {
+      return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
+    }
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  };
+
+  const start = (e) => {
+    e.preventDefault();
+    drawing.current = true;
+    const { x, y } = getPos(e);
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.strokeStyle = tool === 'eraser' ? '#fffdf7' : color;
+    ctx.lineWidth = tool === 'eraser' ? strokeWidth * 4 : strokeWidth;
+  };
+
+  const move = (e) => {
+    if (!drawing.current) return;
+    e.preventDefault();
+    const { x, y } = getPos(e);
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  };
+
+  const end = (e) => {
+    if (!drawing.current) return;
+    if (e) e.preventDefault();
+    drawing.current = false;
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+    ctx.closePath();
+    // Push snapshot to history
+    const canvas = canvasRef.current;
+    setHistory(prev => [...prev, canvas.toDataURL()].slice(-30));
+  };
+
+  const undo = () => {
+    if (history.length <= 1) return;
+    const newHistory = history.slice(0, -1);
+    setHistory(newHistory);
+    const img = new Image();
+    img.onload = () => {
+      const canvas = canvasRef.current;
+      const ctx = ctxRef.current;
+      const rect = canvas.getBoundingClientRect();
+      ctx.clearRect(0, 0, rect.width, rect.height);
+      ctx.drawImage(img, 0, 0, rect.width, rect.height);
+    };
+    img.src = newHistory[newHistory.length - 1];
+  };
+
+  const clearAll = () => {
+    const canvas = canvasRef.current;
+    const ctx = ctxRef.current;
+    const rect = canvas.getBoundingClientRect();
+    ctx.fillStyle = '#fffdf7';
+    ctx.fillRect(0, 0, rect.width, rect.height);
+    setHistory([canvas.toDataURL()]);
+  };
+
+  const save = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dataUrl = canvas.toDataURL('image/png');
+    onSave(dataUrl);
+  };
+
+  return createPortal(
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 10002,
+      background: COLOR.cream,
+      display: 'flex', flexDirection: 'column',
+    }}>
+      {/* Top bar */}
+      <div style={{
+        padding: '12px 16px',
+        paddingTop: 'calc(12px + env(safe-area-inset-top, 0px))',
+        borderBottom: `1px solid ${COLOR.bone}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        background: COLOR.cream,
+      }}>
+        <button onClick={onClose} className="salus-btn" style={{
+          background: 'transparent', border: 'none', padding: '6px 12px',
+          fontSize: 14, color: COLOR.brown, cursor: 'pointer',
+          fontFamily: 'inherit',
+        }}>
+          Cancel
+        </button>
+        <div style={{ ...TYPE.eyebrow }}>Sketch</div>
+        <button onClick={save} className="salus-btn" style={{
+          background: COLOR.forest, color: COLOR.cream, border: 'none',
+          padding: '6px 14px', borderRadius: 999,
+          fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase',
+          cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500,
+        }}>
+          Save
+        </button>
+      </div>
+
+      {/* Canvas — fills available space */}
+      <div style={{ flex: 1, padding: 12, background: COLOR.sand, position: 'relative' }}>
+        <canvas
+          ref={canvasRef}
+          style={{
+            width: '100%', height: '100%',
+            background: '#fffdf7',
+            borderRadius: 12,
+            touchAction: 'none',
+            cursor: tool === 'eraser' ? 'cell' : 'crosshair',
+            display: 'block',
+          }}
+          onMouseDown={start}
+          onMouseMove={move}
+          onMouseUp={end}
+          onMouseLeave={end}
+          onTouchStart={start}
+          onTouchMove={move}
+          onTouchEnd={end}
+        />
+      </div>
+
+      {/* Tool bar */}
+      <div style={{
+        padding: '10px 14px',
+        paddingBottom: 'calc(10px + env(safe-area-inset-bottom, 0px))',
+        borderTop: `1px solid ${COLOR.bone}`,
+        background: COLOR.cream,
+        display: 'flex', flexDirection: 'column', gap: 10,
+      }}>
+        {/* Colors */}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+          {colors.map(c => (
+            <button key={c}
+              onClick={() => { setColor(c); setTool('pen'); }}
+              className="salus-btn"
+              style={{
+                width: 32, height: 32, borderRadius: '50%',
+                background: c,
+                border: (color === c && tool === 'pen') ? `2.5px solid ${COLOR.forest}` : `1px solid ${COLOR.bone}`,
+                cursor: 'pointer', padding: 0,
+              }}
+              aria-label={`Colour ${c}`}
+            />
+          ))}
+          <button onClick={() => setTool('eraser')} className="salus-btn"
+            style={{
+              width: 32, height: 32, borderRadius: '50%',
+              background: COLOR.sand,
+              border: tool === 'eraser' ? `2.5px solid ${COLOR.forest}` : `1px solid ${COLOR.bone}`,
+              cursor: 'pointer', padding: 0,
+              fontSize: 12, fontFamily: 'inherit',
+            }}>
+            ⌫
+          </button>
+        </div>
+
+        {/* Stroke widths + actions */}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'center', alignItems: 'center' }}>
+          {widths.map(w => (
+            <button key={w}
+              onClick={() => setStrokeWidth(w)}
+              className="salus-btn"
+              style={{
+                width: 32, height: 32, borderRadius: 8,
+                background: 'transparent',
+                border: strokeWidth === w ? `1.5px solid ${COLOR.forest}` : `1px solid ${COLOR.bone}`,
+                cursor: 'pointer', padding: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+              <div style={{
+                width: w * 2, height: w * 2, borderRadius: '50%',
+                background: COLOR.forest,
+              }} />
+            </button>
+          ))}
+          <div style={{ flex: 1 }} />
+          <button onClick={undo} disabled={history.length <= 1} className="salus-btn"
+            style={{
+              padding: '7px 12px', background: 'transparent',
+              border: `1px solid ${COLOR.bone}`, borderRadius: 8,
+              fontSize: 11, color: COLOR.brown, letterSpacing: '0.05em',
+              textTransform: 'uppercase', cursor: 'pointer',
+              fontFamily: 'inherit',
+              opacity: history.length <= 1 ? 0.4 : 1,
+            }}>
+            Undo
+          </button>
+          <button onClick={clearAll} className="salus-btn"
+            style={{
+              padding: '7px 12px', background: 'transparent',
+              border: `1px solid ${COLOR.bone}`, borderRadius: 8,
+              fontSize: 11, color: COLOR.brown, letterSpacing: '0.05em',
+              textTransform: 'uppercase', cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}>
+            Clear
+          </button>
+        </div>
+      </div>
+    </div>
+  , document.body);
+}
+
+// ─── FlowsModal — full-screen wrapper around FlowsPage ───────────────────
+function FlowsModal({ data, currentUser, onClose, onReload }) {
+  return createPortal(
+    <>
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.55)', zIndex: 9998,
+        touchAction: 'none',
+      }} />
+      <div style={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        background: COLOR.cream, zIndex: 9999,
+        display: 'flex', flexDirection: 'column',
+      }}>
+        <div style={{
+          padding: '14px 22px',
+          paddingTop: 'calc(14px + env(safe-area-inset-top, 0px))',
+          borderBottom: `1px solid ${COLOR.bone}`,
+          flexShrink: 0, background: COLOR.cream,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          <div style={{ ...TYPE.eyebrow }}>Flows</div>
+          <CloseButton onClick={onClose} />
+        </div>
+        <div style={{
+          flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch',
+          overscrollBehavior: 'contain',
+          padding: '18px 22px 32px',
+        }}>
+          <FlowsPage
+            data={data}
+            currentUser={currentUser}
+            onReload={onReload}
+          />
+        </div>
+      </div>
+    </>
+  , document.body);
+}
+
 function StockItemRow({ item, busy, isManager, onDecrement, onIncrement, onEdit }) {
   const isLow = item.currentQty <= item.lowThreshold;
   const isOut = item.currentQty === 0;
@@ -12629,7 +13319,7 @@ const RATE_PER_SESSION = 30; // £ per class taught
 // ME — personal hub: profile, stats, settings link
 // ──────────────────────────────────────────────────────────────────────────────
 
-function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onToggleViewAsStaff, theme, onPickTheme, emailIntegration, onOpenSettings, onSignOut, onShowInvoices, onShowTimeOff, onShowTeam, onShowExpenses, onConnectGmail, onDisconnectGmail }) {
+function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onToggleViewAsStaff, theme, onPickTheme, emailIntegration, onOpenSettings, onSignOut, onShowInvoices, onShowTimeOff, onShowTeam, onShowExpenses, onShowFlows, onConnectGmail, onDisconnectGmail }) {
   const myClasses = data.classes.filter(c => c.coachId === currentUser.id);
   const sessionCount = myClasses.length;
   const totalMinutes = myClasses.reduce((acc, c) => acc + c.dur, 0);
@@ -12718,6 +13408,25 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
       {/* Push notifications — inline, not in a modal */}
       <section style={styles.homeSection}>
         <PushNotificationsSection />
+      </section>
+
+      {/* Your work */}
+      <section style={styles.homeSection}>
+        <div style={styles.homeSectionHead}>
+          <div style={styles.homeSectionTitle}>Your work</div>
+        </div>
+        <div style={styles.meActionsList}>
+          <button onClick={onShowFlows} className="salus-btn" style={styles.meActionRow}>
+            <Bookmark size={18} color="#5c4a38" />
+            <div style={{ flex: 1, textAlign: 'left' }}>
+              <div style={{ fontSize: 14, color: '#1a2620' }}>Flows</div>
+              <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
+                {(data.flows || []).filter(f => !f.archived).length} active · session library
+              </div>
+            </div>
+            <ChevronRight size={16} color="#a59478" />
+          </button>
+        </div>
       </section>
 
       {/* Your money */}
