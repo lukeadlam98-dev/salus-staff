@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Calendar, MessageSquare, Users, BarChart3, AlertCircle, AlertOctagon, Plus,
-  Send, ArrowLeftRight, Check, X, Clock, Bell, RotateCcw, Settings, Mail, LogOut,
+  Send, ArrowLeftRight, Check, X, Clock, Bell, RotateCcw, Settings, Mail, LogOut, Eye,
   ChevronLeft, ChevronRight, TrendingUp, Award, Activity, Trash2,
   Sparkles, Play, Heart, Flame, Bookmark, MoreHorizontal, Music, Lightbulb,
   Inbox, Shield, RefreshCw, MapPin, Target, Phone, AtSign, Briefcase,
@@ -1423,7 +1423,28 @@ export default function SalusStaff() {
   const persist = async () => { await reloadData(true); };
 
   const currentUser = data.users.find(u => u.id === currentUserId);
-  const isManager = currentUser.role === 'manager';
+  const realIsManager = currentUser.role === 'manager';
+
+  // ─── View-as-staff toggle ────────────────────────────────────────────
+  // Lets managers preview what regular staff see. Persists across reloads.
+  const [viewAsStaff, setViewAsStaff] = useState(() => {
+    if (typeof localStorage === 'undefined') return false;
+    return localStorage.getItem('salus_view_as_staff') === '1';
+  });
+  const toggleViewAsStaff = () => {
+    setViewAsStaff(prev => {
+      const next = !prev;
+      if (typeof localStorage !== 'undefined') {
+        if (next) localStorage.setItem('salus_view_as_staff', '1');
+        else localStorage.removeItem('salus_view_as_staff');
+      }
+      return next;
+    });
+  };
+
+  // Effective manager flag — false when previewing staff view
+  const isManager = realIsManager && !viewAsStaff;
+  const previewingAsStaff = realIsManager && viewAsStaff;
 
   // First-time onboarding — if the user hasn't picked any role yet, show the picker.
   // Manager bypasses this entirely.
@@ -1570,6 +1591,38 @@ export default function SalusStaff() {
           .salus-btn:active { transform: scale(0.98); }
         }
       `}</style>
+
+      {/* Preview-as-staff banner — only when manager has toggled view-as on */}
+      {previewingAsStaff && (
+        <div style={{
+          position: 'sticky', top: 0, zIndex: 50,
+          padding: '8px 14px',
+          paddingTop: 'calc(8px + env(safe-area-inset-top, 0px))',
+          background: '#1a2620', color: '#fffdf7',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          fontSize: 12,
+        }}>
+          <span style={{ letterSpacing: '0.04em' }}>
+            <span style={{ opacity: 0.6, marginRight: 6 }}>👁</span>
+            Viewing as staff — manager features hidden
+          </span>
+          <button
+            onClick={toggleViewAsStaff}
+            className="salus-btn"
+            style={{
+              background: 'transparent',
+              color: '#fffdf7',
+              border: '1px solid rgba(255, 253, 247, 0.3)',
+              padding: '4px 12px', borderRadius: 999,
+              fontSize: 11, fontWeight: 500, letterSpacing: '0.08em',
+              textTransform: 'uppercase', cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            Switch back
+          </button>
+        </div>
+      )}
 
       {/* Header */}
       <header className="salus-header" style={styles.header}>
@@ -1721,6 +1774,9 @@ export default function SalusStaff() {
             data={data}
             currentUser={currentUser}
             isManager={isManager}
+            realIsManager={realIsManager}
+            viewAsStaff={viewAsStaff}
+            onToggleViewAsStaff={toggleViewAsStaff}
             emailIntegration={data.emailIntegration}
             onOpenSettings={() => setModal({ type: 'settings' })}
             onShowInvoices={() => setModal({ type: 'invoices' })}
@@ -12338,7 +12394,7 @@ const RATE_PER_SESSION = 30; // £ per class taught
 // ME — personal hub: profile, stats, settings link
 // ──────────────────────────────────────────────────────────────────────────────
 
-function MePage({ data, currentUser, isManager, emailIntegration, onOpenSettings, onSignOut, onShowInvoices, onShowTimeOff, onShowTeam, onShowExpenses, onConnectGmail, onDisconnectGmail }) {
+function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onToggleViewAsStaff, emailIntegration, onOpenSettings, onSignOut, onShowInvoices, onShowTimeOff, onShowTeam, onShowExpenses, onConnectGmail, onDisconnectGmail }) {
   const myClasses = data.classes.filter(c => c.coachId === currentUser.id);
   const sessionCount = myClasses.length;
   const totalMinutes = myClasses.reduce((acc, c) => acc + c.dur, 0);
@@ -12519,6 +12575,43 @@ function MePage({ data, currentUser, isManager, emailIntegration, onOpenSettings
                 <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>£30 per session, this week</div>
               </div>
               <ChevronRight size={16} color="#a59478" />
+            </button>
+          </div>
+        </section>
+      )}
+
+      {/* View-as-staff toggle — only shown to real managers, always visible (even when previewing) */}
+      {realIsManager && (
+        <section style={styles.homeSection}>
+          <div style={styles.homeSectionHead}>
+            <div style={styles.homeSectionTitle}>View</div>
+          </div>
+          <div style={styles.meActionsList}>
+            <button onClick={onToggleViewAsStaff} className="salus-btn" style={styles.meActionRow}>
+              <Eye size={18} color="#5c4a38" />
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 14, color: '#1a2620' }}>
+                  {viewAsStaff ? 'Switch back to manager view' : 'View as staff'}
+                </div>
+                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
+                  {viewAsStaff
+                    ? 'You\'re currently previewing what coaches see'
+                    : 'Preview what a coach or FOH member sees'}
+                </div>
+              </div>
+              <div style={{
+                width: 40, height: 22, borderRadius: 999, position: 'relative',
+                background: viewAsStaff ? '#1a2620' : '#d4cdb8',
+                transition: 'background 120ms ease',
+              }}>
+                <div style={{
+                  position: 'absolute',
+                  top: 2, left: viewAsStaff ? 20 : 2,
+                  width: 18, height: 18, borderRadius: '50%',
+                  background: '#fffdf7',
+                  transition: 'left 120ms ease',
+                }} />
+              </div>
             </button>
           </div>
         </section>
