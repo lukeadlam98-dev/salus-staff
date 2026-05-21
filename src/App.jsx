@@ -313,6 +313,16 @@ export default function SalusStaff() {
   const [urgentCoverDismissed, setUrgentCoverDismissed] = useState(false);
   const [showUrgentCover, setShowUrgentCover] = useState(false);
 
+  // Listen for Me page admin section button clicks
+  useEffect(() => {
+    const handler = (e) => {
+      const section = e?.detail?.section;
+      if (section) setModal({ type: 'adminSection', section });
+    };
+    window.addEventListener('salus:openAdmin', handler);
+    return () => window.removeEventListener('salus:openAdmin', handler);
+  }, []);
+
   // View-as-staff toggle — lets managers preview the staff experience
   const [viewAsStaff, setViewAsStaff] = useState(() => {
     if (typeof localStorage === 'undefined') return false;
@@ -2149,6 +2159,23 @@ export default function SalusStaff() {
           data={data}
           currentUser={currentUser}
           onClose={() => setModal(null)}
+        />
+      )}
+      {modal?.type === 'adminSection' && (
+        <AdminSectionModal
+          section={modal.section}
+          data={data}
+          currentUser={currentUser}
+          isManager={isManager}
+          emailIntegration={data.emailIntegration}
+          sessionToken={session?.access_token}
+          onClose={() => setModal(null)}
+          onConnectGmail={handleConnectGmail}
+          onCreateTask={createTask}
+          onCreate={() => setModal({ type: 'createBooking' })}
+          onOpenBooking={(id) => setModal({ type: 'bookingDetail', id })}
+          onReload={reloadData}
+          onShowInvoices={() => setModal({ type: 'invoices' })}
         />
       )}
       {modal?.type === 'flows' && (
@@ -7907,6 +7934,124 @@ function exportExpensesCsv(expenses, filter, taxYearStartIso, monthStartIso, cur
 // ─── StaffInvoicesModal — view-only earnings breakdown ──────────────────
 // Coaches see what they're owed for the period. No edit, no generate — just
 // a clean breakdown they can save/share with a manager or accountant.
+// ─── AdminSectionModal — wraps individual manager admin sections in a modal ─
+// Each manager admin sub-section lives in its own modal so it can't blank the
+// rest of the Me page if it crashes. Tap a row in Me → full-screen modal.
+function AdminSectionModal({ section, data, currentUser, isManager, emailIntegration, sessionToken, onClose, onConnectGmail, onCreateTask, onCreate, onOpenBooking, onReload, onShowInvoices }) {
+  const titleMap = {
+    reports: 'Reports',
+    inbox: 'Inbox',
+    cancellations: 'Cancellations',
+    tours: 'Tours',
+    stock: 'Stock',
+    bookings: 'Studio bookings',
+    incidents: 'Incidents',
+    invoices: 'Pay run',
+  };
+  const eyebrowMap = {
+    reports: 'Studio admin',
+    inbox: 'Studio admin',
+    cancellations: 'Studio admin',
+    tours: 'Studio admin',
+    stock: 'Studio admin',
+    bookings: 'Studio admin',
+    incidents: 'Studio admin',
+    invoices: 'Pay run',
+  };
+
+  return createPortal(
+    <>
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.55)', zIndex: 9998,
+        touchAction: 'none',
+      }} />
+      <div style={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        background: '#fffdf7', zIndex: 9999,
+        display: 'flex', flexDirection: 'column',
+      }}>
+        <ModalHeader
+          eyebrow={eyebrowMap[section] || 'Admin'}
+          title={titleMap[section] || 'Admin'}
+          onClose={onClose}
+        />
+        <ModalBody>
+          {section === 'reports' && (
+            <AdminReportsSection
+              emailIntegration={emailIntegration}
+              onConnectGmail={onConnectGmail}
+            />
+          )}
+          {section === 'inbox' && (
+            <AdminInboxSection
+              emailIntegration={emailIntegration}
+              onConnectGmail={onConnectGmail}
+              data={data}
+              currentUser={currentUser}
+              onCreateTask={onCreateTask}
+            />
+          )}
+          {section === 'cancellations' && <AdminCancellationsSection />}
+          {section === 'tours' && <AdminToursSection data={data} currentUser={currentUser} />}
+          {section === 'stock' && (
+            <AdminStockSection
+              data={data}
+              currentUser={currentUser}
+              isManager={isManager}
+              onReload={onReload}
+            />
+          )}
+          {section === 'bookings' && (
+            <StudioBookingsView
+              data={data}
+              currentUser={currentUser}
+              isManager={isManager}
+              onCreate={onCreate}
+              onOpenBooking={onOpenBooking}
+            />
+          )}
+          {section === 'incidents' && (
+            <AdminIncidentsSection
+              data={data}
+              currentUser={currentUser}
+              isManager={isManager}
+              onReload={onReload}
+            />
+          )}
+          {section === 'invoices' && (
+            <div>
+              <SectionLabel>Pay run</SectionLabel>
+              <div style={{
+                background: '#fffdf7', border: '1px solid #efe7d2',
+                borderRadius: 14, padding: '18px 18px 16px', marginBottom: 14,
+              }}>
+                <div style={{ fontFamily: '"Playfair Display", Georgia, serif', fontSize: 18, fontWeight: 500, color: '#1a2620', marginBottom: 6 }}>
+                  Generate invoices
+                </div>
+                <div style={{ fontSize: 12, color: '#7a8270', marginBottom: 14, lineHeight: 1.5 }}>
+                  Build CSV invoices for all coaches based on classes taught.
+                  £30 per session by default, override per-coach via Team settings.
+                </div>
+                <button onClick={() => { onClose(); onShowInvoices?.(); }} className="salus-btn"
+                  style={{
+                    width: '100%', padding: '12px 16px',
+                    background: '#1a2620', color: '#fffdf7',
+                    border: 'none', borderRadius: 10,
+                    fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase',
+                    fontFamily: 'inherit', cursor: 'pointer', fontWeight: 500,
+                  }}>
+                  Open pay run
+                </button>
+              </div>
+            </div>
+          )}
+        </ModalBody>
+      </div>
+    </>,
+    document.body
+  );
+}
+
 function StaffInvoicesModal({ data, currentUser, onClose }) {
   const [period, setPeriod] = useState('this_month');
 
@@ -14352,30 +14497,61 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
         <PushNotificationsSection />
       </section>
 
-      {/* Admin — Me is also Admin. Embedded so it lives in this page. */}
-      <section style={styles.homeSection}>
-        <div style={styles.homeSectionHead}>
-          <div style={styles.homeSectionTitle}>{isManager ? 'Studio admin' : 'Your admin'}</div>
-        </div>
-        <AdminPage
-          embedded
-          data={data}
-          currentUser={currentUser}
-          isManager={isManager}
-          emailIntegration={emailIntegration}
-          sessionToken={sessionToken}
-          onCreate={onCreate}
-          onOpenBooking={onOpenBooking}
-          onConnectGmail={onConnectGmail}
-          onCreateTask={onCreateTask}
-          onReload={onReload}
-          onShowExpenses={onShowExpenses}
-          onShowFlows={onShowFlows}
-          onShowTimeOff={onShowTimeOff}
-          onShowInvoices={onShowInvoices}
-          onShowStaffInvoices={onShowStaffInvoices}
-        />
-      </section>
+      {/* Admin — Me is also Admin. For managers we list each section as a button
+          that opens a focused full-screen modal — safer than embedding the whole
+          AdminPage (whose sub-sections each have their own async/data deps). */}
+      {isManager ? (
+        <section style={styles.homeSection}>
+          <div style={styles.homeSectionHead}>
+            <div style={styles.homeSectionTitle}>Studio admin</div>
+          </div>
+          <div style={styles.meActionsList}>
+            {[
+              { key: 'reports',       label: 'Reports',       sub: 'Email triage and overview',         icon: BarChart3 },
+              { key: 'inbox',         label: 'Inbox',         sub: 'Member messages',                   icon: Inbox },
+              { key: 'cancellations', label: 'Cancellations', sub: 'Booking cancellation tracking',     icon: AlertCircle },
+              { key: 'tours',         label: 'Tours',         sub: 'Prospective member visits',         icon: MapPin },
+              { key: 'stock',         label: 'Stock',         sub: 'Studio inventory',                  icon: Package },
+              { key: 'bookings',      label: 'Studio bookings', sub: 'Hire and external bookings',      icon: Bookmark },
+              { key: 'incidents',     label: 'Incidents',     sub: 'Studio incident log',               icon: AlertOctagon },
+              { key: 'invoices',      label: 'Pay run',       sub: 'Generate coach invoices',           icon: FileText },
+            ].map((item, idx, arr) => {
+              const Icon = item.icon;
+              const isLast = idx === arr.length - 1;
+              return (
+                <button key={item.key}
+                  onClick={() => window.dispatchEvent(new CustomEvent('salus:openAdmin', { detail: { section: item.key } }))}
+                  className="salus-btn"
+                  style={{ ...styles.meActionRow, ...(isLast ? { borderBottom: 'none' } : {}) }}>
+                  <Icon size={18} color="#5c4a38" />
+                  <div style={{ flex: 1, textAlign: 'left' }}>
+                    <div style={{ fontSize: 14, color: '#1a2620' }}>{item.label}</div>
+                    <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>{item.sub}</div>
+                  </div>
+                  <ChevronRight size={16} color="#a59478" />
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      ) : (
+        <section style={styles.homeSection}>
+          <div style={styles.homeSectionHead}>
+            <div style={styles.homeSectionTitle}>Your admin</div>
+          </div>
+          <StaffAdminPage
+            embedded
+            data={data}
+            currentUser={currentUser}
+            emailIntegration={emailIntegration}
+            onConnectGmail={onConnectGmail}
+            onShowExpenses={onShowExpenses}
+            onShowFlows={onShowFlows}
+            onShowTimeOff={onShowTimeOff}
+            onShowStaffInvoices={onShowStaffInvoices}
+          />
+        </section>
+      )}
 
       {/* Personal admin — managers also teach, so they get the same personal tools as staff */}
       {isManager && (
