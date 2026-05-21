@@ -4095,6 +4095,12 @@ function StaffAdminPage({ data, currentUser, emailIntegration, onConnectGmail, o
 }
 
 function AdminPage({ data, currentUser, isManager, emailIntegration, sessionToken, onCreate, onOpenBooking, onConnectGmail, onCreateTask, onReload, onShowExpenses, onShowFlows, onShowTimeOff, onShowInvoices, onShowStaffInvoices, embedded }) {
+  // Hooks MUST be at the top — before any conditional returns — or React loses
+  // track of hook order when isManager flips (eg. View-as-staff toggle).
+  const canSeeAdminSections = isManager || currentUser.isFoh;
+  const [section, setSection] = useState(canSeeAdminSections ? 'reports' : 'bookings');
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
+
   // Non-managers see a simplified personal admin — focused on their own tools, not running the studio.
   if (!isManager) {
     return (
@@ -4111,10 +4117,6 @@ function AdminPage({ data, currentUser, isManager, emailIntegration, sessionToke
       />
     );
   }
-
-  const canSeeAdminSections = isManager || currentUser.isFoh;
-  const [section, setSection] = useState(canSeeAdminSections ? 'reports' : 'bookings');
-  const [broadcastOpen, setBroadcastOpen] = useState(false);
 
   const Wrapper = embedded ? 'div' : 'div';
   const wrapperStyle = embedded ? {} : styles.homeContainer;
@@ -11668,6 +11670,11 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
   const [view, setView] = useState('mine'); // 'mine' | 'everyone'
   const [weekOffset, setWeekOffset] = useState(0);
 
+  // Defensive — these can briefly be undefined during loads
+  const allClasses = data?.classes || [];
+  const allUsers = data?.users || [];
+  const allCovers = data?.coverRequests || [];
+
   // Week math — Monday start (UK convention)
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -11685,23 +11692,23 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
   const weekEndIso = toIso(weekDates[6]);
 
   // Open cover requests (excluding own)
-  const openCoversAll = (data.coverRequests || [])
+  const openCoversAll = allCovers
     .filter(r => r.status === 'open' && r.requestedBy !== currentUser.id)
-    .map(r => ({ ...r, cls: data.classes.find(c => c.id === r.classId) }))
+    .map(r => ({ ...r, cls: allClasses.find(c => c.id === r.classId) }))
     .filter(r => r.cls);
 
   const openCoversThisWeek = openCoversAll.filter(r =>
     r.cls.date >= weekStartIso && r.cls.date <= weekEndIso
   );
 
-  const myClassesThisWeek = data.classes.filter(c =>
+  const myClassesThisWeek = allClasses.filter(c =>
     c.coachId === currentUser.id && c.date >= weekStartIso && c.date <= weekEndIso
   );
 
   // Per-date metadata for the day strip
   const dayMeta = {};
   weekDates.forEach(d => { dayMeta[toIso(d)] = { mine: 0, others: 0, cover: 0 }; });
-  data.classes
+  allClasses
     .filter(c => c.date >= weekStartIso && c.date <= weekEndIso)
     .forEach(c => {
       const m = dayMeta[c.date];
@@ -11724,7 +11731,7 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
   };
 
   const coachName = (id) => {
-    const u = data.users.find(u => u.id === id);
+    const u = allUsers.find(u => u.id === id);
     return u?.name?.split(' ')[0] || '';
   };
 
@@ -11745,7 +11752,7 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
       const count = myClassesThisWeek.length;
       if (count > 0) parts.push({ text: `${count} ${count === 1 ? 'class' : 'classes'}`, urgent: false });
     } else {
-      const count = data.classes.filter(c => c.date >= weekStartIso && c.date <= weekEndIso).length;
+      const count = allClasses.filter(c => c.date >= weekStartIso && c.date <= weekEndIso).length;
       if (count > 0) parts.push({ text: `${count} ${count === 1 ? 'class' : 'classes'}`, urgent: false });
     }
 
@@ -11763,7 +11770,7 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
 
   // Filter classes for the visible week + view
   const visibleClasses = (() => {
-    const weekClasses = data.classes.filter(c => c.date >= weekStartIso && c.date <= weekEndIso);
+    const weekClasses = allClasses.filter(c => c.date >= weekStartIso && c.date <= weekEndIso);
     if (view === 'mine') return weekClasses.filter(c => c.coachId === currentUser.id);
     return weekClasses;
   })();
