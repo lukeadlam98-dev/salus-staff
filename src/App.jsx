@@ -1666,17 +1666,16 @@ ${Object.entries(THEMES.sage.vars).map(([k, v]) => `          ${k}: ${v};`).join
         /* Fonts loaded via index.html */
         * { box-sizing: border-box; }
         body {
-          margin: 0; background: #f5f1e8;
-          /* Allow text selection / highlighting everywhere on iOS PWA */
-          -webkit-user-select: text;
-          user-select: text;
-          -webkit-touch-callout: default;
-        }
-        /* Interactive controls stay non-selectable so taps don't accidentally highlight */
-        .salus-btn, button, nav, header, [role="button"] {
+          margin: 0;
+          /* App feels native — text is not user-selectable */
           -webkit-user-select: none;
           user-select: none;
           -webkit-touch-callout: none;
+        }
+        /* Allow selection in actual input fields so people can edit */
+        input, textarea, [contenteditable] {
+          -webkit-user-select: text;
+          user-select: text;
         }
         .salus-btn { transition: all 0.15s ease; cursor: pointer; }
         .salus-btn:hover { transform: translateY(-1px); }
@@ -4029,23 +4028,189 @@ function generateRecurringDates(startIso, endIso, days /* 0=Mon..6=Sun */) {
 // AdminPage — wraps Inbox, Cancellations, Tours, and Bookings.
 // Coaches see Bookings only; manager + FOH see all sections.
 // ============================================================
-function AdminPage({ data, currentUser, isManager, emailIntegration, sessionToken, onCreate, onOpenBooking, onConnectGmail, onCreateTask, onReload }) {
-  const canSeeAdminSections = isManager || currentUser.isFoh;
-  const [section, setSection] = useState(canSeeAdminSections ? 'reports' : 'bookings');
-  const [broadcastOpen, setBroadcastOpen] = useState(false);
+// ─── StaffAdminPage — simplified personal-tools page for non-managers ────
+// Coaches and FOH see this instead of the full Admin tab bar. Focused on
+// their own personal integrations and studio bookings.
+function StaffAdminPage({ data, currentUser, emailIntegration, onCreate, onOpenBooking, onConnectGmail, onReload }) {
+  const [section, setSection] = useState('personal'); // 'personal' | 'bookings'
+  const isFoh = !!currentUser.isFoh;
 
-  // If the user can't see admin sections, just show bookings.
-  if (!canSeeAdminSections) {
+  return (
+    <div style={styles.homeContainer}>
+      <PageHeader
+        eyebrow="Your tools"
+        title="Admin"
+        subtitle="Connect your calendar and inbox, see studio bookings."
+        compact
+      />
+
+      {/* Compact tab row — just two sections */}
+      <div style={{
+        display: 'flex', gap: 22, padding: '0 4px 8px',
+        borderBottom: `1px solid ${COLOR.bone}`, marginBottom: 22, marginTop: 12,
+      }}>
+        {[
+          ['personal', 'Personal'],
+          ['bookings', 'Studio bookings'],
+        ].map(([key, label]) => (
+          <button key={key}
+            onClick={() => setSection(key)}
+            className="salus-btn"
+            style={{
+              padding: '6px 0', background: 'transparent', border: 'none',
+              borderBottom: section === key ? `1.5px solid ${COLOR.forest}` : '1.5px solid transparent',
+              ...(section === key ? TYPE.capsLabelActive : TYPE.capsLabel),
+              fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap',
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {section === 'personal' && (
+        <div>
+          {/* Calendar integration — Phase 2 */}
+          <SectionLabel>Calendar</SectionLabel>
+          <div style={{
+            background: COLOR.cream, border: `1px solid ${COLOR.bone}`,
+            borderRadius: 14, padding: '18px 18px 16px', marginBottom: 18,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 8 }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 10,
+                background: COLOR.sand, color: COLOR.brown,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 18, flexShrink: 0,
+              }}>
+                <Calendar size={18} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ ...TYPE.itemTitle }}>Google Calendar</div>
+                <div style={{ ...TYPE.metaSmall, marginTop: 4, lineHeight: 1.5 }}>
+                  Your Salus classes appear in your personal calendar. Cover changes update automatically.
+                </div>
+              </div>
+            </div>
+            <button
+              disabled
+              className="salus-btn"
+              style={{
+                width: '100%', marginTop: 8, padding: '10px 16px',
+                background: 'transparent', color: COLOR.taupe,
+                border: `1px solid ${COLOR.bone}`, borderRadius: 10,
+                fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase',
+                fontFamily: 'inherit', cursor: 'not-allowed',
+                fontWeight: 500,
+              }}
+            >
+              Coming soon
+            </button>
+          </div>
+
+          {/* Personal email — Phase 2 */}
+          <SectionLabel>Personal inbox</SectionLabel>
+          <div style={{
+            background: COLOR.cream, border: `1px solid ${COLOR.bone}`,
+            borderRadius: 14, padding: '18px 18px 16px', marginBottom: 18,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 8 }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 10,
+                background: COLOR.sand, color: COLOR.brown,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 18, flexShrink: 0,
+              }}>
+                <Mail size={18} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ ...TYPE.itemTitle }}>Gmail</div>
+                {emailIntegration ? (
+                  <div style={{ ...TYPE.metaSmall, marginTop: 4, lineHeight: 1.5 }}>
+                    Connected as {emailIntegration.emailAddress || 'your Gmail account'}.
+                  </div>
+                ) : (
+                  <div style={{ ...TYPE.metaSmall, marginTop: 4, lineHeight: 1.5 }}>
+                    Connect your personal Gmail so member messages can be triaged inside Salus.
+                  </div>
+                )}
+              </div>
+            </div>
+            {emailIntegration ? (
+              <div style={{
+                marginTop: 8, padding: '10px 16px',
+                background: 'transparent', color: COLOR.sage,
+                border: `1px solid ${COLOR.bone}`, borderRadius: 10,
+                fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase',
+                fontFamily: 'inherit', textAlign: 'center',
+                fontWeight: 500,
+              }}>
+                ✓ Connected
+              </div>
+            ) : (
+              <button
+                onClick={onConnectGmail}
+                className="salus-btn"
+                style={{
+                  width: '100%', marginTop: 8, padding: '10px 16px',
+                  background: COLOR.forest, color: COLOR.cream,
+                  border: 'none', borderRadius: 10,
+                  fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase',
+                  fontFamily: 'inherit', cursor: 'pointer', fontWeight: 500,
+                }}
+              >
+                Connect Gmail
+              </button>
+            )}
+          </div>
+
+          {/* FOH-only stub: tour log */}
+          {isFoh && (
+            <>
+              <SectionLabel>For FOH</SectionLabel>
+              <div style={{
+                ...TYPE.metaSmall, padding: '14px 18px',
+                background: COLOR.sand, borderRadius: 12, lineHeight: 1.6, marginBottom: 18,
+              }}>
+                Studio tours and incidents have moved into their dedicated tabs and Schedule view.
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {section === 'bookings' && (
+        <StudioBookingsView
+          data={data}
+          currentUser={currentUser}
+          isManager={false}
+          onCreate={onCreate}
+          onOpenBooking={onOpenBooking}
+        />
+      )}
+    </div>
+  );
+}
+
+function AdminPage({ data, currentUser, isManager, emailIntegration, sessionToken, onCreate, onOpenBooking, onConnectGmail, onCreateTask, onReload }) {
+  // Non-managers see a simplified personal admin — focused on their own tools, not running the studio.
+  if (!isManager) {
     return (
-      <StudioBookingsView
+      <StaffAdminPage
         data={data}
         currentUser={currentUser}
-        isManager={isManager}
+        emailIntegration={emailIntegration}
         onCreate={onCreate}
         onOpenBooking={onOpenBooking}
+        onConnectGmail={onConnectGmail}
+        onReload={onReload}
       />
     );
   }
+
+  const canSeeAdminSections = isManager || currentUser.isFoh;
+  const [section, setSection] = useState(canSeeAdminSections ? 'reports' : 'bookings');
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
 
   return (
     <div style={styles.homeContainer}>
@@ -17466,9 +17631,9 @@ function Modal({ children, onClose }) {
 const styles = {
   app: {
     height: '100%',
-    background: '#f5f1e8',
+    background: 'var(--c-sand)',
     fontFamily: "'Inter', -apple-system, sans-serif",
-    color: '#1a2620',
+    color: 'var(--c-forest)',
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
@@ -17478,7 +17643,7 @@ const styles = {
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: '12px 18px',
-    background: '#f5f1e8',
+    background: 'var(--c-sand)',
   },
   headerLeft: { display: 'flex', alignItems: 'center', gap: 10 },
   headerRight: { display: 'flex', alignItems: 'center', gap: 8 },
@@ -17720,13 +17885,13 @@ const styles = {
   meStatCell: { textAlign: 'center', padding: '8px 4px' },
   meStatNum: { fontFamily: '"Playfair Display", serif', fontSize: 24, fontWeight: 500, color: '#1a2620' },
   meStatLabel: { fontSize: 10, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 0.8, marginTop: 4, fontWeight: 600 },
-  meActionsList: { background: '#fffdf7', borderRadius: 14, border: '1px solid #efe7d2', overflow: 'hidden' },
+  meActionsList: { background: 'var(--c-cream)', borderRadius: 14, border: '1px solid var(--c-bone)', overflow: 'hidden' },
   meActionRow: {
     display: 'flex', alignItems: 'center', gap: 12,
     padding: '14px 16px', width: '100%',
     background: 'none', border: 'none', fontFamily: 'inherit',
-    fontSize: 14, color: '#1a2620', cursor: 'pointer',
-    borderBottom: '1px solid #f5f0e0',
+    fontSize: 14, color: 'var(--c-forest)', cursor: 'pointer',
+    borderBottom: '1px solid var(--c-bone)',
   },
   meBankCard: {
     width: '100%', display: 'flex', alignItems: 'center', gap: 12,
@@ -18844,19 +19009,19 @@ const styles = {
   // ─── BOTTOM NAV ───
   bottomNav: {
     position: 'fixed', bottom: 0, left: 0, right: 0,
-    background: 'rgba(255, 253, 247, 0.95)', backdropFilter: 'blur(12px)',
-    borderTop: '1px solid #efe7d2',
+    background: 'var(--c-cream)', backdropFilter: 'blur(12px)',
+    borderTop: '1px solid var(--c-bone)',
     display: 'flex', padding: '10px 12px 8px',
     paddingBottom: 'calc(10px + env(safe-area-inset-bottom))',
     zIndex: 100,
   },
   bottomTab: {
     flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-    padding: 4, color: '#a59478', background: 'none', border: 'none',
+    padding: 4, color: 'var(--c-taupe)', background: 'none', border: 'none',
     fontFamily: 'inherit', cursor: 'pointer', position: 'relative',
     transition: 'color 0.15s ease',
   },
-  bottomTabActive: { color: '#1a2620' },
+  bottomTabActive: { color: 'var(--c-forest)' },
   bottomTabLabel: { fontSize: 10, fontWeight: 500, letterSpacing: '0.05em' },
   bottomTabLabelActive: { fontWeight: 600 },
   bottomTabBadge: {
