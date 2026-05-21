@@ -11811,16 +11811,20 @@ function CoverPage({ data, currentUser, isManager, onClassClick }) {
 //   • Everyone — all classes, yours emphasised
 //   • Cover board lives in its own bottom-nav tab.
 
+
+
+// ─── StaffScheduleView — editorial schedule inspired by the Luova reference ──
+// Personal greeting + pinned cover cards + week-strip pills + clean timeline.
 function StaffScheduleView({ data, currentUser, onClassClick }) {
   const [view, setView] = useState('mine'); // 'mine' | 'everyone'
   const [weekOffset, setWeekOffset] = useState(0);
 
-  // Defensive — these can briefly be undefined during loads
+  // Defensive
   const allClasses = data?.classes || [];
   const allUsers = data?.users || [];
   const allCovers = data?.coverRequests || [];
 
-  // Week math — Monday start (UK convention)
+  // Week math
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const dow = (today.getDay() + 6) % 7;
@@ -11836,12 +11840,11 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
   const weekStartIso = toIso(weekDates[0]);
   const weekEndIso = toIso(weekDates[6]);
 
-  // Open cover requests (excluding own)
+  // Cover requests
   const openCoversAll = allCovers
     .filter(r => r.status === 'open' && r.requestedBy !== currentUser.id)
     .map(r => ({ ...r, cls: allClasses.find(c => c.id === r.classId) }))
     .filter(r => r.cls);
-
   const openCoversThisWeek = openCoversAll.filter(r =>
     r.cls.date >= weekStartIso && r.cls.date <= weekEndIso
   );
@@ -11850,7 +11853,7 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
     c.coachId === currentUser.id && c.date >= weekStartIso && c.date <= weekEndIso
   );
 
-  // Per-date metadata for the day strip
+  // Per-date metadata
   const dayMeta = {};
   weekDates.forEach(d => { dayMeta[toIso(d)] = { mine: 0, others: 0, cover: 0 }; });
   allClasses
@@ -11863,7 +11866,6 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
       if (openCoversAll.some(r => r.cls.id === c.id)) m.cover++;
     });
 
-  // Class accent color
   const classColor = (cls) => {
     const meta = (CLASS_TYPES && CLASS_TYPES[cls.type]) || {};
     return meta.color || '#c6926a';
@@ -11880,39 +11882,6 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
     return u?.name?.split(' ')[0] || '';
   };
 
-  // Range label
-  const rangeLabel = (() => {
-    const a = weekDates[0], b = weekDates[6];
-    const sameMonth = a.getMonth() === b.getMonth();
-    if (sameMonth) {
-      return `${a.getDate()} – ${b.getDate()} ${b.toLocaleDateString('en-GB', { month: 'long' })}`;
-    }
-    return `${a.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} – ${b.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`;
-  })();
-
-  // Status line (the "Hello Thomas, you have 2 assignments..." pattern)
-  const statusLineParts = (() => {
-    const parts = [];
-    if (view === 'mine') {
-      const count = myClassesThisWeek.length;
-      if (count > 0) parts.push({ text: `${count} ${count === 1 ? 'class' : 'classes'}`, urgent: false });
-    } else {
-      const count = allClasses.filter(c => c.date >= weekStartIso && c.date <= weekEndIso).length;
-      if (count > 0) parts.push({ text: `${count} ${count === 1 ? 'class' : 'classes'}`, urgent: false });
-    }
-
-    if (openCoversThisWeek.length > 0) {
-      const ids = [...new Set(openCoversThisWeek.map(r => r.requestedBy))];
-      const names = ids.map(id => coachName(id)).filter(Boolean);
-      let text;
-      if (names.length === 1) text = `${names[0]} needs cover`;
-      else if (names.length === 2) text = `${names[0]} and ${names[1]} need cover`;
-      else text = `${names.length} teammates need cover`;
-      parts.push({ text, urgent: true });
-    }
-    return parts;
-  })();
-
   // Filter classes for the visible week + view
   const visibleClasses = (() => {
     const weekClasses = allClasses.filter(c => c.date >= weekStartIso && c.date <= weekEndIso);
@@ -11927,38 +11896,114 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
   });
   Object.keys(byDate).forEach(d => byDate[d].sort((a, b) => (a.time || '').localeCompare(b.time || '')));
 
-  const eyebrowDate = weekOffset === 0
-    ? today.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
-    : rangeLabel;
+  const firstName = currentUser?.name?.split(' ')[0] || 'there';
+  const myCount = view === 'mine'
+    ? myClassesThisWeek.length
+    : allClasses.filter(c => c.date >= weekStartIso && c.date <= weekEndIso).length;
+  const coverCount = openCoversThisWeek.length;
+
+  // Range label for week nav
+  const rangeLabel = (() => {
+    const a = weekDates[0], b = weekDates[6];
+    const sameMonth = a.getMonth() === b.getMonth();
+    if (sameMonth) {
+      return `${b.toLocaleDateString('en-GB', { month: 'long' })}`;
+    }
+    return `${a.toLocaleDateString('en-GB', { month: 'short' })} – ${b.toLocaleDateString('en-GB', { month: 'short' })}`;
+  })();
 
   return (
     <>
-      <PageHeader
-        eyebrow={eyebrowDate}
-        title="Schedule"
-        compact
-      />
-
-      {/* Contextual status line — the "Hello Thomas, you have..." pattern */}
-      {statusLineParts.length > 0 && (
-        <p style={{
+      {/* Personal greeting — Luova right-side pattern */}
+      <div style={{ padding: '12px 4px 22px' }}>
+        <h1 style={{
           fontFamily: '"Playfair Display", Georgia, serif',
-          fontSize: 14, color: '#7a8270', fontStyle: 'italic',
-          margin: 0, padding: '0 4px 18px',
-          lineHeight: 1.5, letterSpacing: '-0.005em',
+          fontSize: 30, fontWeight: 400, margin: 0,
+          color: '#1a2620', lineHeight: 1.1, letterSpacing: '-0.015em',
         }}>
-          {statusLineParts.map((p, i) => (
-            <React.Fragment key={i}>
-              {i > 0 && <span style={{ color: '#a59478', padding: '0 6px' }}>·</span>}
-              <span style={p.urgent ? { color: '#c8442a', fontStyle: 'normal', fontWeight: 500, fontFamily: "'Inter', sans-serif", fontSize: 12, letterSpacing: '0.02em' } : {}}>
-                {p.text}
+          Hello {firstName},
+        </h1>
+        <p style={{
+          fontSize: 14, color: '#7a8270',
+          margin: '10px 0 0', lineHeight: 1.5,
+        }}>
+          {weekOffset === 0 ? 'you have ' : 'this week has '}
+          <span style={{ color: '#1a2620', fontWeight: 500 }}>
+            {myCount} {myCount === 1 ? 'class' : 'classes'}
+          </span>
+          {coverCount > 0 && (
+            <>
+              {' and '}
+              <span style={{ color: '#c8442a', fontWeight: 500 }}>
+                {coverCount} {coverCount === 1 ? 'cover' : 'covers'} needed
               </span>
-            </React.Fragment>
-          ))}
+            </>
+          )}
+          .
         </p>
+      </div>
+
+      {/* Pinned cover cards — only when covers exist (Luova top-row pattern) */}
+      {openCoversThisWeek.length > 0 && (
+        <div style={{
+          marginBottom: 28,
+          marginLeft: -4, marginRight: -4,
+          overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          scrollbarWidth: 'none',
+        }}>
+          <div style={{ display: 'flex', gap: 10, padding: '4px 4px' }}>
+            {openCoversThisWeek.map(req => {
+              const cls = req.cls;
+              const requesterName = coachName(req.requestedBy);
+              const d = new Date(cls.date);
+              const dateLabel = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+              return (
+                <button key={req.id} onClick={() => onClassClick?.(cls.id)} className="salus-btn"
+                  style={{
+                    flexShrink: 0, width: '72%', minWidth: 240,
+                    background: '#fffdf7',
+                    border: '1px solid #efe7d2',
+                    borderRadius: 14, padding: '16px 18px',
+                    cursor: 'pointer', textAlign: 'left',
+                    fontFamily: 'inherit',
+                  }}>
+                  <div style={{
+                    fontSize: 11, color: '#a59478',
+                    letterSpacing: '0.04em', fontVariantNumeric: 'tabular-nums',
+                  }}>
+                    {dateLabel} · {cls.time}
+                  </div>
+                  <div style={{
+                    fontFamily: '"Playfair Display", Georgia, serif',
+                    fontSize: 17, fontWeight: 500, color: '#1a2620',
+                    marginTop: 10, letterSpacing: '-0.005em',
+                  }}>
+                    {cls.type}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#7a8270', marginTop: 4 }}>
+                    {requesterName ? `${requesterName} needs cover` : 'Needs cover'}
+                  </div>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    marginTop: 16,
+                  }}>
+                    <span style={{
+                      fontSize: 10, color: '#c8442a', fontWeight: 600,
+                      letterSpacing: '0.12em', textTransform: 'uppercase',
+                    }}>
+                      Cover needed
+                    </span>
+                    <div style={{ width: 8, height: 8, borderRadius: 4, background: '#c8442a' }} />
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       )}
 
-      {/* View tabs — Mine / Everyone */}
+      {/* View tabs */}
       <div style={{
         display: 'flex', gap: 22, padding: '0 4px 8px',
         borderBottom: '1px solid #efe7d2', marginBottom: 18,
@@ -11981,97 +12026,89 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
             </button>
           );
         })}
-      </div>
-
-      {/* Day strip — week at a glance with dots for busy/cover days */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 4,
-        padding: '0 0 22px',
-      }}>
-        <button onClick={() => setWeekOffset(o => o - 1)} className="salus-btn" style={{
-          background: 'transparent', border: 'none', padding: '6px 4px',
-          color: '#5c4a38', cursor: 'pointer', fontFamily: 'inherit',
-          display: 'flex', alignItems: 'center', flexShrink: 0,
-        }}>
-          <ChevronLeft size={18} />
-        </button>
-
-        <div style={{
-          flex: 1,
-          display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)',
-          gap: 2,
-        }}>
-          {weekDates.map(d => {
-            const iso = toIso(d);
-            const isToday = iso === todayIso;
-            const m = dayMeta[iso] || { mine: 0, others: 0, cover: 0 };
-            const hasMine = m.mine > 0;
-            const hasCover = m.cover > 0;
-            const hasOthers = m.others > 0;
-            const dayShort = d.toLocaleDateString('en-GB', { weekday: 'short' }).slice(0, 3);
-            const dayNum = d.getDate();
-
-            return (
-              <div key={iso} style={{
-                display: 'flex', flexDirection: 'column', alignItems: 'center',
-                gap: 4, padding: '4px 0',
-              }}>
-                <div style={{
-                  fontSize: 9, color: '#a59478',
-                  letterSpacing: '0.1em', textTransform: 'uppercase',
-                  fontWeight: 500,
-                }}>
-                  {dayShort}
-                </div>
-                <div style={{
-                  width: 30, height: 30, borderRadius: 15,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: isToday ? '#1a2620' : 'transparent',
-                  color: isToday ? '#fffdf7' : '#1a2620',
-                  fontSize: 14, fontWeight: isToday ? 600 : 400,
-                  fontFamily: '"Playfair Display", Georgia, serif',
-                  fontVariantNumeric: 'tabular-nums',
-                  letterSpacing: '-0.01em',
-                }}>
-                  {dayNum}
-                </div>
-                <div style={{
-                  height: 4, display: 'flex', alignItems: 'center', gap: 2,
-                }}>
-                  {hasCover && <div style={{ width: 4, height: 4, borderRadius: 2, background: '#c8442a' }} />}
-                  {!hasCover && hasMine && <div style={{ width: 4, height: 4, borderRadius: 2, background: '#1a2620' }} />}
-                  {!hasMine && !hasCover && hasOthers && view === 'everyone' && (
-                    <div style={{ width: 4, height: 4, borderRadius: 2, background: '#d4cdb8' }} />
-                  )}
-                </div>
-              </div>
-            );
-          })}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button onClick={() => setWeekOffset(o => o - 1)} className="salus-btn" style={{
+            background: 'transparent', border: 'none', padding: 4,
+            color: '#5c4a38', cursor: 'pointer',
+          }}>
+            <ChevronLeft size={16} />
+          </button>
+          <button onClick={() => setWeekOffset(0)} className="salus-btn" style={{
+            background: 'transparent', border: 'none', padding: '4px 8px',
+            color: '#1a2620', cursor: 'pointer',
+            fontSize: 11, fontWeight: 500, fontFamily: 'inherit',
+            letterSpacing: '0.04em',
+          }}>
+            {rangeLabel}
+          </button>
+          <button onClick={() => setWeekOffset(o => o + 1)} className="salus-btn" style={{
+            background: 'transparent', border: 'none', padding: 4,
+            color: '#5c4a38', cursor: 'pointer',
+          }}>
+            <ChevronRight size={16} />
+          </button>
         </div>
-
-        <button onClick={() => setWeekOffset(o => o + 1)} className="salus-btn" style={{
-          background: 'transparent', border: 'none', padding: '6px 4px',
-          color: '#5c4a38', cursor: 'pointer', fontFamily: 'inherit',
-          display: 'flex', alignItems: 'center', flexShrink: 0,
-        }}>
-          <ChevronRight size={18} />
-        </button>
       </div>
 
-      {/* Jump to today */}
-      {weekOffset !== 0 && (
-        <button onClick={() => setWeekOffset(0)} className="salus-btn" style={{
-          background: 'transparent', border: 'none',
-          color: '#c8442a', fontSize: 11, fontWeight: 500,
-          letterSpacing: '0.08em', textTransform: 'uppercase',
-          fontFamily: 'inherit', cursor: 'pointer',
-          padding: '0 4px 14px', textAlign: 'left',
-        }}>
-          ← Jump to this week
-        </button>
-      )}
+      {/* Day pill row — Luova-style: dates as pills, current day filled, future days subtle */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        padding: '0 0 26px',
+        overflowX: 'auto', WebkitOverflowScrolling: 'touch',
+        scrollbarWidth: 'none',
+      }}>
+        {weekDates.map(d => {
+          const iso = toIso(d);
+          const isToday = iso === todayIso;
+          const isPast = iso < todayIso;
+          const m = dayMeta[iso] || { mine: 0, others: 0, cover: 0 };
+          const hasMine = m.mine > 0;
+          const hasCover = m.cover > 0;
+          const hasOthers = m.others > 0;
+          const dayShort = d.toLocaleDateString('en-GB', { weekday: 'short' }).slice(0, 3);
+          const dayNum = d.getDate();
 
-      {/* Body */}
+          return (
+            <div key={iso} style={{
+              flex: 1, minWidth: 42,
+              display: 'flex', flexDirection: 'column', alignItems: 'center',
+              gap: 4, padding: '6px 0 8px',
+              opacity: isPast ? 0.45 : 1,
+              transition: 'opacity 0.15s ease',
+            }}>
+              <div style={{
+                fontSize: 9, color: '#a59478',
+                letterSpacing: '0.1em', textTransform: 'uppercase',
+                fontWeight: 500,
+              }}>
+                {dayShort}
+              </div>
+              <div style={{
+                width: 32, height: 32, borderRadius: 16,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: isToday ? '#1a2620' : 'transparent',
+                color: isToday ? '#fffdf7' : '#1a2620',
+                fontSize: 14, fontWeight: isToday ? 500 : 400,
+                fontFamily: '"Playfair Display", Georgia, serif',
+                fontVariantNumeric: 'tabular-nums',
+                letterSpacing: '-0.01em',
+                border: !isToday && (hasMine || hasCover) ? '1px solid #efe7d2' : '1px solid transparent',
+              }}>
+                {dayNum}
+              </div>
+              <div style={{ height: 4, display: 'flex', alignItems: 'center', gap: 2 }}>
+                {hasCover && <div style={{ width: 4, height: 4, borderRadius: 2, background: '#c8442a' }} />}
+                {!hasCover && hasMine && <div style={{ width: 4, height: 4, borderRadius: 2, background: '#1a2620' }} />}
+                {!hasMine && !hasCover && hasOthers && view === 'everyone' && (
+                  <div style={{ width: 4, height: 4, borderRadius: 2, background: '#d4cdb8' }} />
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Body — timeline */}
       {visibleClasses.length === 0 ? (
         <EmptyState sub={view === 'mine' ? 'A quiet week — enjoy.' : 'Nothing on the studio schedule.'}>
           {view === 'mine' ? 'No classes this week.' : 'Empty week.'}
@@ -12084,34 +12121,20 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
           const isToday = iso === todayIso;
           const dayName = d.toLocaleDateString('en-GB', { weekday: 'long' });
           const dayNum = d.getDate();
-          const monthAbbr = d.toLocaleDateString('en-GB', { month: 'short' });
 
           return (
-            <div key={iso} style={{ marginBottom: 28 }}>
-              {/* Day header — small caps, editorial */}
+            <div key={iso} style={{ marginBottom: 30 }}>
+              {/* Day header — small caps */}
               <div style={{
-                display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
-                padding: '0 4px 14px',
+                fontSize: 10, color: isToday ? '#c8442a' : '#a59478',
+                letterSpacing: '0.18em', textTransform: 'uppercase',
+                fontWeight: 600,
+                padding: '0 4px 16px',
               }}>
-                <div style={{
-                  fontSize: 11, color: isToday ? '#c8442a' : '#5c4a38',
-                  letterSpacing: '0.14em', textTransform: 'uppercase',
-                  fontWeight: 600,
-                }}>
-                  {dayName} <span style={{ color: '#a59478', fontWeight: 500, marginLeft: 4 }}>{dayNum} {monthAbbr}</span>
-                </div>
-                {isToday && (
-                  <div style={{
-                    fontSize: 10, color: '#c8442a',
-                    letterSpacing: '0.14em', textTransform: 'uppercase',
-                    fontWeight: 600,
-                  }}>
-                    Today
-                  </div>
-                )}
+                {dayName} {dayNum}
               </div>
 
-              {/* Class rows — editorial timeline, no card backgrounds */}
+              {/* Class rows — Luova timeline pattern */}
               {dayClasses.map((c, idx) => {
                 const isMine = c.coachId === currentUser.id;
                 const needsCover = openCoversAll.some(r => r.cls.id === c.id);
@@ -12119,14 +12142,10 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
                 const coverReq = openCoversAll.find(r => r.cls.id === c.id);
                 const requesterFirstName = coverReq ? coachName(coverReq.requestedBy) : '';
 
-                // Vertical bar color reflects status (Image 7 right pattern)
                 const barColor = needsCover ? '#c8442a' :
                                  isMine ? classColor(c) :
                                  '#d4cdb8';
-
-                // Cover-needed rows get subtle background to draw attention
-                const rowBg = needsCover ? '#fef0ec' : 'transparent';
-                const isLast = idx === dayClasses.length - 1;
+                const barWidth = needsCover ? 3 : isMine ? 2 : 1;
 
                 return (
                   <button
@@ -12134,59 +12153,64 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
                     onClick={() => onClassClick?.(c.id)}
                     className="salus-btn"
                     style={{
-                      display: 'flex', gap: 14, padding: '14px 14px',
-                      background: rowBg,
-                      border: 'none',
-                      borderBottom: isLast ? 'none' : '1px solid #efe7d2',
-                      borderRadius: needsCover ? 10 : 0,
-                      marginBottom: needsCover ? 4 : 0,
+                      display: 'flex', gap: 18, padding: '8px 4px 18px 4px',
+                      background: 'transparent', border: 'none',
                       cursor: 'pointer', textAlign: 'left',
                       width: '100%', fontFamily: 'inherit',
-                      opacity: isDimmed ? 0.5 : 1,
+                      opacity: isDimmed ? 0.45 : 1,
                       transition: 'opacity 0.15s ease',
+                      borderBottom: idx === dayClasses.length - 1 ? 'none' : '1px solid #f5ecd6',
+                      marginBottom: idx === dayClasses.length - 1 ? 0 : 4,
                     }}>
-                    {/* Vertical status bar */}
-                    <div style={{
-                      width: needsCover ? 3 : 2,
-                      background: barColor,
-                      borderRadius: 2,
-                      alignSelf: 'stretch',
-                      minHeight: 42,
-                      flexShrink: 0,
-                    }} />
-
-                    {/* Time stacked (HH:MM + duration) */}
-                    <div style={{ flexShrink: 0, minWidth: 56, paddingTop: 2 }}>
+                    {/* Time — left column */}
+                    <div style={{ flexShrink: 0, minWidth: 52, paddingTop: 4 }}>
                       <div style={{
-                        fontFamily: '"Playfair Display", Georgia, serif',
-                        fontSize: 19, fontWeight: 400,
-                        color: '#1a2620', lineHeight: 1,
+                        fontSize: 13, fontWeight: 500,
+                        color: needsCover ? '#c8442a' : '#1a2620',
                         fontVariantNumeric: 'tabular-nums',
-                        letterSpacing: '-0.01em',
+                        letterSpacing: '0.02em',
                       }}>
                         {c.time}
                       </div>
                       {c.durationMin ? (
                         <div style={{
-                          fontSize: 9, color: '#a59478', marginTop: 6,
-                          letterSpacing: '0.08em', textTransform: 'uppercase',
-                          fontWeight: 500,
+                          fontSize: 11, color: '#a59478', marginTop: 4,
+                          fontVariantNumeric: 'tabular-nums',
                         }}>
-                          {c.durationMin} min
+                          {c.durationMin}m
                         </div>
                       ) : null}
                     </div>
 
-                    {/* Class details */}
+                    {/* Vertical bar */}
+                    <div style={{
+                      width: barWidth,
+                      background: barColor,
+                      borderRadius: 2,
+                      alignSelf: 'stretch',
+                      minHeight: 44,
+                      flexShrink: 0,
+                    }} />
+
+                    {/* Details */}
                     <div style={{ flex: 1, minWidth: 0, paddingTop: 2 }}>
+                      {needsCover && (
+                        <div style={{
+                          fontSize: 9, color: '#c8442a', fontWeight: 600,
+                          letterSpacing: '0.14em', textTransform: 'uppercase',
+                          marginBottom: 6,
+                        }}>
+                          {requesterFirstName ? `${requesterFirstName} needs cover` : 'Needs cover'}
+                        </div>
+                      )}
                       <div style={{
                         fontFamily: '"Playfair Display", Georgia, serif',
-                        fontSize: 16, fontWeight: 500, color: '#1a2620',
-                        letterSpacing: '-0.005em', lineHeight: 1.2,
+                        fontSize: 17, fontWeight: 500, color: '#1a2620',
+                        letterSpacing: '-0.005em', lineHeight: 1.25,
                       }}>
                         {c.type}
                       </div>
-                      <div style={{ fontSize: 12, color: '#7a8270', marginTop: 4 }}>
+                      <div style={{ fontSize: 12, color: '#7a8270', marginTop: 6, lineHeight: 1.4 }}>
                         {studioLabel(c.studio)}
                         {view !== 'mine' && c.coachId && (
                           <> · <span style={{ color: isMine ? '#7a8c5c' : '#a59478' }}>
@@ -12196,15 +12220,10 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
                       </div>
                       {needsCover && (
                         <div style={{
-                          fontSize: 11, color: '#c8442a',
-                          marginTop: 8, fontWeight: 500,
-                          letterSpacing: '0.02em',
-                          display: 'flex', alignItems: 'center', gap: 8,
+                          fontSize: 11, color: '#a59478',
+                          marginTop: 8, letterSpacing: '0.04em',
                         }}>
-                          {requesterFirstName ? `${requesterFirstName} needs cover` : 'Needs cover'}
-                          <span style={{ color: '#a59478', fontWeight: 400, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                            Tap to take it
-                          </span>
+                          Tap to take it →
                         </div>
                       )}
                     </div>
@@ -12218,6 +12237,7 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
     </>
   );
 }
+
 
 
 function ScheduleView({
