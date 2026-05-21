@@ -119,20 +119,95 @@ const STUDIOS = {
 };
 
 // ─── DESIGN SYSTEM — single source of truth for typography & colors ──────
+// ─── ThemeApplier — sets the data-theme attribute on <html> when theme changes ─
+function ThemeApplier({ theme }) {
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    if (theme && theme !== 'nude') {
+      document.documentElement.setAttribute('data-theme', theme);
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+  }, [theme]);
+  return null;
+}
+
+// ─── Themes ──────────────────────────────────────────────────────────────
+// COLOR values are CSS variables so they swap instantly when the theme changes.
+// The themes are defined as a stylesheet injected at the root of the app —
+// see <style id="salus-theme"> in SalusStaff().
 const COLOR = {
-  forest:   '#1a2620',  // primary text, primary buttons
-  brown:    '#5c4a38',  // secondary text, decorative
-  amber:    '#c6926a',  // accent (hires, warm)
-  sage:     '#7a8c5c',  // accent (mine, internal)
-  coral:    '#c8442a',  // urgency only — cover needed, errors
-  cream:    '#fffdf7',  // primary background
-  sand:     '#f5f1e8',  // app background, recessed surfaces
-  bone:     '#efe7d2',  // dividers, subtle borders
-  shell:    '#d4cdb8',  // stronger dividers
-  taupe:    '#a59478',  // tertiary text, meta
-  moss:     '#7a8270',  // body grey
+  forest:   'var(--c-forest)',  // primary text, primary buttons
+  brown:    'var(--c-brown)',   // secondary text, decorative
+  amber:    'var(--c-amber)',   // accent (hires, warm)
+  sage:     'var(--c-sage)',    // accent (mine, internal)
+  coral:    'var(--c-coral)',   // urgency only — cover needed, errors
+  cream:    'var(--c-cream)',   // primary background
+  sand:     'var(--c-sand)',    // recessed surfaces
+  bone:     'var(--c-bone)',    // dividers, subtle borders
+  shell:    'var(--c-shell)',   // stronger dividers
+  taupe:    'var(--c-taupe)',   // tertiary text, meta
+  moss:     'var(--c-moss)',    // body grey
   serif:    '"Playfair Display", Georgia, serif',
   sans:     "'Inter', -apple-system, sans-serif",
+};
+
+// Theme definitions — used both for the picker UI and for the injected stylesheet
+const THEMES = {
+  nude: {
+    label: 'Nude',
+    description: 'Our signature editorial cream',
+    swatch: ['#fffdf7', '#1a2620', '#c6926a'],
+    vars: {
+      '--c-forest': '#1a2620',
+      '--c-brown':  '#5c4a38',
+      '--c-amber':  '#c6926a',
+      '--c-sage':   '#7a8c5c',
+      '--c-coral':  '#c8442a',
+      '--c-cream':  '#fffdf7',
+      '--c-sand':   '#f5f1e8',
+      '--c-bone':   '#efe7d2',
+      '--c-shell':  '#d4cdb8',
+      '--c-taupe':  '#a59478',
+      '--c-moss':   '#7a8270',
+    },
+  },
+  dark: {
+    label: 'Dark',
+    description: 'Forest night',
+    swatch: ['#1a2620', '#fffdf7', '#c6926a'],
+    vars: {
+      '--c-forest': '#fffdf7',
+      '--c-brown':  '#d4cdb8',
+      '--c-amber':  '#d4a47f',
+      '--c-sage':   '#9eb38a',
+      '--c-coral':  '#e07a5f',
+      '--c-cream':  '#1a2620',
+      '--c-sand':   '#232f29',
+      '--c-bone':   '#2d3a32',
+      '--c-shell':  '#3a4a40',
+      '--c-taupe':  '#a59478',
+      '--c-moss':   '#c8c4b8',
+    },
+  },
+  sage: {
+    label: 'Sage',
+    description: 'Pastel green, like summer',
+    swatch: ['#f7faf2', '#2c4636', '#9eb38a'],
+    vars: {
+      '--c-forest': '#2c4636',
+      '--c-brown':  '#5e7152',
+      '--c-amber':  '#d6a06a',
+      '--c-sage':   '#9eb38a',
+      '--c-coral':  '#d97757',
+      '--c-cream':  '#f7faf2',
+      '--c-sand':   '#e8efde',
+      '--c-bone':   '#d6e0c8',
+      '--c-shell':  '#c0ceac',
+      '--c-taupe':  '#8a9b76',
+      '--c-moss':   '#6f8264',
+    },
+  },
 };
 
 const TYPE = {
@@ -325,6 +400,20 @@ export default function SalusStaff() {
       }
       return next;
     });
+  };
+
+  // Theme — 'nude' | 'dark' | 'sage'
+  const [theme, setTheme] = useState(() => {
+    if (typeof localStorage === 'undefined') return 'nude';
+    const stored = localStorage.getItem('salus_theme');
+    return (stored && THEMES[stored]) ? stored : 'nude';
+  });
+  const pickTheme = (name) => {
+    if (!THEMES[name]) return;
+    setTheme(name);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('salus_theme', name);
+    }
   };
 
   // Load lastViewed from localStorage when the logged-in user is known
@@ -1554,6 +1643,21 @@ export default function SalusStaff() {
 
   return (
     <div style={styles.app}>
+      {/* Theme stylesheet — drives CSS variables that all COLOR.* values reference */}
+      <style id="salus-theme">{`
+        :root {
+${Object.entries(THEMES.nude.vars).map(([k, v]) => `          ${k}: ${v};`).join('\n')}
+        }
+        [data-theme="dark"] {
+${Object.entries(THEMES.dark.vars).map(([k, v]) => `          ${k}: ${v};`).join('\n')}
+        }
+        [data-theme="sage"] {
+${Object.entries(THEMES.sage.vars).map(([k, v]) => `          ${k}: ${v};`).join('\n')}
+        }
+        body { background: var(--c-sand); transition: background 240ms ease; }
+      `}</style>
+      <ThemeApplier theme={theme} />
+
       <style>{`
         /* Fonts loaded via index.html */
         * { box-sizing: border-box; }
@@ -1776,6 +1880,8 @@ export default function SalusStaff() {
             realIsManager={realIsManager}
             viewAsStaff={viewAsStaff}
             onToggleViewAsStaff={toggleViewAsStaff}
+            theme={theme}
+            onPickTheme={pickTheme}
             emailIntegration={data.emailIntegration}
             onOpenSettings={() => setModal({ type: 'settings' })}
             onShowInvoices={() => setModal({ type: 'invoices' })}
@@ -12523,7 +12629,7 @@ const RATE_PER_SESSION = 30; // £ per class taught
 // ME — personal hub: profile, stats, settings link
 // ──────────────────────────────────────────────────────────────────────────────
 
-function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onToggleViewAsStaff, emailIntegration, onOpenSettings, onSignOut, onShowInvoices, onShowTimeOff, onShowTeam, onShowExpenses, onConnectGmail, onDisconnectGmail }) {
+function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onToggleViewAsStaff, theme, onPickTheme, emailIntegration, onOpenSettings, onSignOut, onShowInvoices, onShowTimeOff, onShowTeam, onShowExpenses, onConnectGmail, onDisconnectGmail }) {
   const myClasses = data.classes.filter(c => c.coachId === currentUser.id);
   const sessionCount = myClasses.length;
   const totalMinutes = myClasses.reduce((acc, c) => acc + c.dur, 0);
@@ -12745,6 +12851,55 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
           </div>
         </section>
       )}
+
+      {/* Theme picker — for everyone */}
+      <section style={styles.homeSection}>
+        <div style={styles.homeSectionHead}>
+          <div style={styles.homeSectionTitle}>Theme</div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+          {Object.entries(THEMES).map(([key, t]) => {
+            const isActive = theme === key;
+            return (
+              <button
+                key={key}
+                onClick={() => onPickTheme?.(key)}
+                className="salus-btn"
+                style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'stretch',
+                  padding: 10, gap: 8,
+                  background: isActive ? 'var(--c-cream)' : 'transparent',
+                  border: `1.5px solid ${isActive ? 'var(--c-forest)' : 'var(--c-bone)'}`,
+                  borderRadius: 12, cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  transition: 'border-color 120ms ease, background 120ms ease',
+                }}
+              >
+                <div style={{
+                  display: 'flex', height: 36, borderRadius: 8, overflow: 'hidden',
+                  border: '0.5px solid rgba(0,0,0,0.04)',
+                }}>
+                  {t.swatch.map((c, i) => (
+                    <div key={i} style={{ flex: 1, background: c }} />
+                  ))}
+                </div>
+                <div style={{
+                  fontSize: 12, fontWeight: 500, color: 'var(--c-forest)',
+                  textAlign: 'left',
+                }}>
+                  {t.label}
+                </div>
+                <div style={{
+                  fontSize: 10, color: 'var(--c-taupe)', textAlign: 'left',
+                  letterSpacing: '0.02em', lineHeight: 1.3,
+                }}>
+                  {t.description}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
       {/* Email integration — managers + FOH staff */}
       {(isManager || currentUser.isFoh) && (
