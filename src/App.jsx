@@ -8989,6 +8989,249 @@ function MonthView({ classes, coverRequests, currentUser, onDayClick }) {
 // HOME — cover-first dashboard, the new app landing screen
 // ──────────────────────────────────────────────────────────────────────────────
 
+// ─── MyDayHero — personal command center at the top of Home ──────────────
+// Replaces the generic greeting. Shows: today's hero, this week's earnings,
+// up next, other classes today, birthdays.
+function MyDayHero({ data, currentUser, isManager, onClassClick }) {
+  const now = new Date();
+  const hour = now.getHours();
+  const greeting = hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening';
+  const todayStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+  const todayIso = now.toISOString().slice(0, 10);
+  const firstName = currentUser.name?.split(' ')[0] || 'there';
+  const isCoach = currentUser.isCoach;
+
+  // My classes today (as coach OR as a cover acceptor)
+  const myToday = data.classes
+    .filter(c => c.date === todayIso && c.coachId === currentUser.id)
+    .sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+
+  // My FOH shift today
+  const myFohToday = (data.fohShifts || []).filter(s => s.date === todayIso && s.userId === currentUser.id);
+
+  // Who else is around today (excluding self)
+  const todayTeammates = new Set();
+  data.classes.filter(c => c.date === todayIso).forEach(c => {
+    if (c.coachId && c.coachId !== currentUser.id) todayTeammates.add(c.coachId);
+  });
+  (data.fohShifts || []).filter(s => s.date === todayIso).forEach(s => {
+    if (s.userId && s.userId !== currentUser.id) todayTeammates.add(s.userId);
+  });
+  const teammateNames = Array.from(todayTeammates)
+    .map(id => data.users.find(u => u.id === id))
+    .filter(Boolean)
+    .map(u => u.name?.split(' ')[0])
+    .filter(Boolean)
+    .slice(0, 3);
+
+  // Editorial subtitle — "3 classes · FOH shift · with Karis and Mike"
+  const subtitle = (() => {
+    const parts = [];
+    if (myToday.length > 0) {
+      parts.push(`${myToday.length} ${myToday.length === 1 ? 'class' : 'classes'}`);
+    }
+    if (myFohToday.length > 0) {
+      parts.push('FOH shift');
+    }
+    if (teammateNames.length === 1) {
+      parts.push(`with ${teammateNames[0]}`);
+    } else if (teammateNames.length === 2) {
+      parts.push(`with ${teammateNames[0]} and ${teammateNames[1]}`);
+    } else if (teammateNames.length >= 3) {
+      parts.push(`with ${teammateNames[0]}, ${teammateNames[1]} and others`);
+    }
+    return parts.length > 0 ? parts.join(' · ') : 'A quiet day — nothing on your schedule';
+  })();
+
+  // This week's stats (Mon → Sun, UK convention)
+  const dow = (now.getDay() + 6) % 7; // 0=Mon ... 6=Sun
+  const weekStart = new Date(now);
+  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(weekStart.getDate() - dow);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekEnd.getDate() + 6);
+  const weekStartIso = weekStart.toISOString().slice(0, 10);
+  const weekEndIso = weekEnd.toISOString().slice(0, 10);
+
+  const myWeekClasses = data.classes
+    .filter(c => c.coachId === currentUser.id && c.date >= weekStartIso && c.date <= weekEndIso);
+  const myWeekCount = myWeekClasses.length;
+  const sessionRate = currentUser.sessionRatePence || 3000;
+  const weeklyEarningsPence = sessionRate * myWeekCount;
+  const showEarnings = isCoach && myWeekCount > 0;
+
+  // Up next — first future class today
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const upNext = myToday.find(c => {
+    if (!c.time) return false;
+    const [h, m] = c.time.split(':').map(Number);
+    return h * 60 + m > nowMinutes;
+  });
+
+  let upNextCountdown = null;
+  if (upNext) {
+    const [h, m] = upNext.time.split(':').map(Number);
+    const minsAway = (h * 60 + m) - nowMinutes;
+    if (minsAway <= 60) upNextCountdown = `Starts in ${minsAway} min`;
+    else if (minsAway < 240) {
+      const hrs = Math.floor(minsAway / 60);
+      const restMin = minsAway % 60;
+      upNextCountdown = restMin > 0 ? `In ${hrs}h ${restMin}m` : `In ${hrs}h`;
+    }
+  }
+
+  // Birthdays today (other users) — date_of_birth stored as YYYY-MM-DD
+  const todayMD = `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const birthdaysToday = data.users
+    .filter(u => u.id !== currentUser.id && u.dateOfBirth && typeof u.dateOfBirth === 'string'
+            && u.dateOfBirth.slice(5) === todayMD);
+
+  // Class accent color
+  const classColor = (cls) => {
+    const meta = (CLASS_TYPES && CLASS_TYPES[cls.type]) || {};
+    return meta.color || COLOR.amber;
+  };
+
+  const studioLabel = (s) => {
+    if (s === 'reformer') return 'Reformer studio';
+    if (s === 'hybrid')   return 'Hybrid studio';
+    return 'Studio';
+  };
+
+  return (
+    <div style={{ padding: '12px 0 0' }}>
+      {/* Greeting */}
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ ...TYPE.eyebrow, marginBottom: 6 }}>{todayStr}</div>
+        <div style={{ ...TYPE.pageTitle }}>{greeting}, {firstName}</div>
+        <div style={{
+          fontFamily: COLOR.serif, fontStyle: 'italic',
+          fontSize: 14, color: COLOR.brown,
+          marginTop: 8, lineHeight: 1.4,
+        }}>
+          {subtitle}
+        </div>
+      </div>
+
+      {/* This week's stats — only for coaches with classes */}
+      {showEarnings && (
+        <div style={{
+          padding: '14px 16px', marginBottom: 16,
+          border: `1px solid ${COLOR.bone}`, borderRadius: 14,
+          background: COLOR.cream,
+        }}>
+          <div style={{ ...TYPE.eyebrow, marginBottom: 10 }}>This week</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 22 }}>
+            <div>
+              <div style={{ fontFamily: COLOR.serif, fontSize: 22, color: COLOR.forest, lineHeight: 1, letterSpacing: '-0.015em' }}>
+                £{Math.round(weeklyEarningsPence / 100).toLocaleString('en-GB')}
+              </div>
+              <div style={{ fontSize: 10, color: COLOR.taupe, marginTop: 5, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                Estimated
+              </div>
+            </div>
+            <div style={{ width: 1, height: 36, background: COLOR.bone }} />
+            <div>
+              <div style={{ fontFamily: COLOR.serif, fontSize: 22, color: COLOR.forest, lineHeight: 1, letterSpacing: '-0.015em' }}>
+                {myWeekCount}
+              </div>
+              <div style={{ fontSize: 10, color: COLOR.taupe, marginTop: 5, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                {myWeekCount === 1 ? 'Class' : 'Classes'}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Up next card */}
+      {upNext && (
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ ...TYPE.eyebrow, marginBottom: 10 }}>Up next</div>
+          <button
+            onClick={() => onClassClick?.(upNext.id)}
+            className="salus-btn"
+            style={{
+              display: 'flex', gap: 12, padding: '14px 16px',
+              background: COLOR.sand, borderRadius: 12,
+              border: 'none', cursor: 'pointer',
+              width: '100%', textAlign: 'left',
+              fontFamily: 'inherit',
+            }}
+          >
+            <div style={{
+              width: 3, background: classColor(upNext), borderRadius: 2,
+              alignSelf: 'stretch', minHeight: 38,
+            }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ ...TYPE.itemTitle }}>{upNext.type}</div>
+              <div style={{ fontSize: 12, color: COLOR.moss, marginTop: 4 }}>
+                {upNext.time} · {studioLabel(upNext.studio)}
+              </div>
+              {upNextCountdown && (
+                <div style={{ fontSize: 11, color: COLOR.coral, marginTop: 6, fontStyle: 'italic' }}>
+                  {upNextCountdown}
+                </div>
+              )}
+            </div>
+          </button>
+
+          {/* Rest of today's classes — condensed list */}
+          {myToday.length > 1 && (
+            <div style={{ marginTop: 8, paddingLeft: 15 }}>
+              {myToday.filter(c => c.id !== upNext.id).map(c => (
+                <button
+                  key={c.id}
+                  onClick={() => onClassClick?.(c.id)}
+                  className="salus-btn"
+                  style={{
+                    display: 'flex', justifyContent: 'space-between',
+                    width: '100%', textAlign: 'left',
+                    padding: '8px 0',
+                    borderTop: `1px solid ${COLOR.bone}`,
+                    background: 'transparent', border: 'none',
+                    fontSize: 13, color: COLOR.brown,
+                    fontFamily: 'inherit', cursor: 'pointer',
+                  }}
+                >
+                  <span>{c.type}</span>
+                  <span style={{ color: COLOR.taupe, fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>{c.time}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Today's classes when no "up next" (all past, or none today) */}
+      {!upNext && myToday.length > 0 && (
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ ...TYPE.eyebrow, marginBottom: 10 }}>Today</div>
+          <div style={{
+            padding: '14px 16px', background: COLOR.sand, borderRadius: 12,
+          }}>
+            <div style={{ fontSize: 13, color: COLOR.brown, fontStyle: 'italic' }}>
+              All {myToday.length} {myToday.length === 1 ? 'class is' : 'classes are'} done. Nice.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Birthdays */}
+      {birthdaysToday.map(u => (
+        <div key={u.id} style={{
+          padding: '12px 14px', marginBottom: 12,
+          background: '#f0ede0', borderRadius: 10,
+          fontSize: 13, color: COLOR.brown, lineHeight: 1.5,
+          display: 'flex', alignItems: 'center', gap: 10,
+        }}>
+          <span style={{ fontSize: 18 }}>🎉</span>
+          <span>It's <strong>{u.name?.split(' ')[0]}</strong>'s birthday today — say hi when you see {u.name?.split(' ')[0]}.</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestCover, onHireStudio, onClaim, onExpressInterest, onViewAllCover, onViewChat, onCreateTask, onOpenTask, onOpenAllTasks, onOpenTour, onCreateMaintenance, onOpenMaintenance, onCreateFeedback, onOpenFeedback, onMarkBroadcastRead }) {
   const now = new Date();
   const hour = now.getHours();
@@ -9058,18 +9301,13 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
 
   return (
     <div style={styles.homeContainer}>
-      {/* Greeting */}
-      <div style={styles.homeGreeting}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 6 }}>
-              {todayStr}
-            </div>
-            <h1 style={styles.homeH1}>{greeting}, {firstName}</h1>
-            <p style={styles.homeGreetSub}>{classesToday.length} {classesToday.length === 1 ? 'class' : 'classes'} today</p>
-          </div>
-        </div>
-      </div>
+      {/* My Day hero — replaces the old greeting */}
+      <MyDayHero
+        data={data}
+        currentUser={currentUser}
+        isManager={isManager}
+        onClassClick={onClassClick}
+      />
 
       {/* Manager broadcasts — urgent comms */}
       <BroadcastBanner
