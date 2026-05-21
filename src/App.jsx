@@ -10720,7 +10720,7 @@ function DayView({ items, allItems, dayOffset, setDayOffset, getDate, getTime, i
 
       <ScheduleStatsRow coverCount={coverCount} totalCount={totalCount} totalLabel={totalLabel} />
 
-      {!hideFilters && <ScheduleFilterRow filter={filter} setFilter={setFilter} isManager={isManager} />}
+      {!hideFilters && <ScheduleFilterRow filter={filter} setFilter={setFilter} isManager={isManager} coverCount={coverCount} />}
 
       <div>
         {dayItems.length === 0 ? (
@@ -10792,7 +10792,7 @@ function WeekViewBody({ items, allItems, weekOffset, setWeekOffset, getDate, get
     <>
       <ScheduleWeekNav weekStart={weekStart} weekOffset={weekOffset} setWeekOffset={setWeekOffset} />
       <ScheduleStatsRow coverCount={totalCover} totalCount={totalCount} totalLabel={totalLabel} />
-      {!hideFilters && <ScheduleFilterRow filter={filter} setFilter={setFilter} isManager={isManager} />}
+      {!hideFilters && <ScheduleFilterRow filter={filter} setFilter={setFilter} isManager={isManager} coverCount={totalCover} />}
 
       {weekDates.map((d, dayIdx) => {
         const dayItems = byDay[dayIdx];
@@ -11026,47 +11026,31 @@ function ScheduleStatsRow({ coverCount, totalCount, totalLabel }) {
   if (coverCount === 0 && totalCount === 0) return null;
   return (
     <div style={{
-      display: 'flex', alignItems: 'baseline', gap: 20,
-      padding: '0 4px 18px',
+      padding: '0 4px 14px',
+      fontFamily: '"Playfair Display", serif',
+      fontSize: 14, fontStyle: 'italic',
+      color: '#5c4a38',
+      letterSpacing: '-0.005em',
+      display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap',
     }}>
-      <div>
-        <div style={{
-          fontFamily: '"Playfair Display", serif',
-          fontSize: 28, fontWeight: 400,
-          color: coverCount > 0 ? '#c8442a' : '#1a2620',
-          lineHeight: 1, letterSpacing: '-0.02em',
-        }}>
-          {totalCount}
-        </div>
-        <div style={{
-          fontSize: 10, color: '#a59478', marginTop: 6,
-          fontWeight: 500, textTransform: 'uppercase', letterSpacing: 2,
-        }}>
-          {totalLabel}
-        </div>
-      </div>
+      <span>{totalCount} {totalLabel}</span>
       {coverCount > 0 && (
-        <div>
-          <div style={{
-            fontFamily: '"Playfair Display", serif',
-            fontSize: 28, fontWeight: 400, color: '#c8442a',
-            lineHeight: 1, letterSpacing: '-0.02em',
-          }}>
-            {coverCount}
-          </div>
-          <div style={{
-            fontSize: 10, color: '#c8442a', marginTop: 6,
-            fontWeight: 500, textTransform: 'uppercase', letterSpacing: 2,
-          }}>
-            {coverCount === 1 ? 'needs cover' : 'need cover'}
-          </div>
-        </div>
+        <>
+          <span style={{ color: '#a59478', fontStyle: 'normal' }}>·</span>
+          <span style={{ color: '#c8442a' }}>
+            {coverCount} {coverCount === 1 ? 'needs cover' : 'need cover'}
+          </span>
+        </>
       )}
     </div>
   );
 }
 
-function ScheduleFilterRow({ filter, setFilter, isManager }) {
+function ScheduleFilterRow({ filter, setFilter, isManager, coverCount = 0 }) {
+  // Progressive disclosure — only show this row when there's actually something to filter on.
+  // Hide if there are no cover items AND the user is a manager (so they don't have a Mine button either).
+  if (coverCount === 0 && isManager) return null;
+
   return (
     <div style={{
       display: 'flex', gap: 22, padding: '0 4px 8px',
@@ -11088,20 +11072,22 @@ function ScheduleFilterRow({ filter, setFilter, isManager }) {
       >
         All
       </button>
-      <button
-        onClick={() => setFilter('needsCover')}
-        className="salus-btn"
-        style={{
-          padding: '6px 0', background: 'transparent', border: 'none',
-          borderBottom: filter === 'needsCover' ? '1.5px solid #c8442a' : '1.5px solid transparent',
-          fontSize: 11, fontWeight: filter === 'needsCover' ? 600 : 500,
-          color: filter === 'needsCover' ? '#c8442a' : '#a59478',
-          letterSpacing: '0.08em', textTransform: 'uppercase',
-          fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap',
-        }}
-      >
-        Needs cover
-      </button>
+      {coverCount > 0 && (
+        <button
+          onClick={() => setFilter('needsCover')}
+          className="salus-btn"
+          style={{
+            padding: '6px 0', background: 'transparent', border: 'none',
+            borderBottom: filter === 'needsCover' ? '1.5px solid #c8442a' : '1.5px solid transparent',
+            fontSize: 11, fontWeight: filter === 'needsCover' ? 600 : 500,
+            color: filter === 'needsCover' ? '#c8442a' : '#a59478',
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap',
+          }}
+        >
+          Needs cover ({coverCount})
+        </button>
+      )}
       {!isManager && (
         <button
           onClick={() => setFilter('mine')}
@@ -16698,25 +16684,25 @@ const styles = {
   },
   fohStatNumber: { fontSize: 22, fontWeight: 700, color: '#5c4a38', lineHeight: 1 },
   fohStatLabel: { fontSize: 10, color: '#7a8270', fontWeight: 600, marginTop: 4, textTransform: 'uppercase', letterSpacing: 0.4 },
-  fohDayBlock: { padding: '20px 0 4px' },
+  fohDayBlock: { padding: '18px 0 2px' },
   fohDayHeader: {
     display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 4,
-    padding: '0 4px 10px', background: 'transparent',
+    padding: '0 4px 8px', background: 'transparent',
     borderBottom: '1px solid #efe7d2',
   },
   fohDayHeaderToday: { background: 'transparent' },
   fohDayName: {
-    fontFamily: '"Playfair Display", serif',
-    fontSize: 20, fontWeight: 400, color: '#1a2620',
-    letterSpacing: '-0.01em',
+    fontFamily: "'Inter', sans-serif",
+    fontSize: 11, fontWeight: 600, color: '#1a2620',
+    letterSpacing: '0.12em', textTransform: 'uppercase',
   },
   fohDayDate: {
-    fontSize: 11, color: '#a59478', letterSpacing: '0.05em',
+    fontSize: 10, color: '#a59478', letterSpacing: '0.08em',
     textTransform: 'uppercase', fontWeight: 500,
   },
   fohTodayBadge: {
-    background: 'transparent', color: '#c8442a', fontSize: 10, fontWeight: 600,
-    padding: 0, borderRadius: 0, textTransform: 'uppercase', letterSpacing: 2,
+    background: 'transparent', color: '#c8442a', fontSize: 9, fontWeight: 600,
+    padding: 0, borderRadius: 0, textTransform: 'uppercase', letterSpacing: 1.8,
     marginLeft: 'auto',
   },
   fohShiftList: { display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 6 },
