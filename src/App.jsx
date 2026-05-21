@@ -1764,27 +1764,12 @@ export default function SalusStaff() {
             onOpenDm={(userId) => setModal({ type: 'dm', otherUserId: userId })}
           />
         )}
-        {tab === 'stats' && (
-          isManager
-            ? <ManagerStats data={data} onShowInvoices={() => setModal({ type: 'invoices' })} />
-            : <CoachStats data={data} currentUser={currentUser} />
-        )}
-        {tab === 'admin' && (
-          <AdminPage
+        {tab === 'cover' && (
+          <CoverPage
             data={data}
             currentUser={currentUser}
             isManager={isManager}
-            emailIntegration={data.emailIntegration}
-            sessionToken={session?.access_token}
-            onCreate={() => setModal({ type: 'createBooking' })}
-            onOpenBooking={(id) => setModal({ type: 'bookingDetail', id })}
-            onConnectGmail={handleConnectGmail}
-            onCreateTask={createTask}
-            onReload={reloadData}
-            onShowExpenses={() => setModal({ type: 'expenses' })}
-            onShowFlows={() => setModal({ type: 'flows' })}
-            onShowTimeOff={() => setModal({ type: 'timeOff' })}
-            onShowInvoices={() => setModal({ type: 'invoices' })}
+            onClassClick={(id) => setModal({ type: 'classDetail', classId: id })}
           />
         )}
         {tab === 'me' && (
@@ -1796,8 +1781,10 @@ export default function SalusStaff() {
             viewAsStaff={viewAsStaff}
             onToggleViewAsStaff={toggleViewAsStaff}
             emailIntegration={data.emailIntegration}
+            sessionToken={session?.access_token}
             onOpenSettings={() => setModal({ type: 'settings' })}
             onShowInvoices={() => setModal({ type: 'invoices' })}
+            onShowStaffInvoices={() => setModal({ type: 'staffInvoices' })}
             onShowTimeOff={() => setModal({ type: 'timeOff' })}
             onShowTeam={() => setModal({ type: 'team' })}
             onShowExpenses={() => setModal({ type: 'expenses' })}
@@ -1805,6 +1792,10 @@ export default function SalusStaff() {
             onSignOut={handleLogout}
             onConnectGmail={handleConnectGmail}
             onDisconnectGmail={handleDisconnectGmail}
+            onCreate={() => setModal({ type: 'createBooking' })}
+            onOpenBooking={(id) => setModal({ type: 'bookingDetail', id })}
+            onCreateTask={createTask}
+            onReload={reloadData}
           />
         )}
       </main>
@@ -1812,7 +1803,7 @@ export default function SalusStaff() {
       {/* Bottom nav */}
       <nav style={styles.bottomNav}>
         <BottomTab icon={HomeIcon} label="Home" active={tab==='home'} onClick={() => setTab('home')} />
-        <BottomTab icon={Shield} label="Admin" active={tab==='admin'} onClick={() => setTab('admin')} />
+        <BottomTab icon={CoverIcon} label="Cover" active={tab==='cover'} onClick={() => setTab('cover')} badge={data.coverRequests.filter(r => r.status === 'open' && r.requestedBy !== currentUser.id).length} />
         <BottomTab icon={Calendar} label="Schedule" active={tab==='timetable'} onClick={() => setTab('timetable')} />
         <BottomTab icon={MessageSquare} label="Chat" active={tab==='chat'} onClick={() => setTab('chat')} badge={chatUnread + dmUnread} />
         <BottomTab icon={UserIcon} label="Me" active={tab==='me'} onClick={() => setTab('me')} />
@@ -2151,6 +2142,13 @@ export default function SalusStaff() {
           sessionToken={session?.access_token}
           onClose={() => setModal(null)}
           onReload={reloadData}
+        />
+      )}
+      {modal?.type === 'staffInvoices' && (
+        <StaffInvoicesModal
+          data={data}
+          currentUser={currentUser}
+          onClose={() => setModal(null)}
         />
       )}
       {modal?.type === 'flows' && (
@@ -3932,15 +3930,17 @@ function generateRecurringDates(startIso, endIso, days /* 0=Mon..6=Sun */) {
 // ─── StaffAdminPage — your personal admin tools ──────────────────────────
 // Calendar & email integrations · Expenses · Flows · Time off.
 // No Studio Bookings (that's a manager concern).
-function StaffAdminPage({ data, currentUser, emailIntegration, onConnectGmail, onShowExpenses, onShowFlows, onShowTimeOff }) {
-  return (
-    <div style={styles.homeContainer}>
-      <PageHeader
-        eyebrow="Your tools"
-        title="Admin"
-        subtitle="Your personal admin — calendar, inbox, expenses, time off."
-        compact
-      />
+function StaffAdminPage({ data, currentUser, emailIntegration, onConnectGmail, onShowExpenses, onShowFlows, onShowTimeOff, onShowStaffInvoices, embedded }) {
+  const inner = (
+    <>
+      {!embedded && (
+        <PageHeader
+          eyebrow="Your tools"
+          title="Admin"
+          subtitle="Your personal admin — calendar, inbox, expenses, time off."
+          compact
+        />
+      )}
 
       {/* Integrations */}
       <SectionLabel>Integrations</SectionLabel>
@@ -4036,6 +4036,30 @@ function StaffAdminPage({ data, currentUser, emailIntegration, onConnectGmail, o
       {/* Personal admin tools */}
       <SectionLabel>Personal admin</SectionLabel>
       <div style={styles.meActionsList}>
+        {(() => {
+          // Compute this month's invoice preview for the row subtitle
+          const now = new Date();
+          const monthStartIso = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+          const monthEndIso = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+          const myMonth = (data.classes || []).filter(c =>
+            c.coachId === currentUser.id && c.date >= monthStartIso && c.date <= monthEndIso
+          );
+          const rate = currentUser.sessionRatePence || 3000;
+          const monthTotal = (rate * myMonth.length) / 100;
+          const monthLabel = now.toLocaleDateString('en-GB', { month: 'long' });
+          return (
+            <button onClick={onShowStaffInvoices} className="salus-btn" style={styles.meActionRow}>
+              <FileText size={18} color="#5c4a38" />
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 14, color: '#1a2620' }}>Invoices</div>
+                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
+                  {monthLabel}: {myMonth.length} {myMonth.length === 1 ? 'class' : 'classes'} · £{monthTotal.toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                </div>
+              </div>
+              <ChevronRight size={16} color="#a59478" />
+            </button>
+          );
+        })()}
         <button onClick={onShowExpenses} className="salus-btn" style={styles.meActionRow}>
           <FileText size={18} color="#5c4a38" />
           <div style={{ flex: 1, textAlign: 'left' }}>
@@ -4065,11 +4089,12 @@ function StaffAdminPage({ data, currentUser, emailIntegration, onConnectGmail, o
           <ChevronRight size={16} color="#a59478" />
         </button>
       </div>
-    </div>
+    </>
   );
+  return embedded ? inner : <div style={styles.homeContainer}>{inner}</div>;
 }
 
-function AdminPage({ data, currentUser, isManager, emailIntegration, sessionToken, onCreate, onOpenBooking, onConnectGmail, onCreateTask, onReload, onShowExpenses, onShowFlows, onShowTimeOff, onShowInvoices }) {
+function AdminPage({ data, currentUser, isManager, emailIntegration, sessionToken, onCreate, onOpenBooking, onConnectGmail, onCreateTask, onReload, onShowExpenses, onShowFlows, onShowTimeOff, onShowInvoices, onShowStaffInvoices, embedded }) {
   // Non-managers see a simplified personal admin — focused on their own tools, not running the studio.
   if (!isManager) {
     return (
@@ -4081,6 +4106,8 @@ function AdminPage({ data, currentUser, isManager, emailIntegration, sessionToke
         onShowExpenses={onShowExpenses}
         onShowFlows={onShowFlows}
         onShowTimeOff={onShowTimeOff}
+        onShowStaffInvoices={onShowStaffInvoices}
+        embedded={embedded}
       />
     );
   }
@@ -4089,8 +4116,11 @@ function AdminPage({ data, currentUser, isManager, emailIntegration, sessionToke
   const [section, setSection] = useState(canSeeAdminSections ? 'reports' : 'bookings');
   const [broadcastOpen, setBroadcastOpen] = useState(false);
 
+  const Wrapper = embedded ? 'div' : 'div';
+  const wrapperStyle = embedded ? {} : styles.homeContainer;
+
   return (
-    <div style={styles.homeContainer}>
+    <Wrapper style={wrapperStyle}>
       {/* Section tabs */}
       <div style={styles.adminTabRow}>
         <button onClick={() => setSection('reports')} className="salus-btn"
@@ -4222,7 +4252,7 @@ function AdminPage({ data, currentUser, isManager, emailIntegration, sessionToke
           onSent={() => { setBroadcastOpen(false); onReload?.(); }}
         />
       )}
-    </div>
+    </Wrapper>
   );
 }
 
@@ -7872,6 +7902,243 @@ function exportExpensesCsv(expenses, filter, taxYearStartIso, monthStartIso, cur
 }
 
 // ─── ExpensesModal — full-screen wrapper around ExpensesPage ─────────────
+// ─── StaffInvoicesModal — view-only earnings breakdown ──────────────────
+// Coaches see what they're owed for the period. No edit, no generate — just
+// a clean breakdown they can save/share with a manager or accountant.
+function StaffInvoicesModal({ data, currentUser, onClose }) {
+  const [period, setPeriod] = useState('this_month');
+
+  const now = new Date();
+  const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const thisMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+
+  // UK tax year (6 April → 5 April)
+  const taxYearStart = (() => {
+    const y = now.getFullYear();
+    const aprilSixth = new Date(y, 3, 6);
+    return now < aprilSixth ? new Date(y - 1, 3, 6) : aprilSixth;
+  })();
+  const taxYearEnd = new Date(taxYearStart.getFullYear() + 1, 3, 5);
+
+  const toIso = d => d.toISOString().slice(0, 10);
+
+  const range = (() => {
+    if (period === 'this_month') return { start: toIso(thisMonthStart), end: toIso(thisMonthEnd), label: thisMonthStart.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) };
+    if (period === 'last_month') return { start: toIso(lastMonthStart), end: toIso(lastMonthEnd), label: lastMonthStart.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) };
+    return { start: toIso(taxYearStart), end: toIso(taxYearEnd), label: `Tax year ${taxYearStart.getFullYear()}/${String(taxYearStart.getFullYear() + 1).slice(-2)}` };
+  })();
+
+  const myClasses = data.classes
+    .filter(c => c.coachId === currentUser.id && c.date >= range.start && c.date <= range.end)
+    .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+
+  const rate = currentUser.sessionRatePence || 3000;
+  const totalPence = rate * myClasses.length;
+
+  // Group by week for the list
+  const byWeek = {};
+  myClasses.forEach(c => {
+    const d = new Date(c.date);
+    const dow = (d.getDay() + 6) % 7;
+    const mon = new Date(d); mon.setDate(d.getDate() - dow);
+    const weekKey = toIso(mon);
+    if (!byWeek[weekKey]) byWeek[weekKey] = [];
+    byWeek[weekKey].push(c);
+  });
+  const weekKeys = Object.keys(byWeek).sort();
+
+  const fmt = (pence) => `£${(pence / 100).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const exportCsv = () => {
+    const rows = [['Date', 'Time', 'Class', 'Studio', 'Rate (£)', 'Amount (£)']];
+    myClasses.forEach(c => {
+      rows.push([
+        c.date,
+        c.time,
+        c.type,
+        c.studio === 'reformer' ? 'Reformer studio' : c.studio === 'hybrid' ? 'Hybrid studio' : (c.studio || ''),
+        (rate / 100).toFixed(2),
+        (rate / 100).toFixed(2),
+      ]);
+    });
+    rows.push(['', '', '', '', 'Total', (totalPence / 100).toFixed(2)]);
+    const csv = rows.map(r => r.map(cell => {
+      const s = String(cell ?? '');
+      return s.includes(',') || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s;
+    }).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const name = (currentUser.name || 'invoice').toLowerCase().replace(/[^a-z0-9]/g, '-');
+    a.download = `${name}-invoice-${period}-${todayIso}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  return createPortal(
+    <>
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, background: 'rgba(26, 38, 32, 0.55)', zIndex: 9998,
+        touchAction: 'none',
+      }} />
+      <div style={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        background: '#fffdf7', zIndex: 9999,
+        display: 'flex', flexDirection: 'column',
+      }}>
+        <ModalHeader
+          eyebrow="Personal"
+          title="Your invoices"
+          subtitle="View what you're owed for sessions you've taught."
+          onClose={onClose}
+        />
+        <ModalBody>
+          {/* Period tabs */}
+          <div style={{
+            display: 'flex', gap: 22, padding: '0 4px 8px',
+            borderBottom: '1px solid #efe7d2', marginBottom: 18,
+          }}>
+            {[
+              ['this_month', 'This month'],
+              ['last_month', 'Last month'],
+              ['tax_year', 'Tax year'],
+            ].map(([key, label]) => {
+              const isActive = period === key;
+              return (
+                <button key={key}
+                  onClick={() => setPeriod(key)}
+                  className="salus-btn"
+                  style={{
+                    padding: '6px 0', background: 'transparent', border: 'none',
+                    borderBottom: isActive ? '1.5px solid #1a2620' : '1.5px solid transparent',
+                    fontSize: 11, fontWeight: isActive ? 600 : 500,
+                    color: isActive ? '#1a2620' : '#a59478',
+                    letterSpacing: '0.08em', textTransform: 'uppercase',
+                    fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap',
+                  }}>
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Hero stats card */}
+          <div style={{
+            padding: '20px 22px', marginBottom: 22,
+            background: '#fffdf7', border: '1px solid #efe7d2',
+            borderRadius: 14,
+          }}>
+            <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 8 }}>
+              {range.label}
+            </div>
+            <div style={{
+              fontFamily: '"Playfair Display", Georgia, serif',
+              fontSize: 32, fontWeight: 400, color: '#1a2620',
+              letterSpacing: '-0.015em', lineHeight: 1.1,
+            }}>
+              {fmt(totalPence)}
+            </div>
+            <div style={{ fontSize: 13, color: '#7a8270', marginTop: 6, fontStyle: 'italic', fontFamily: '"Playfair Display", Georgia, serif' }}>
+              {myClasses.length} {myClasses.length === 1 ? 'class' : 'classes'} · {fmt(rate)} per session
+            </div>
+          </div>
+
+          {/* Classes by week */}
+          {myClasses.length === 0 ? (
+            <EmptyState sub="Once you teach a class in this period, it'll appear here.">
+              No classes in this period.
+            </EmptyState>
+          ) : (
+            weekKeys.map(weekKey => {
+              const weekClasses = byWeek[weekKey];
+              const weekTotal = rate * weekClasses.length;
+              const monDate = new Date(weekKey);
+              const sunDate = new Date(monDate); sunDate.setDate(sunDate.getDate() + 6);
+              const sameMonth = monDate.getMonth() === sunDate.getMonth();
+              const weekLabel = sameMonth
+                ? `${monDate.getDate()} – ${sunDate.getDate()} ${sunDate.toLocaleDateString('en-GB', { month: 'short' })}`
+                : `${monDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} – ${sunDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`;
+
+              return (
+                <div key={weekKey} style={{ marginBottom: 22 }}>
+                  <SectionLabel>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                      <span>{weekLabel}</span>
+                      <span style={{ fontSize: 11, color: '#a59478', fontStyle: 'normal', fontFamily: "'Inter', sans-serif", fontVariantNumeric: 'tabular-nums' }}>
+                        {fmt(weekTotal)}
+                      </span>
+                    </div>
+                  </SectionLabel>
+                  {weekClasses.map(c => {
+                    const dateLabel = new Date(c.date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+                    return (
+                      <div key={c.id} style={{
+                        display: 'flex', gap: 12, padding: '12px 4px',
+                        borderBottom: '1px solid #efe7d2',
+                        alignItems: 'center',
+                      }}>
+                        <div style={{ flexShrink: 0, minWidth: 110 }}>
+                          <div style={{ fontSize: 13, color: '#1a2620', fontWeight: 500 }}>{dateLabel}</div>
+                          <div style={{ fontSize: 11, color: '#a59478', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>{c.time}</div>
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{
+                            fontSize: 14, color: '#1a2620',
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }}>{c.type}</div>
+                        </div>
+                        <div style={{
+                          fontSize: 14, color: '#1a2620', fontVariantNumeric: 'tabular-nums',
+                          flexShrink: 0,
+                        }}>
+                          {fmt(rate)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })
+          )}
+
+          {myClasses.length > 0 && (
+            <div style={{
+              padding: '14px 16px', marginTop: 10,
+              background: '#f5f1e8', borderRadius: 12,
+              fontSize: 12, color: '#5c4a38', lineHeight: 1.5,
+            }}>
+              <strong>Note:</strong> rate shown is per the manager's setting (£{(rate / 100).toFixed(2)} per session).
+              Final amounts may differ — check with the studio for adjustments, holiday pay, or special rates.
+            </div>
+          )}
+        </ModalBody>
+        <ModalFooter>
+          <button onClick={exportCsv} disabled={myClasses.length === 0} className="salus-btn"
+            style={{
+              width: '100%', padding: '14px 22px',
+              background: '#1a2620', color: '#fffdf7',
+              border: 'none', borderRadius: 999,
+              fontSize: 13, letterSpacing: '0.08em', textTransform: 'uppercase',
+              fontFamily: 'inherit', cursor: myClasses.length === 0 ? 'not-allowed' : 'pointer',
+              fontWeight: 500,
+              opacity: myClasses.length === 0 ? 0.4 : 1,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            }}
+          >
+            Download as CSV
+          </button>
+        </ModalFooter>
+      </div>
+    </>
+  , document.body);
+}
+
 function ExpensesModal({ data, currentUser, sessionToken, onClose, onReload }) {
   return createPortal(
     <>
@@ -11219,13 +11486,186 @@ function CoverHomeCard({ req, users, interested, urgent, pending, onClick, onCla
 // ──────────────────────────────────────────────────────────────────────────────
 
 
-// ─── StaffScheduleView — schedule built around cover ─────────────────────
+// ─── CoverPage — top-level cover board (own tab in bottom nav) ──────────
+// Shows every open cover request, sorted by date. The heart of the app.
+function CoverPage({ data, currentUser, isManager, onClassClick }) {
+  // Open covers, excluding ones the user posted themselves
+  const openCovers = (data.coverRequests || [])
+    .filter(r => r.status === 'open' && r.requestedBy !== currentUser.id)
+    .map(r => ({ ...r, cls: data.classes.find(c => c.id === r.classId) }))
+    .filter(r => r.cls)
+    .sort((a, b) => (a.cls.date + ' ' + a.cls.time).localeCompare(b.cls.date + ' ' + b.cls.time));
+
+  // Pending (manager-approval) covers
+  const pendingForManager = isManager
+    ? (data.coverRequests || [])
+        .filter(r => r.status === 'pending')
+        .map(r => ({ ...r, cls: data.classes.find(c => c.id === r.classId) }))
+        .filter(r => r.cls)
+        .sort((a, b) => (a.cls.date + ' ' + a.cls.time).localeCompare(b.cls.date + ' ' + b.cls.time))
+    : [];
+
+  // Your own open requests (so you can track them)
+  const myOpenRequests = (data.coverRequests || [])
+    .filter(r => r.status === 'open' && r.requestedBy === currentUser.id)
+    .map(r => ({ ...r, cls: data.classes.find(c => c.id === r.classId) }))
+    .filter(r => r.cls)
+    .sort((a, b) => (a.cls.date + ' ' + a.cls.time).localeCompare(b.cls.date + ' ' + b.cls.time));
+
+  const classColor = (cls) => {
+    const meta = (CLASS_TYPES && CLASS_TYPES[cls.type]) || {};
+    return meta.color || COLOR.amber;
+  };
+
+  const studioLabel = (s) => {
+    if (s === 'reformer') return 'Reformer studio';
+    if (s === 'hybrid') return 'Hybrid studio';
+    return 'Studio';
+  };
+
+  const coachName = (id) => {
+    const u = data.users.find(u => u.id === id);
+    return u?.name?.split(' ')[0] || '';
+  };
+
+  const dateLabel = (iso) => {
+    const d = new Date(iso);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    if (d.toISOString().slice(0,10) === today.toISOString().slice(0,10)) return 'Today';
+    if (d.toISOString().slice(0,10) === tomorrow.toISOString().slice(0,10)) return 'Tomorrow';
+    return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  };
+
+  const renderCoverCard = (req, opts = {}) => {
+    const c = req.cls;
+    const requesterFirstName = coachName(req.requestedBy);
+    const isOwn = opts.isOwn;
+    return (
+      <button
+        key={req.id}
+        onClick={() => onClassClick?.(c.id)}
+        className="salus-btn"
+        style={{
+          display: 'flex', gap: 14, padding: '14px 16px',
+          background: isOwn ? '#fffdf7' : '#fef0ec',
+          border: `1px solid ${isOwn ? '#efe7d2' : '#f0c8b8'}`,
+          borderRadius: 12,
+          marginBottom: 8,
+          cursor: 'pointer', textAlign: 'left',
+          width: '100%', fontFamily: 'inherit',
+        }}
+      >
+        <div style={{ flexShrink: 0, minWidth: 78 }}>
+          <div style={{ fontSize: 11, color: '#c8442a', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+            {dateLabel(c.date)}
+          </div>
+          <div style={{
+            fontFamily: '"Playfair Display", Georgia, serif',
+            fontSize: 18, fontWeight: 400, color: '#1a2620',
+            lineHeight: 1, marginTop: 4, fontVariantNumeric: 'tabular-nums',
+          }}>
+            {c.time}
+          </div>
+          {c.durationMin ? (
+            <div style={{ fontSize: 10, color: '#a59478', marginTop: 4, letterSpacing: '0.05em' }}>
+              {c.durationMin} min
+            </div>
+          ) : null}
+        </div>
+
+        <div style={{ width: 3, background: classColor(c), borderRadius: 2, alignSelf: 'stretch', minHeight: 36 }} />
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontFamily: '"Playfair Display", Georgia, serif',
+            fontSize: 15, fontWeight: 500, color: '#1a2620', letterSpacing: '-0.005em',
+          }}>
+            {c.type}
+          </div>
+          <div style={{ fontSize: 12, color: '#7a8270', marginTop: 4 }}>
+            {studioLabel(c.studio)}
+          </div>
+          <div style={{
+            fontSize: 11, color: '#c8442a', marginTop: 6,
+            fontWeight: 500, letterSpacing: '0.05em',
+          }}>
+            {isOwn
+              ? 'Your request · awaiting someone to cover'
+              : `${requesterFirstName || 'Someone'} needs cover — tap to take it`}
+          </div>
+        </div>
+      </button>
+    );
+  };
+
+  return (
+    <div style={styles.homeContainer}>
+      <PageHeader
+        eyebrow="Help your team"
+        title="Cover board"
+        subtitle="Classes that need someone to step in."
+        compact
+      />
+
+      {/* Manager's pending approval queue */}
+      {isManager && pendingForManager.length > 0 && (
+        <div style={{ marginBottom: 28 }}>
+          <SectionLabel>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+              <span>Awaiting your approval</span>
+              <span style={{ ...TYPE.metaSmall, fontStyle: 'normal' }}>{pendingForManager.length}</span>
+            </div>
+          </SectionLabel>
+          {pendingForManager.map(req => renderCoverCard(req))}
+        </div>
+      )}
+
+      {/* Open covers — pickup-able */}
+      <div style={{ marginBottom: 28 }}>
+        <SectionLabel>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <span>Available to cover</span>
+            <span style={{ ...TYPE.metaSmall, fontStyle: 'normal' }}>{openCovers.length}</span>
+          </div>
+        </SectionLabel>
+        {openCovers.length === 0 ? (
+          <EmptyState sub="Nice — everyone's accounted for.">
+            No cover needed right now.
+          </EmptyState>
+        ) : (
+          openCovers.map(req => renderCoverCard(req))
+        )}
+      </div>
+
+      {/* Your own open requests */}
+      {myOpenRequests.length > 0 && (
+        <div style={{ marginBottom: 28 }}>
+          <SectionLabel>Your open requests</SectionLabel>
+          {myOpenRequests.map(req => renderCoverCard(req, { isOwn: true }))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ─── StaffScheduleView — editorial schedule, cover-aware ────────────────
+// Combines the patterns Luke liked:
+//   • Contextual greeting line ("3 classes · Karis needs cover Wednesday")
+//   • Week-strip day-picker showing dots for busy/cover days at a glance
+//   • Vertical status bars on class rows (coral=cover, forest=yours, taupe=others)
+//   • Editorial day section headers (Playfair, restrained)
+//   • Pinned cover-needed cards stand out from the timeline of regular classes
 // Three views:
 //   • Mine — just your own classes (default)
-//   • Everyone — all classes, yours emphasised — pick up cover by tapping
-//   • Cover board — only classes that need cover, sorted by date
+//   • Everyone — all classes, yours emphasised
+//   • Cover board lives in its own bottom-nav tab.
+
 function StaffScheduleView({ data, currentUser, onClassClick }) {
-  const [view, setView] = useState('mine'); // 'mine' | 'everyone' | 'cover'
+  const [view, setView] = useState('mine'); // 'mine' | 'everyone'
   const [weekOffset, setWeekOffset] = useState(0);
 
   // Week math — Monday start (UK convention)
@@ -11244,18 +11684,37 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
   const weekStartIso = toIso(weekDates[0]);
   const weekEndIso = toIso(weekDates[6]);
 
-  // Open covers (status='open') excluding own
-  const openCovers = (data.coverRequests || [])
+  // Open cover requests (excluding own)
+  const openCoversAll = (data.coverRequests || [])
     .filter(r => r.status === 'open' && r.requestedBy !== currentUser.id)
     .map(r => ({ ...r, cls: data.classes.find(c => c.id === r.classId) }))
-    .filter(r => r.cls)
-    .sort((a, b) => (a.cls.date + ' ' + a.cls.time).localeCompare(b.cls.date + ' ' + b.cls.time));
+    .filter(r => r.cls);
 
-  const coverCount = openCovers.length;
+  const openCoversThisWeek = openCoversAll.filter(r =>
+    r.cls.date >= weekStartIso && r.cls.date <= weekEndIso
+  );
 
+  const myClassesThisWeek = data.classes.filter(c =>
+    c.coachId === currentUser.id && c.date >= weekStartIso && c.date <= weekEndIso
+  );
+
+  // Per-date metadata for the day strip
+  const dayMeta = {};
+  weekDates.forEach(d => { dayMeta[toIso(d)] = { mine: 0, others: 0, cover: 0 }; });
+  data.classes
+    .filter(c => c.date >= weekStartIso && c.date <= weekEndIso)
+    .forEach(c => {
+      const m = dayMeta[c.date];
+      if (!m) return;
+      if (c.coachId === currentUser.id) m.mine++;
+      else m.others++;
+      if (openCoversAll.some(r => r.cls.id === c.id)) m.cover++;
+    });
+
+  // Class accent color
   const classColor = (cls) => {
     const meta = (CLASS_TYPES && CLASS_TYPES[cls.type]) || {};
-    return meta.color || COLOR.amber;
+    return meta.color || '#c6926a';
   };
 
   const studioLabel = (s) => {
@@ -11269,6 +11728,7 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
     return u?.name?.split(' ')[0] || '';
   };
 
+  // Range label
   const rangeLabel = (() => {
     const a = weekDates[0], b = weekDates[6];
     const sameMonth = a.getMonth() === b.getMonth();
@@ -11278,17 +11738,33 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
     return `${a.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} – ${b.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`;
   })();
 
-  const eyebrowLabel = weekOffset === 0 ? 'This week' : weekOffset === 1 ? 'Next week' : weekOffset === -1 ? 'Last week' : 'Week';
-
-  // Filter classes for the current view
-  const visibleClasses = (() => {
-    if (view === 'cover') {
-      return openCovers.map(r => r.cls);
-    }
-    const weekClasses = data.classes.filter(c => c.date >= weekStartIso && c.date <= weekEndIso);
+  // Status line (the "Hello Thomas, you have 2 assignments..." pattern)
+  const statusLineParts = (() => {
+    const parts = [];
     if (view === 'mine') {
-      return weekClasses.filter(c => c.coachId === currentUser.id);
+      const count = myClassesThisWeek.length;
+      if (count > 0) parts.push({ text: `${count} ${count === 1 ? 'class' : 'classes'}`, urgent: false });
+    } else {
+      const count = data.classes.filter(c => c.date >= weekStartIso && c.date <= weekEndIso).length;
+      if (count > 0) parts.push({ text: `${count} ${count === 1 ? 'class' : 'classes'}`, urgent: false });
     }
+
+    if (openCoversThisWeek.length > 0) {
+      const ids = [...new Set(openCoversThisWeek.map(r => r.requestedBy))];
+      const names = ids.map(id => coachName(id)).filter(Boolean);
+      let text;
+      if (names.length === 1) text = `${names[0]} needs cover`;
+      else if (names.length === 2) text = `${names[0]} and ${names[1]} need cover`;
+      else text = `${names.length} teammates need cover`;
+      parts.push({ text, urgent: true });
+    }
+    return parts;
+  })();
+
+  // Filter classes for the visible week + view
+  const visibleClasses = (() => {
+    const weekClasses = data.classes.filter(c => c.date >= weekStartIso && c.date <= weekEndIso);
+    if (view === 'mine') return weekClasses.filter(c => c.coachId === currentUser.id);
     return weekClasses;
   })();
 
@@ -11299,90 +11775,145 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
   });
   Object.keys(byDate).forEach(d => byDate[d].sort((a, b) => (a.time || '').localeCompare(b.time || '')));
 
-  const sortedDates = Object.keys(byDate).sort();
-  const datesToShow = view === 'cover' ? sortedDates : weekDates.map(toIso);
+  const eyebrowDate = weekOffset === 0
+    ? today.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
+    : rangeLabel;
 
   return (
     <>
       <PageHeader
-        eyebrow={view === 'cover' ? 'Help your team' : eyebrowLabel}
-        title={view === 'cover' ? 'Cover board' : 'Schedule'}
+        eyebrow={eyebrowDate}
+        title="Schedule"
         compact
       />
 
-      {/* View tabs — Mine / Everyone / Cover */}
+      {/* Contextual status line — the "Hello Thomas, you have..." pattern */}
+      {statusLineParts.length > 0 && (
+        <p style={{
+          fontFamily: '"Playfair Display", Georgia, serif',
+          fontSize: 14, color: '#7a8270', fontStyle: 'italic',
+          margin: 0, padding: '0 4px 18px',
+          lineHeight: 1.5, letterSpacing: '-0.005em',
+        }}>
+          {statusLineParts.map((p, i) => (
+            <React.Fragment key={i}>
+              {i > 0 && <span style={{ color: '#a59478', padding: '0 6px' }}>·</span>}
+              <span style={p.urgent ? { color: '#c8442a', fontStyle: 'normal', fontWeight: 500, fontFamily: "'Inter', sans-serif", fontSize: 12, letterSpacing: '0.02em' } : {}}>
+                {p.text}
+              </span>
+            </React.Fragment>
+          ))}
+        </p>
+      )}
+
+      {/* View tabs — Mine / Everyone */}
       <div style={{
-        display: 'flex', gap: 22, padding: '4px 4px 8px',
-        borderBottom: '1px solid #efe7d2', marginBottom: 16,
+        display: 'flex', gap: 22, padding: '0 4px 8px',
+        borderBottom: '1px solid #efe7d2', marginBottom: 18,
       }}>
-        {[
-          ['mine', 'Mine'],
-          ['everyone', 'Everyone'],
-          ['cover', `Cover${coverCount > 0 ? ` (${coverCount})` : ''}`],
-        ].map(([key, label]) => {
+        {[['mine', 'Mine'], ['everyone', 'Everyone']].map(([key, label]) => {
           const isActive = view === key;
-          const isCoverWithCount = key === 'cover' && coverCount > 0;
           return (
             <button key={key}
               onClick={() => setView(key)}
               className="salus-btn"
               style={{
                 padding: '6px 0', background: 'transparent', border: 'none',
-                borderBottom: isActive
-                  ? `1.5px solid ${isCoverWithCount ? '#c8442a' : '#1a2620'}`
-                  : '1.5px solid transparent',
+                borderBottom: isActive ? '1.5px solid #1a2620' : '1.5px solid transparent',
                 fontSize: 11, fontWeight: isActive ? 600 : 500,
-                color: isActive ? (isCoverWithCount ? '#c8442a' : '#1a2620') : (isCoverWithCount ? '#c8442a' : '#a59478'),
+                color: isActive ? '#1a2620' : '#a59478',
                 letterSpacing: '0.08em', textTransform: 'uppercase',
                 fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap',
-              }}
-            >
+              }}>
               {label}
             </button>
           );
         })}
       </div>
 
-      {/* Week nav — hidden on cover board */}
-      {view !== 'cover' && (
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '0 4px 18px',
+      {/* Day strip — week at a glance with dots for busy/cover days */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 4,
+        padding: '0 0 22px',
+      }}>
+        <button onClick={() => setWeekOffset(o => o - 1)} className="salus-btn" style={{
+          background: 'transparent', border: 'none', padding: '6px 4px',
+          color: '#5c4a38', cursor: 'pointer', fontFamily: 'inherit',
+          display: 'flex', alignItems: 'center', flexShrink: 0,
         }}>
-          <button onClick={() => setWeekOffset(o => o - 1)} className="salus-btn" style={{
-            background: 'transparent', border: 'none', padding: '6px 8px',
-            color: '#5c4a38', cursor: 'pointer', fontFamily: 'inherit',
-            display: 'flex', alignItems: 'center',
-          }}>
-            <ChevronLeft size={18} />
-          </button>
-          <button onClick={() => setWeekOffset(0)} className="salus-btn" style={{
-            background: 'transparent', border: 'none',
-            fontFamily: '"Playfair Display", Georgia, serif', fontSize: 16,
-            color: '#1a2620', letterSpacing: '-0.005em', cursor: 'pointer',
-            padding: '6px 12px',
-          }}>
-            {rangeLabel}
-          </button>
-          <button onClick={() => setWeekOffset(o => o + 1)} className="salus-btn" style={{
-            background: 'transparent', border: 'none', padding: '6px 8px',
-            color: '#5c4a38', cursor: 'pointer', fontFamily: 'inherit',
-            display: 'flex', alignItems: 'center',
-          }}>
-            <ChevronRight size={18} />
-          </button>
+          <ChevronLeft size={18} />
+        </button>
+
+        <div style={{
+          flex: 1,
+          display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)',
+          gap: 2,
+        }}>
+          {weekDates.map(d => {
+            const iso = toIso(d);
+            const isToday = iso === todayIso;
+            const m = dayMeta[iso] || { mine: 0, others: 0, cover: 0 };
+            const hasMine = m.mine > 0;
+            const hasCover = m.cover > 0;
+            const hasOthers = m.others > 0;
+            const dayShort = d.toLocaleDateString('en-GB', { weekday: 'short' }).slice(0, 3);
+            const dayNum = d.getDate();
+
+            return (
+              <div key={iso} style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center',
+                gap: 4, padding: '4px 0',
+              }}>
+                <div style={{
+                  fontSize: 9, color: '#a59478',
+                  letterSpacing: '0.1em', textTransform: 'uppercase',
+                  fontWeight: 500,
+                }}>
+                  {dayShort}
+                </div>
+                <div style={{
+                  width: 30, height: 30, borderRadius: 15,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: isToday ? '#1a2620' : 'transparent',
+                  color: isToday ? '#fffdf7' : '#1a2620',
+                  fontSize: 14, fontWeight: isToday ? 600 : 400,
+                  fontFamily: '"Playfair Display", Georgia, serif',
+                  fontVariantNumeric: 'tabular-nums',
+                  letterSpacing: '-0.01em',
+                }}>
+                  {dayNum}
+                </div>
+                <div style={{
+                  height: 4, display: 'flex', alignItems: 'center', gap: 2,
+                }}>
+                  {hasCover && <div style={{ width: 4, height: 4, borderRadius: 2, background: '#c8442a' }} />}
+                  {!hasCover && hasMine && <div style={{ width: 4, height: 4, borderRadius: 2, background: '#1a2620' }} />}
+                  {!hasMine && !hasCover && hasOthers && view === 'everyone' && (
+                    <div style={{ width: 4, height: 4, borderRadius: 2, background: '#d4cdb8' }} />
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
-      )}
+
+        <button onClick={() => setWeekOffset(o => o + 1)} className="salus-btn" style={{
+          background: 'transparent', border: 'none', padding: '6px 4px',
+          color: '#5c4a38', cursor: 'pointer', fontFamily: 'inherit',
+          display: 'flex', alignItems: 'center', flexShrink: 0,
+        }}>
+          <ChevronRight size={18} />
+        </button>
+      </div>
 
       {/* Jump to today */}
-      {view !== 'cover' && weekOffset !== 0 && (
+      {weekOffset !== 0 && (
         <button onClick={() => setWeekOffset(0)} className="salus-btn" style={{
           background: 'transparent', border: 'none',
           color: '#c8442a', fontSize: 11, fontWeight: 500,
           letterSpacing: '0.08em', textTransform: 'uppercase',
           fontFamily: 'inherit', cursor: 'pointer',
-          padding: '0 4px 14px',
-          textAlign: 'left',
+          padding: '0 4px 14px', textAlign: 'left',
         }}>
           ← Jump to this week
         </button>
@@ -11390,20 +11921,14 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
 
       {/* Body */}
       {visibleClasses.length === 0 ? (
-        <EmptyState sub={
-          view === 'cover' ? 'When a teammate needs cover, it shows up here.' :
-          view === 'mine'  ? 'A quiet week — enjoy.' :
-                             'Nothing on the studio schedule.'
-        }>
-          {view === 'cover' ? 'No cover needed right now.' :
-           view === 'mine'  ? 'No classes this week.' :
-                              'Empty week.'}
+        <EmptyState sub={view === 'mine' ? 'A quiet week — enjoy.' : 'Nothing on the studio schedule.'}>
+          {view === 'mine' ? 'No classes this week.' : 'Empty week.'}
         </EmptyState>
       ) : (
-        datesToShow.map(iso => {
+        weekDates.map(d => {
+          const iso = toIso(d);
           const dayClasses = byDate[iso] || [];
           if (dayClasses.length === 0) return null;
-          const d = new Date(iso);
           const isToday = iso === todayIso;
           const dayName = d.toLocaleDateString('en-GB', { weekday: 'long' });
           const dayNum = d.getDate();
@@ -11411,45 +11936,45 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
 
           return (
             <div key={iso} style={{ marginBottom: 28 }}>
+              {/* Day header — small caps, editorial */}
               <div style={{
-                display: 'flex', alignItems: 'baseline', gap: 10,
-                padding: '0 4px 12px',
-                borderBottom: '1px solid #efe7d2',
-                marginBottom: 12,
+                display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+                padding: '0 4px 14px',
               }}>
                 <div style={{
-                  fontFamily: '"Playfair Display", Georgia, serif',
-                  fontSize: 20, fontWeight: 400,
-                  color: isToday ? '#c8442a' : '#1a2620',
-                  letterSpacing: '-0.005em',
+                  fontSize: 11, color: isToday ? '#c8442a' : '#5c4a38',
+                  letterSpacing: '0.14em', textTransform: 'uppercase',
+                  fontWeight: 600,
                 }}>
-                  {dayName}
-                </div>
-                <div style={{
-                  fontSize: 11, color: '#a59478',
-                  letterSpacing: '0.08em', textTransform: 'uppercase',
-                }}>
-                  {dayNum} {monthAbbr}
+                  {dayName} <span style={{ color: '#a59478', fontWeight: 500, marginLeft: 4 }}>{dayNum} {monthAbbr}</span>
                 </div>
                 {isToday && (
                   <div style={{
-                    marginLeft: 'auto',
-                    fontSize: 10, color: '#c8442a', fontWeight: 600,
-                    letterSpacing: '0.12em', textTransform: 'uppercase',
+                    fontSize: 10, color: '#c8442a',
+                    letterSpacing: '0.14em', textTransform: 'uppercase',
+                    fontWeight: 600,
                   }}>
                     Today
                   </div>
                 )}
               </div>
 
-              {dayClasses.map(c => {
+              {/* Class rows — editorial timeline, no card backgrounds */}
+              {dayClasses.map((c, idx) => {
                 const isMine = c.coachId === currentUser.id;
-                const needsCover = (data.coverRequests || []).some(r =>
-                  r.classId === c.id && (r.status === 'open' || r.status === 'pending')
-                );
+                const needsCover = openCoversAll.some(r => r.cls.id === c.id);
                 const isDimmed = view === 'everyone' && !isMine && !needsCover;
-                const coverReq = (data.coverRequests || []).find(r => r.classId === c.id && r.status === 'open');
+                const coverReq = openCoversAll.find(r => r.cls.id === c.id);
                 const requesterFirstName = coverReq ? coachName(coverReq.requestedBy) : '';
+
+                // Vertical bar color reflects status (Image 7 right pattern)
+                const barColor = needsCover ? '#c8442a' :
+                                 isMine ? classColor(c) :
+                                 '#d4cdb8';
+
+                // Cover-needed rows get subtle background to draw attention
+                const rowBg = needsCover ? '#fef0ec' : 'transparent';
+                const isLast = idx === dayClasses.length - 1;
 
                 return (
                   <button
@@ -11457,40 +11982,55 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
                     onClick={() => onClassClick?.(c.id)}
                     className="salus-btn"
                     style={{
-                      display: 'flex', gap: 14, padding: '14px 16px',
-                      background: needsCover ? '#fef0ec' : '#fffdf7',
-                      border: `1px solid ${needsCover ? '#f0c8b8' : '#efe7d2'}`,
-                      borderRadius: 12,
-                      marginBottom: 8,
+                      display: 'flex', gap: 14, padding: '14px 14px',
+                      background: rowBg,
+                      border: 'none',
+                      borderBottom: isLast ? 'none' : '1px solid #efe7d2',
+                      borderRadius: needsCover ? 10 : 0,
+                      marginBottom: needsCover ? 4 : 0,
                       cursor: 'pointer', textAlign: 'left',
                       width: '100%', fontFamily: 'inherit',
-                      opacity: isDimmed ? 0.55 : 1,
-                    }}
-                  >
-                    <div style={{ flexShrink: 0, minWidth: 60 }}>
+                      opacity: isDimmed ? 0.5 : 1,
+                      transition: 'opacity 0.15s ease',
+                    }}>
+                    {/* Vertical status bar */}
+                    <div style={{
+                      width: needsCover ? 3 : 2,
+                      background: barColor,
+                      borderRadius: 2,
+                      alignSelf: 'stretch',
+                      minHeight: 42,
+                      flexShrink: 0,
+                    }} />
+
+                    {/* Time stacked (HH:MM + duration) */}
+                    <div style={{ flexShrink: 0, minWidth: 56, paddingTop: 2 }}>
                       <div style={{
                         fontFamily: '"Playfair Display", Georgia, serif',
-                        fontSize: 20, fontWeight: 400,
-                        color: '#1a2620', lineHeight: 1, fontVariantNumeric: 'tabular-nums',
+                        fontSize: 19, fontWeight: 400,
+                        color: '#1a2620', lineHeight: 1,
+                        fontVariantNumeric: 'tabular-nums',
+                        letterSpacing: '-0.01em',
                       }}>
                         {c.time}
                       </div>
                       {c.durationMin ? (
-                        <div style={{ fontSize: 10, color: '#a59478', marginTop: 6, letterSpacing: '0.05em' }}>
+                        <div style={{
+                          fontSize: 9, color: '#a59478', marginTop: 6,
+                          letterSpacing: '0.08em', textTransform: 'uppercase',
+                          fontWeight: 500,
+                        }}>
                           {c.durationMin} min
                         </div>
                       ) : null}
                     </div>
 
-                    <div style={{
-                      width: 3, background: classColor(c), borderRadius: 2, alignSelf: 'stretch',
-                      minHeight: 36,
-                    }} />
-
-                    <div style={{ flex: 1, minWidth: 0 }}>
+                    {/* Class details */}
+                    <div style={{ flex: 1, minWidth: 0, paddingTop: 2 }}>
                       <div style={{
                         fontFamily: '"Playfair Display", Georgia, serif',
-                        fontSize: 15, fontWeight: 500, color: '#1a2620', letterSpacing: '-0.005em',
+                        fontSize: 16, fontWeight: 500, color: '#1a2620',
+                        letterSpacing: '-0.005em', lineHeight: 1.2,
                       }}>
                         {c.type}
                       </div>
@@ -11504,11 +12044,15 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
                       </div>
                       {needsCover && (
                         <div style={{
-                          fontSize: 11, color: '#c8442a', marginTop: 6,
-                          fontWeight: 500, letterSpacing: '0.05em',
+                          fontSize: 11, color: '#c8442a',
+                          marginTop: 8, fontWeight: 500,
+                          letterSpacing: '0.02em',
+                          display: 'flex', alignItems: 'center', gap: 8,
                         }}>
                           {requesterFirstName ? `${requesterFirstName} needs cover` : 'Needs cover'}
-                          {view === 'cover' && ' — tap to take it'}
+                          <span style={{ color: '#a59478', fontWeight: 400, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                            Tap to take it
+                          </span>
                         </div>
                       )}
                     </div>
@@ -11522,6 +12066,7 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
     </>
   );
 }
+
 
 function ScheduleView({
   data, currentUser, isManager, isMobile, scheduleView, setScheduleView,
@@ -13709,7 +14254,7 @@ const RATE_PER_SESSION = 30; // £ per class taught
 // ME — personal hub: profile, stats, settings link
 // ──────────────────────────────────────────────────────────────────────────────
 
-function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onToggleViewAsStaff, emailIntegration, onOpenSettings, onSignOut, onShowInvoices, onShowTimeOff, onShowTeam, onShowExpenses, onShowFlows, onConnectGmail, onDisconnectGmail }) {
+function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onToggleViewAsStaff, emailIntegration, sessionToken, onOpenSettings, onSignOut, onShowInvoices, onShowStaffInvoices, onShowTimeOff, onShowTeam, onShowExpenses, onShowFlows, onConnectGmail, onDisconnectGmail, onCreate, onOpenBooking, onCreateTask, onReload }) {
   const myClasses = data.classes.filter(c => c.coachId === currentUser.id);
   const sessionCount = myClasses.length;
   const totalMinutes = myClasses.reduce((acc, c) => acc + c.dur, 0);
@@ -13800,6 +14345,93 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
         <PushNotificationsSection />
       </section>
 
+      {/* Admin — Me is also Admin. Embedded so it lives in this page. */}
+      <section style={styles.homeSection}>
+        <div style={styles.homeSectionHead}>
+          <div style={styles.homeSectionTitle}>{isManager ? 'Studio admin' : 'Your admin'}</div>
+        </div>
+        <AdminPage
+          embedded
+          data={data}
+          currentUser={currentUser}
+          isManager={isManager}
+          emailIntegration={emailIntegration}
+          sessionToken={sessionToken}
+          onCreate={onCreate}
+          onOpenBooking={onOpenBooking}
+          onConnectGmail={onConnectGmail}
+          onCreateTask={onCreateTask}
+          onReload={onReload}
+          onShowExpenses={onShowExpenses}
+          onShowFlows={onShowFlows}
+          onShowTimeOff={onShowTimeOff}
+          onShowInvoices={onShowInvoices}
+          onShowStaffInvoices={onShowStaffInvoices}
+        />
+      </section>
+
+      {/* Personal admin — managers also teach, so they get the same personal tools as staff */}
+      {isManager && (
+        <section style={styles.homeSection}>
+          <div style={styles.homeSectionHead}>
+            <div style={styles.homeSectionTitle}>Your personal admin</div>
+          </div>
+          <div style={styles.meActionsList}>
+            {(() => {
+              const now = new Date();
+              const monthStartIso = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+              const monthEndIso = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+              const myMonth = (data.classes || []).filter(c =>
+                c.coachId === currentUser.id && c.date >= monthStartIso && c.date <= monthEndIso
+              );
+              const rate = currentUser.sessionRatePence || 3000;
+              const monthTotal = (rate * myMonth.length) / 100;
+              const monthLabel = now.toLocaleDateString('en-GB', { month: 'long' });
+              return (
+                <button onClick={onShowStaffInvoices} className="salus-btn" style={styles.meActionRow}>
+                  <FileText size={18} color="#5c4a38" />
+                  <div style={{ flex: 1, textAlign: 'left' }}>
+                    <div style={{ fontSize: 14, color: '#1a2620' }}>Your invoice</div>
+                    <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
+                      {monthLabel}: {myMonth.length} {myMonth.length === 1 ? 'class' : 'classes'} · £{monthTotal.toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </div>
+                  </div>
+                  <ChevronRight size={16} color="#a59478" />
+                </button>
+              );
+            })()}
+            <button onClick={onShowExpenses} className="salus-btn" style={styles.meActionRow}>
+              <FileText size={18} color="#5c4a38" />
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 14, color: '#1a2620' }}>Expenses</div>
+                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
+                  {data.expenses?.length || 0} receipts · for your tax return
+                </div>
+              </div>
+              <ChevronRight size={16} color="#a59478" />
+            </button>
+            <button onClick={onShowFlows} className="salus-btn" style={styles.meActionRow}>
+              <Bookmark size={18} color="#5c4a38" />
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 14, color: '#1a2620' }}>Flows</div>
+                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
+                  {(data.flows || []).filter(f => !f.archived).length} active · session library
+                </div>
+              </div>
+              <ChevronRight size={16} color="#a59478" />
+            </button>
+            <button onClick={onShowTimeOff} className="salus-btn" style={{ ...styles.meActionRow, borderBottom: 'none' }}>
+              <Calendar size={18} color="#5c4a38" />
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 14, color: '#1a2620' }}>Time off & bank holidays</div>
+                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Upcoming UK bank holidays</div>
+              </div>
+              <ChevronRight size={16} color="#a59478" />
+            </button>
+          </div>
+        </section>
+      )}
+
       {/* Your team */}
       <section style={styles.homeSection}>
         <div style={styles.homeSectionHead}>
@@ -13838,6 +14470,181 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
           </div>
           <ChevronRight size={16} color="#a59478" />
         </button>
+      </section>
+
+      {/* ─── Manager admin — visible only to real managers ─── */}
+      {isManager && (
+        <section style={styles.homeSection}>
+          <div style={styles.homeSectionHead}>
+            <div style={styles.homeSectionTitle}>Manager admin</div>
+          </div>
+          <div style={styles.meActionsList}>
+            <button onClick={() => onOpenAdminSection?.('reports')} className="salus-btn" style={styles.meActionRow}>
+              <BarChart3 size={18} color="#5c4a38" />
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 14, color: '#1a2620' }}>Reports</div>
+                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Studio performance & daily digest</div>
+              </div>
+              <ChevronRight size={16} color="#a59478" />
+            </button>
+            <button onClick={() => onOpenAdminSection?.('inbox')} className="salus-btn" style={styles.meActionRow}>
+              <Inbox size={18} color="#5c4a38" />
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 14, color: '#1a2620' }}>Inbox</div>
+                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Triaged member emails</div>
+              </div>
+              <ChevronRight size={16} color="#a59478" />
+            </button>
+            <button onClick={() => onOpenAdminSection?.('cancellations')} className="salus-btn" style={styles.meActionRow}>
+              <AlertCircle size={18} color="#5c4a38" />
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 14, color: '#1a2620' }}>Cancellations</div>
+                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Members trying to leave</div>
+              </div>
+              <ChevronRight size={16} color="#a59478" />
+            </button>
+            <button onClick={() => onOpenAdminSection?.('tours')} className="salus-btn" style={styles.meActionRow}>
+              <MapPin size={18} color="#5c4a38" />
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 14, color: '#1a2620' }}>Tours</div>
+                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Studio walkthroughs booked</div>
+              </div>
+              <ChevronRight size={16} color="#a59478" />
+            </button>
+            <button onClick={() => onOpenAdminSection?.('stock')} className="salus-btn" style={styles.meActionRow}>
+              <Package size={18} color="#5c4a38" />
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 14, color: '#1a2620' }}>Stock</div>
+                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Supplies & inventory</div>
+              </div>
+              <ChevronRight size={16} color="#a59478" />
+            </button>
+            <button onClick={() => onOpenAdminSection?.('bookings')} className="salus-btn" style={styles.meActionRow}>
+              <Bookmark size={18} color="#5c4a38" />
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 14, color: '#1a2620' }}>Studio bookings</div>
+                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Hire & private sessions</div>
+              </div>
+              <ChevronRight size={16} color="#a59478" />
+            </button>
+            <button onClick={() => onOpenAdminSection?.('incidents')} className="salus-btn" style={styles.meActionRow}>
+              <AlertCircle size={18} color="#5c4a38" />
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 14, color: '#1a2620' }}>Incidents</div>
+                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Health & safety reports</div>
+              </div>
+              <ChevronRight size={16} color="#a59478" />
+            </button>
+            <button onClick={onShowInvoices} className="salus-btn" style={styles.meActionRow}>
+              <FileText size={18} color="#5c4a38" />
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 14, color: '#1a2620' }}>Pay run · generate invoices</div>
+                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>£30 per session, all coaches</div>
+              </div>
+              <ChevronRight size={16} color="#a59478" />
+            </button>
+            <button onClick={onOpenBroadcast} className="salus-btn" style={{ ...styles.meActionRow, borderBottom: 'none' }}>
+              <MessageSquare size={18} color="#5c4a38" />
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 14, color: '#1a2620' }}>Broadcast</div>
+                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Push notification to everyone</div>
+              </div>
+              <ChevronRight size={16} color="#a59478" />
+            </button>
+          </div>
+        </section>
+      )}
+
+      {/* ─── Personal admin — everyone ─── */}
+      <section style={styles.homeSection}>
+        <div style={styles.homeSectionHead}>
+          <div style={styles.homeSectionTitle}>Your admin</div>
+        </div>
+        <div style={styles.meActionsList}>
+          {(() => {
+            // Live preview for staff invoices row
+            const now = new Date();
+            const monthStartIso = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+            const monthEndIso = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+            const myMonth = (data.classes || []).filter(c =>
+              c.coachId === currentUser.id && c.date >= monthStartIso && c.date <= monthEndIso
+            );
+            const rate = currentUser.sessionRatePence || 3000;
+            const monthTotal = (rate * myMonth.length) / 100;
+            const monthLabel = now.toLocaleDateString('en-GB', { month: 'long' });
+            return (
+              <button onClick={onShowStaffInvoices} className="salus-btn" style={styles.meActionRow}>
+                <FileText size={18} color="#5c4a38" />
+                <div style={{ flex: 1, textAlign: 'left' }}>
+                  <div style={{ fontSize: 14, color: '#1a2620' }}>Your invoices</div>
+                  <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
+                    {monthLabel}: {myMonth.length} {myMonth.length === 1 ? 'class' : 'classes'} · £{monthTotal.toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  </div>
+                </div>
+                <ChevronRight size={16} color="#a59478" />
+              </button>
+            );
+          })()}
+          <button onClick={onShowExpenses} className="salus-btn" style={styles.meActionRow}>
+            <FileText size={18} color="#5c4a38" />
+            <div style={{ flex: 1, textAlign: 'left' }}>
+              <div style={{ fontSize: 14, color: '#1a2620' }}>Expenses</div>
+              <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
+                {data.expenses?.length || 0} receipts · for your tax return
+              </div>
+            </div>
+            <ChevronRight size={16} color="#a59478" />
+          </button>
+          <button onClick={onShowFlows} className="salus-btn" style={styles.meActionRow}>
+            <Bookmark size={18} color="#5c4a38" />
+            <div style={{ flex: 1, textAlign: 'left' }}>
+              <div style={{ fontSize: 14, color: '#1a2620' }}>Flows</div>
+              <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
+                {(data.flows || []).filter(f => !f.archived).length} active · session library
+              </div>
+            </div>
+            <ChevronRight size={16} color="#a59478" />
+          </button>
+          <button onClick={onShowTimeOff} className="salus-btn" style={styles.meActionRow}>
+            <Calendar size={18} color="#5c4a38" />
+            <div style={{ flex: 1, textAlign: 'left' }}>
+              <div style={{ fontSize: 14, color: '#1a2620' }}>Time off & bank holidays</div>
+              <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Upcoming UK bank holidays</div>
+            </div>
+            <ChevronRight size={16} color="#a59478" />
+          </button>
+          {/* Calendar — Phase 2 stub */}
+          <div style={{ ...styles.meActionRow, cursor: 'default' }}>
+            <Calendar size={18} color="#a59478" />
+            <div style={{ flex: 1, textAlign: 'left' }}>
+              <div style={{ fontSize: 14, color: '#a59478' }}>Google Calendar sync</div>
+              <div style={{ fontSize: 11, color: '#a59478', marginTop: 1 }}>Coming soon</div>
+            </div>
+          </div>
+          {/* Gmail */}
+          {emailIntegration ? (
+            <div style={{ ...styles.meActionRow, cursor: 'default', borderBottom: 'none' }}>
+              <Mail size={18} color="#7a8c5c" />
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 14, color: '#1a2620' }}>
+                  Gmail · <span style={{ color: '#7a8c5c', fontWeight: 600 }}>Connected</span>
+                </div>
+                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
+                  {emailIntegration.emailAddress || 'Your Gmail account'}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <button onClick={onConnectGmail} className="salus-btn" style={{ ...styles.meActionRow, borderBottom: 'none' }}>
+              <Mail size={18} color="#5c4a38" />
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 14, color: '#1a2620' }}>Connect Gmail</div>
+                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Triage member messages inside Salus</div>
+              </div>
+              <ChevronRight size={16} color="#a59478" />
+            </button>
+          )}
+        </div>
       </section>
 
       {/* View-as-staff toggle — only shown to real managers, always visible (even when previewing) */}
