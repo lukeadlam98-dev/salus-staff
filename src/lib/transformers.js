@@ -19,6 +19,8 @@ export const profileFromDb = (row, authEmail) => ({
   isFoh: row.is_foh === true,
   isManager: row.is_manager === true,
   sessionRatePence: typeof row.session_rate_pence === 'number' ? row.session_rate_pence : 3000,
+  homePhotoUrl:     row.home_photo_url  || null,
+  homePhotoPath:    row.home_photo_path || null,
   codeOfConductAckedAt: row.code_of_conduct_acked_at,
   duringClassAckedAt: row.during_class_acked_at,
   afterClassAckedAt: row.after_class_acked_at,
