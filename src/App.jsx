@@ -1813,7 +1813,7 @@ export default function SalusStaff() {
       {/* Bottom nav */}
       <nav style={styles.bottomNav}>
         <BottomTab icon={HomeIcon} label="Home" active={tab==='home'} onClick={() => setTab('home')} />
-        <BottomTab icon={CoverIcon} label="Cover" active={tab==='cover'} onClick={() => setTab('cover')} badge={data.coverRequests.filter(r => r.status === 'open' && r.requestedBy !== currentUser.id).length} />
+        <BottomTab icon={CoverIcon} label="Cover" active={tab==='cover'} onClick={() => setTab('cover')} badge={(data.coverRequests || []).filter(r => r.status === 'open' || r.status === 'pending').length} />
         <BottomTab icon={Calendar} label="Schedule" active={tab==='timetable'} onClick={() => setTab('timetable')} />
         <BottomTab icon={MessageSquare} label="Chat" active={tab==='chat'} onClick={() => setTab('chat')} badge={chatUnread + dmUnread} />
         <BottomTab icon={UserIcon} label="Me" active={tab==='me'} onClick={() => setTab('me')} />
@@ -12124,28 +12124,6 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
           </div>
         </div>
       )}
-
-      {/* "You've X classes today" — pill summary */}
-      <div style={{
-        display: 'inline-flex', alignItems: 'baseline', gap: 8,
-        padding: '8px 14px',
-        background: '#f5f1e8', borderRadius: 999,
-        marginBottom: 18,
-      }}>
-        <span style={{
-          fontFamily: '"Playfair Display", Georgia, serif',
-          fontSize: 15, fontWeight: 500, color: '#1a2620',
-        }}>
-          {selectedDayMineCount > 0
-            ? `You've ${selectedDayMineCount} ${selectedDayMineCount === 1 ? 'class' : 'classes'} ${selectedDayLabel}`
-            : `No classes ${selectedDayLabel}`}
-        </span>
-        {selectedDayMineCount > 0 && (
-          <span style={{ fontSize: 12, color: '#7a8270' }}>
-            · £{((currentUser.sessionRatePence || 3000) * selectedDayMineCount / 100).toFixed(0)} earned
-          </span>
-        )}
-      </div>
 
       {/* View tabs */}
       <div style={{
