@@ -14407,9 +14407,19 @@ const RATE_PER_SESSION = 30; // £ per class taught
 // ──────────────────────────────────────────────────────────────────────────────
 
 function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onToggleViewAsStaff, emailIntegration, sessionToken, onOpenSettings, onSignOut, onShowInvoices, onShowStaffInvoices, onShowTimeOff, onShowTeam, onShowExpenses, onShowFlows, onConnectGmail, onDisconnectGmail, onCreate, onOpenBooking, onCreateTask, onReload }) {
-  const myClasses = data.classes.filter(c => c.coachId === currentUser.id);
+  // Defensive — data and currentUser must always be objects
+  if (!currentUser || !data) {
+    return (
+      <div style={styles.homeContainer}>
+        <PageHeader eyebrow="Loading" title="Me" compact />
+      </div>
+    );
+  }
+  const safeClasses = data.classes || [];
+  const safeUsers = data.users || [];
+  const myClasses = safeClasses.filter(c => c.coachId === currentUser.id);
   const sessionCount = myClasses.length;
-  const totalMinutes = myClasses.reduce((acc, c) => acc + c.dur, 0);
+  const totalMinutes = myClasses.reduce((acc, c) => acc + (c.durationMin || c.dur || 45), 0);
   const owed = sessionCount * 30;
 
   const roleLabel = isManager
@@ -14653,181 +14663,6 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
           </div>
           <ChevronRight size={16} color="#a59478" />
         </button>
-      </section>
-
-      {/* ─── Manager admin — visible only to real managers ─── */}
-      {isManager && (
-        <section style={styles.homeSection}>
-          <div style={styles.homeSectionHead}>
-            <div style={styles.homeSectionTitle}>Manager admin</div>
-          </div>
-          <div style={styles.meActionsList}>
-            <button onClick={() => onOpenAdminSection?.('reports')} className="salus-btn" style={styles.meActionRow}>
-              <BarChart3 size={18} color="#5c4a38" />
-              <div style={{ flex: 1, textAlign: 'left' }}>
-                <div style={{ fontSize: 14, color: '#1a2620' }}>Reports</div>
-                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Studio performance & daily digest</div>
-              </div>
-              <ChevronRight size={16} color="#a59478" />
-            </button>
-            <button onClick={() => onOpenAdminSection?.('inbox')} className="salus-btn" style={styles.meActionRow}>
-              <Inbox size={18} color="#5c4a38" />
-              <div style={{ flex: 1, textAlign: 'left' }}>
-                <div style={{ fontSize: 14, color: '#1a2620' }}>Inbox</div>
-                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Triaged member emails</div>
-              </div>
-              <ChevronRight size={16} color="#a59478" />
-            </button>
-            <button onClick={() => onOpenAdminSection?.('cancellations')} className="salus-btn" style={styles.meActionRow}>
-              <AlertCircle size={18} color="#5c4a38" />
-              <div style={{ flex: 1, textAlign: 'left' }}>
-                <div style={{ fontSize: 14, color: '#1a2620' }}>Cancellations</div>
-                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Members trying to leave</div>
-              </div>
-              <ChevronRight size={16} color="#a59478" />
-            </button>
-            <button onClick={() => onOpenAdminSection?.('tours')} className="salus-btn" style={styles.meActionRow}>
-              <MapPin size={18} color="#5c4a38" />
-              <div style={{ flex: 1, textAlign: 'left' }}>
-                <div style={{ fontSize: 14, color: '#1a2620' }}>Tours</div>
-                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Studio walkthroughs booked</div>
-              </div>
-              <ChevronRight size={16} color="#a59478" />
-            </button>
-            <button onClick={() => onOpenAdminSection?.('stock')} className="salus-btn" style={styles.meActionRow}>
-              <Package size={18} color="#5c4a38" />
-              <div style={{ flex: 1, textAlign: 'left' }}>
-                <div style={{ fontSize: 14, color: '#1a2620' }}>Stock</div>
-                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Supplies & inventory</div>
-              </div>
-              <ChevronRight size={16} color="#a59478" />
-            </button>
-            <button onClick={() => onOpenAdminSection?.('bookings')} className="salus-btn" style={styles.meActionRow}>
-              <Bookmark size={18} color="#5c4a38" />
-              <div style={{ flex: 1, textAlign: 'left' }}>
-                <div style={{ fontSize: 14, color: '#1a2620' }}>Studio bookings</div>
-                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Hire & private sessions</div>
-              </div>
-              <ChevronRight size={16} color="#a59478" />
-            </button>
-            <button onClick={() => onOpenAdminSection?.('incidents')} className="salus-btn" style={styles.meActionRow}>
-              <AlertCircle size={18} color="#5c4a38" />
-              <div style={{ flex: 1, textAlign: 'left' }}>
-                <div style={{ fontSize: 14, color: '#1a2620' }}>Incidents</div>
-                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Health & safety reports</div>
-              </div>
-              <ChevronRight size={16} color="#a59478" />
-            </button>
-            <button onClick={onShowInvoices} className="salus-btn" style={styles.meActionRow}>
-              <FileText size={18} color="#5c4a38" />
-              <div style={{ flex: 1, textAlign: 'left' }}>
-                <div style={{ fontSize: 14, color: '#1a2620' }}>Pay run · generate invoices</div>
-                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>£30 per session, all coaches</div>
-              </div>
-              <ChevronRight size={16} color="#a59478" />
-            </button>
-            <button onClick={onOpenBroadcast} className="salus-btn" style={{ ...styles.meActionRow, borderBottom: 'none' }}>
-              <MessageSquare size={18} color="#5c4a38" />
-              <div style={{ flex: 1, textAlign: 'left' }}>
-                <div style={{ fontSize: 14, color: '#1a2620' }}>Broadcast</div>
-                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Push notification to everyone</div>
-              </div>
-              <ChevronRight size={16} color="#a59478" />
-            </button>
-          </div>
-        </section>
-      )}
-
-      {/* ─── Personal admin — everyone ─── */}
-      <section style={styles.homeSection}>
-        <div style={styles.homeSectionHead}>
-          <div style={styles.homeSectionTitle}>Your admin</div>
-        </div>
-        <div style={styles.meActionsList}>
-          {(() => {
-            // Live preview for staff invoices row
-            const now = new Date();
-            const monthStartIso = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-            const monthEndIso = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
-            const myMonth = (data.classes || []).filter(c =>
-              c.coachId === currentUser.id && c.date >= monthStartIso && c.date <= monthEndIso
-            );
-            const rate = currentUser.sessionRatePence || 3000;
-            const monthTotal = (rate * myMonth.length) / 100;
-            const monthLabel = now.toLocaleDateString('en-GB', { month: 'long' });
-            return (
-              <button onClick={onShowStaffInvoices} className="salus-btn" style={styles.meActionRow}>
-                <FileText size={18} color="#5c4a38" />
-                <div style={{ flex: 1, textAlign: 'left' }}>
-                  <div style={{ fontSize: 14, color: '#1a2620' }}>Your invoices</div>
-                  <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
-                    {monthLabel}: {myMonth.length} {myMonth.length === 1 ? 'class' : 'classes'} · £{monthTotal.toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                  </div>
-                </div>
-                <ChevronRight size={16} color="#a59478" />
-              </button>
-            );
-          })()}
-          <button onClick={onShowExpenses} className="salus-btn" style={styles.meActionRow}>
-            <FileText size={18} color="#5c4a38" />
-            <div style={{ flex: 1, textAlign: 'left' }}>
-              <div style={{ fontSize: 14, color: '#1a2620' }}>Expenses</div>
-              <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
-                {data.expenses?.length || 0} receipts · for your tax return
-              </div>
-            </div>
-            <ChevronRight size={16} color="#a59478" />
-          </button>
-          <button onClick={onShowFlows} className="salus-btn" style={styles.meActionRow}>
-            <Bookmark size={18} color="#5c4a38" />
-            <div style={{ flex: 1, textAlign: 'left' }}>
-              <div style={{ fontSize: 14, color: '#1a2620' }}>Flows</div>
-              <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
-                {(data.flows || []).filter(f => !f.archived).length} active · session library
-              </div>
-            </div>
-            <ChevronRight size={16} color="#a59478" />
-          </button>
-          <button onClick={onShowTimeOff} className="salus-btn" style={styles.meActionRow}>
-            <Calendar size={18} color="#5c4a38" />
-            <div style={{ flex: 1, textAlign: 'left' }}>
-              <div style={{ fontSize: 14, color: '#1a2620' }}>Time off & bank holidays</div>
-              <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Upcoming UK bank holidays</div>
-            </div>
-            <ChevronRight size={16} color="#a59478" />
-          </button>
-          {/* Calendar — Phase 2 stub */}
-          <div style={{ ...styles.meActionRow, cursor: 'default' }}>
-            <Calendar size={18} color="#a59478" />
-            <div style={{ flex: 1, textAlign: 'left' }}>
-              <div style={{ fontSize: 14, color: '#a59478' }}>Google Calendar sync</div>
-              <div style={{ fontSize: 11, color: '#a59478', marginTop: 1 }}>Coming soon</div>
-            </div>
-          </div>
-          {/* Gmail */}
-          {emailIntegration ? (
-            <div style={{ ...styles.meActionRow, cursor: 'default', borderBottom: 'none' }}>
-              <Mail size={18} color="#7a8c5c" />
-              <div style={{ flex: 1, textAlign: 'left' }}>
-                <div style={{ fontSize: 14, color: '#1a2620' }}>
-                  Gmail · <span style={{ color: '#7a8c5c', fontWeight: 600 }}>Connected</span>
-                </div>
-                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
-                  {emailIntegration.emailAddress || 'Your Gmail account'}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <button onClick={onConnectGmail} className="salus-btn" style={{ ...styles.meActionRow, borderBottom: 'none' }}>
-              <Mail size={18} color="#5c4a38" />
-              <div style={{ flex: 1, textAlign: 'left' }}>
-                <div style={{ fontSize: 14, color: '#1a2620' }}>Connect Gmail</div>
-                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Triage member messages inside Salus</div>
-              </div>
-              <ChevronRight size={16} color="#a59478" />
-            </button>
-          )}
-        </div>
       </section>
 
       {/* View-as-staff toggle — only shown to real managers, always visible (even when previewing) */}
