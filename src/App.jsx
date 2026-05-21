@@ -11634,195 +11634,419 @@ function CoverHomeCard({ req, users, interested, urgent, pending, onClick, onCla
 
 
 // ─── CoverPage — top-level cover board (own tab in bottom nav) ──────────
-// Shows every open cover request, sorted by date. The heart of the app.
+// Job-board aesthetic: each cover request is a card you can save, mark
+// maybe-interested in, or take. Filterable by time-range.
+
+const SAVED_COVERS_KEY = 'salus_saved_covers';
+const MAYBE_COVERS_KEY = 'salus_maybe_covers';
+
+
+// ─── CoverPage — job-board style cards for cover requests ────────────────
+// Designed like job postings: each cover is a card with class details, pills
+// for studio/duration, and per-card actions (Take it / Maybe / Heart-save).
+// Sort + filter at the top, grouped sections beneath.
 function CoverPage({ data, currentUser, isManager, onClassClick }) {
-  // Open covers, excluding ones the user posted themselves
-  const openCovers = (data.coverRequests || [])
-    .filter(r => r.status === 'open' && r.requestedBy !== currentUser.id)
-    .map(r => ({ ...r, cls: data.classes.find(c => c.id === r.classId) }))
-    .filter(r => r.cls)
-    .sort((a, b) => (a.cls.date + ' ' + a.cls.time).localeCompare(b.cls.date + ' ' + b.cls.time));
+  const [filter, setFilter] = useState('all'); // 'all' | 'thisWeek' | 'nextWeek' | 'saved' | 'mine'
+  const [sortBy, setSortBy] = useState('soonest'); // 'soonest' | 'newest'
 
-  // Pending (manager-approval) covers
-  const pendingForManager = isManager
-    ? (data.coverRequests || [])
-        .filter(r => r.status === 'pending')
-        .map(r => ({ ...r, cls: data.classes.find(c => c.id === r.classId) }))
-        .filter(r => r.cls)
-        .sort((a, b) => (a.cls.date + ' ' + a.cls.time).localeCompare(b.cls.date + ' ' + b.cls.time))
-    : [];
+  // Locally-stored bookmarks
+  const [savedIds, setSavedIds] = useState(() => {
+    if (typeof localStorage === 'undefined') return new Set();
+    try { return new Set(JSON.parse(localStorage.getItem(SAVED_COVERS_KEY) || '[]')); }
+    catch { return new Set(); }
+  });
+  const [maybeIds, setMaybeIds] = useState(() => {
+    if (typeof localStorage === 'undefined') return new Set();
+    try { return new Set(JSON.parse(localStorage.getItem(MAYBE_COVERS_KEY) || '[]')); }
+    catch { return new Set(); }
+  });
 
-  // Your own open requests (so you can track them)
-  const myOpenRequests = (data.coverRequests || [])
-    .filter(r => r.status === 'open' && r.requestedBy === currentUser.id)
-    .map(r => ({ ...r, cls: data.classes.find(c => c.id === r.classId) }))
-    .filter(r => r.cls)
-    .sort((a, b) => (a.cls.date + ' ' + a.cls.time).localeCompare(b.cls.date + ' ' + b.cls.time));
-
-  const classColor = (cls) => {
-    const meta = (CLASS_TYPES && CLASS_TYPES[cls.type]) || {};
-    return meta.color || COLOR.amber;
+  const toggleSaved = (id) => {
+    setSavedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(SAVED_COVERS_KEY, JSON.stringify([...next]));
+      }
+      return next;
+    });
+  };
+  const toggleMaybe = (id) => {
+    setMaybeIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(MAYBE_COVERS_KEY, JSON.stringify([...next]));
+      }
+      return next;
+    });
   };
 
-  const studioLabel = (s) => {
-    if (s === 'reformer') return 'Reformer studio';
-    if (s === 'hybrid') return 'Hybrid studio';
-    return 'Studio';
+  // Defensive
+  const allClasses = data?.classes || [];
+  const allUsers = data?.users || [];
+  const allCovers = data?.coverRequests || [];
+
+  // Hydrate cover requests with class + requester
+  const hydrate = (r) => ({
+    ...r,
+    cls: allClasses.find(c => c.id === r.classId),
+    requester: allUsers.find(u => u.id === r.requestedBy),
+  });
+
+  const allOpen = allCovers
+    .filter(r => r.status === 'open' || r.status === 'pending')
+    .map(hydrate)
+    .filter(r => r.cls);
+
+  const myRequests = allOpen.filter(r => r.requestedBy === currentUser.id);
+  const openForMe = allOpen.filter(r => r.requestedBy !== currentUser.id);
+
+  // Date filtering
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dow = (today.getDay() + 6) % 7;
+  const thisMon = new Date(today); thisMon.setDate(today.getDate() - dow);
+  const thisSun = new Date(thisMon); thisSun.setDate(thisMon.getDate() + 6);
+  const nextMon = new Date(thisMon); nextMon.setDate(thisMon.getDate() + 7);
+  const nextSun = new Date(nextMon); nextSun.setDate(nextMon.getDate() + 6);
+  const toIso = (d) => d.toISOString().slice(0, 10);
+
+  const applyFilter = (list) => {
+    if (filter === 'thisWeek') {
+      return list.filter(r => r.cls.date >= toIso(thisMon) && r.cls.date <= toIso(thisSun));
+    }
+    if (filter === 'nextWeek') {
+      return list.filter(r => r.cls.date >= toIso(nextMon) && r.cls.date <= toIso(nextSun));
+    }
+    if (filter === 'saved') {
+      return list.filter(r => savedIds.has(r.id));
+    }
+    if (filter === 'mine') {
+      return list.filter(r => r.requestedBy === currentUser.id);
+    }
+    return list;
   };
 
-  const coachName = (id) => {
-    const u = data.users.find(u => u.id === id);
-    return u?.name?.split(' ')[0] || '';
+  const applySort = (list) => {
+    const sorted = [...list];
+    if (sortBy === 'newest') {
+      sorted.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    } else {
+      sorted.sort((a, b) => (a.cls.date + ' ' + a.cls.time).localeCompare(b.cls.date + ' ' + b.cls.time));
+    }
+    return sorted;
   };
 
-  const dateLabel = (iso) => {
-    const d = new Date(iso);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    if (d.toISOString().slice(0,10) === today.toISOString().slice(0,10)) return 'Today';
-    if (d.toISOString().slice(0,10) === tomorrow.toISOString().slice(0,10)) return 'Tomorrow';
-    return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-  };
+  // For staff: openForMe filtered + sorted
+  // For manager: all pending (awaiting approval) + all open
+  const visibleForStaff = applySort(applyFilter(openForMe));
+  const pendingForManager = applySort(allOpen.filter(r => r.status === 'pending'));
+  const openForManager = applySort(applyFilter(allOpen.filter(r => r.status === 'open')));
 
-  const renderCoverCard = (req, opts = {}) => {
-    const c = req.cls;
-    const requesterFirstName = coachName(req.requestedBy);
-    const isOwn = opts.isOwn;
+  // Card renderer
+  const renderCard = (req) => {
+    const cls = req.cls;
+    const requester = req.requester;
+    const isMine = req.requestedBy === currentUser.id;
+    const isSaved = savedIds.has(req.id);
+    const isMaybe = maybeIds.has(req.id);
+    const studio = cls.studio === 'reformer' ? 'Reformer studio'
+                  : cls.studio === 'hybrid' ? 'Hybrid studio' : 'Studio';
+
+    // Date label
+    const d = new Date(cls.date);
+    const isToday = cls.date === toIso(today);
+    const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+    const isTomorrow = cls.date === toIso(tomorrow);
+    const dateLabel = isToday
+      ? 'Today'
+      : isTomorrow
+      ? 'Tomorrow'
+      : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+
+    // Hours until class (for urgency)
+    const classDateTime = new Date(`${cls.date}T${cls.time || '00:00'}`);
+    const hoursUntil = (classDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
+    const isUrgent = hoursUntil > 0 && hoursUntil < 24;
+
     return (
-      <button
-        key={req.id}
-        onClick={() => onClassClick?.(c.id)}
-        className="salus-btn"
-        style={{
-          display: 'flex', gap: 14, padding: '14px 16px',
-          background: isOwn ? '#fffdf7' : '#fef0ec',
-          border: `1px solid ${isOwn ? '#efe7d2' : '#f0c8b8'}`,
-          borderRadius: 12,
-          marginBottom: 8,
-          cursor: 'pointer', textAlign: 'left',
-          width: '100%', fontFamily: 'inherit',
-        }}
-      >
-        <div style={{ flexShrink: 0, minWidth: 78 }}>
-          <div style={{ fontSize: 11, color: '#c8442a', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-            {dateLabel(c.date)}
-          </div>
+      <div key={req.id} style={{
+        background: '#fffdf7',
+        border: `1px solid ${isUrgent ? '#f0c8b8' : '#efe7d2'}`,
+        borderRadius: 16,
+        padding: '18px 18px 14px',
+        marginBottom: 12,
+      }}>
+        {/* Top row: date + save heart */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          marginBottom: 10,
+        }}>
           <div style={{
-            fontFamily: '"Playfair Display", Georgia, serif',
-            fontSize: 18, fontWeight: 400, color: '#1a2620',
-            lineHeight: 1, marginTop: 4, fontVariantNumeric: 'tabular-nums',
+            display: 'flex', alignItems: 'center', gap: 8,
           }}>
-            {c.time}
-          </div>
-          {c.durationMin ? (
-            <div style={{ fontSize: 10, color: '#a59478', marginTop: 4, letterSpacing: '0.05em' }}>
-              {c.durationMin} min
+            <div style={{
+              fontSize: 11, fontWeight: 600, color: isUrgent ? '#c8442a' : '#5c4a38',
+              letterSpacing: '0.04em',
+            }}>
+              {dateLabel} · {cls.time}
             </div>
-          ) : null}
+            {isUrgent && (
+              <div style={{
+                fontSize: 9, fontWeight: 600, color: '#c8442a',
+                background: '#fef0ec', border: '1px solid #f0c8b8',
+                padding: '2px 8px', borderRadius: 999,
+                letterSpacing: '0.1em', textTransform: 'uppercase',
+              }}>
+                Urgent
+              </div>
+            )}
+          </div>
+          {!isMine && (
+            <button onClick={() => toggleSaved(req.id)} className="salus-btn"
+              style={{
+                background: 'transparent', border: 'none', padding: 4,
+                color: isSaved ? '#c8442a' : '#a59478', cursor: 'pointer',
+                display: 'flex', alignItems: 'center',
+              }}>
+              <Heart size={18} fill={isSaved ? '#c8442a' : 'none'} strokeWidth={isSaved ? 0 : 1.8} />
+            </button>
+          )}
         </div>
 
-        <div style={{ width: 3, background: classColor(c), borderRadius: 2, alignSelf: 'stretch', minHeight: 36 }} />
+        {/* Class title — Playfair, prominent */}
+        <div style={{
+          fontFamily: '"Playfair Display", Georgia, serif',
+          fontSize: 20, fontWeight: 500, color: '#1a2620',
+          letterSpacing: '-0.01em', lineHeight: 1.2,
+          marginBottom: 12,
+        }}>
+          {cls.type}
+        </div>
 
-        <div style={{ flex: 1, minWidth: 0 }}>
+        {/* Pills/tags — studio, duration, status */}
+        <div style={{
+          display: 'flex', flexWrap: 'wrap', gap: 6,
+          marginBottom: 14,
+        }}>
+          <span style={pillStyle}>{studio}</span>
+          {cls.durationMin && <span style={pillStyle}>{cls.durationMin} min</span>}
+          {req.status === 'pending' && (
+            <span style={{ ...pillStyle, background: '#fef0ec', color: '#c8442a', borderColor: '#f0c8b8' }}>
+              Awaiting approval
+            </span>
+          )}
+        </div>
+
+        {/* Requester row */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          marginBottom: isMine ? 6 : 14,
+          paddingTop: 12,
+          borderTop: '1px solid #f5ecd6',
+        }}>
           <div style={{
-            fontFamily: '"Playfair Display", Georgia, serif',
-            fontSize: 15, fontWeight: 500, color: '#1a2620', letterSpacing: '-0.005em',
+            width: 28, height: 28, borderRadius: 14,
+            background: '#f5f1e8',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 12, fontWeight: 500, color: '#5c4a38',
+            flexShrink: 0,
           }}>
-            {c.type}
+            {requester?.name?.charAt(0) || '?'}
           </div>
-          <div style={{ fontSize: 12, color: '#7a8270', marginTop: 4 }}>
-            {studioLabel(c.studio)}
-          </div>
-          <div style={{
-            fontSize: 11, color: '#c8442a', marginTop: 6,
-            fontWeight: 500, letterSpacing: '0.05em',
-          }}>
-            {isOwn
-              ? 'Your request · awaiting someone to cover'
-              : `${requesterFirstName || 'Someone'} needs cover — tap to take it`}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, color: '#1a2620', fontWeight: 500 }}>
+              {isMine ? 'You' : (requester?.name || 'Unknown')}
+            </div>
+            <div style={{ fontSize: 11, color: '#a59478', marginTop: 1 }}>
+              {isMine ? 'asked for cover' : 'needs cover'}
+              {req.reason && ` · ${req.reason}`}
+            </div>
           </div>
         </div>
-      </button>
+
+        {/* Action row — Take it / Maybe (only when not own request) */}
+        {!isMine && req.status === 'open' && (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => onClassClick?.(cls.id)} className="salus-btn"
+              style={{
+                flex: 1, padding: '11px 16px',
+                background: '#1a2620', color: '#fffdf7',
+                border: 'none', borderRadius: 999,
+                fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase',
+                fontFamily: 'inherit', cursor: 'pointer', fontWeight: 600,
+              }}>
+              Take it
+            </button>
+            <button onClick={() => toggleMaybe(req.id)} className="salus-btn"
+              style={{
+                flex: 1, padding: '11px 16px',
+                background: isMaybe ? '#5c4a38' : 'transparent',
+                color: isMaybe ? '#fffdf7' : '#5c4a38',
+                border: `1px solid ${isMaybe ? '#5c4a38' : '#d4cdb8'}`,
+                borderRadius: 999,
+                fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase',
+                fontFamily: 'inherit', cursor: 'pointer', fontWeight: 500,
+              }}>
+              {isMaybe ? '✓ Maybe' : 'Maybe'}
+            </button>
+          </div>
+        )}
+      </div>
     );
   };
 
+  const totalCount = isManager
+    ? (pendingForManager.length + openForManager.length)
+    : (openForMe.length);
+  const countLabel = `${totalCount} ${totalCount === 1 ? 'cover' : 'covers'}`;
+
   return (
-    <div style={styles.homeContainer}>
-      <PageHeader
-        eyebrow="Help your team"
-        title="Cover board"
-        subtitle="Classes that need someone to step in."
-        compact
-      />
-
-      {/* Manager's pending approval queue */}
-      {isManager && pendingForManager.length > 0 && (
-        <div style={{ marginBottom: 28 }}>
-          <SectionLabel>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-              <span>Awaiting your approval</span>
-              <span style={{ ...TYPE.metaSmall, fontStyle: 'normal' }}>{pendingForManager.length}</span>
-            </div>
-          </SectionLabel>
-          {pendingForManager.map(req => renderCoverCard(req))}
+    <>
+      {/* Header — count + sort */}
+      <div style={{ padding: '10px 4px 18px' }}>
+        <div style={{
+          fontFamily: '"Playfair Display", Georgia, serif',
+          fontSize: 24, fontWeight: 500, color: '#1a2620',
+          letterSpacing: '-0.015em', lineHeight: 1.2,
+        }}>
+          {countLabel}
         </div>
-      )}
-
-      {/* Open covers — pickup-able */}
-      <div style={{ marginBottom: 28 }}>
-        <SectionLabel>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-            <span>Available to cover</span>
-            <span style={{ ...TYPE.metaSmall, fontStyle: 'normal' }}>{openCovers.length}</span>
-          </div>
-        </SectionLabel>
-        {openCovers.length === 0 ? (
-          <EmptyState sub="Nice — everyone's accounted for.">
-            No cover needed right now.
-          </EmptyState>
-        ) : (
-          openCovers.map(req => renderCoverCard(req))
-        )}
+        <div style={{ fontSize: 13, color: '#7a8270', marginTop: 4 }}>
+          {totalCount === 0
+            ? 'All quiet — no cover needed right now.'
+            : isManager
+            ? 'Manage requests and help your team find cover.'
+            : 'Open shifts waiting to be taken.'}
+        </div>
       </div>
 
-      {/* Your own open requests */}
-      {myOpenRequests.length > 0 && (
-        <div style={{ marginBottom: 28 }}>
-          <SectionLabel>Your open requests</SectionLabel>
-          {myOpenRequests.map(req => renderCoverCard(req, { isOwn: true }))}
+      {/* Filter chips */}
+      {totalCount > 0 && (
+        <div style={{
+          display: 'flex', gap: 6, marginBottom: 12,
+          overflowX: 'auto', WebkitOverflowScrolling: 'touch',
+          scrollbarWidth: 'none', padding: '0 4px 4px',
+        }}>
+          {[
+            ['all', 'All'],
+            ['thisWeek', 'This week'],
+            ['nextWeek', 'Next week'],
+            ['saved', `Saved${savedIds.size > 0 ? ` (${savedIds.size})` : ''}`],
+            ['mine', 'My requests'],
+          ].map(([key, label]) => {
+            const isActive = filter === key;
+            return (
+              <button key={key} onClick={() => setFilter(key)} className="salus-btn"
+                style={{
+                  flexShrink: 0,
+                  padding: '7px 14px',
+                  background: isActive ? '#1a2620' : 'transparent',
+                  border: `1px solid ${isActive ? '#1a2620' : '#d4cdb8'}`,
+                  borderRadius: 999,
+                  fontSize: 11, fontWeight: isActive ? 600 : 500,
+                  color: isActive ? '#fffdf7' : '#5c4a38',
+                  letterSpacing: '0.04em',
+                  fontFamily: 'inherit', cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}>
+                {label}
+              </button>
+            );
+          })}
         </div>
       )}
-    </div>
+
+      {/* Sort */}
+      {totalCount > 1 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '0 4px 18px',
+        }}>
+          <span style={{
+            fontSize: 10, color: '#a59478', letterSpacing: '0.08em',
+            textTransform: 'uppercase', fontWeight: 600,
+          }}>
+            Sort by
+          </span>
+          <button onClick={() => setSortBy('soonest')} className="salus-btn"
+            style={{
+              background: 'transparent', border: 'none', padding: '2px 0',
+              fontSize: 12, color: sortBy === 'soonest' ? '#1a2620' : '#a59478',
+              fontWeight: sortBy === 'soonest' ? 600 : 500,
+              textDecoration: sortBy === 'soonest' ? 'underline' : 'none',
+              textUnderlineOffset: 4,
+              fontFamily: 'inherit', cursor: 'pointer',
+            }}>
+            Soonest first
+          </button>
+          <span style={{ color: '#d4cdb8' }}>·</span>
+          <button onClick={() => setSortBy('newest')} className="salus-btn"
+            style={{
+              background: 'transparent', border: 'none', padding: '2px 0',
+              fontSize: 12, color: sortBy === 'newest' ? '#1a2620' : '#a59478',
+              fontWeight: sortBy === 'newest' ? 600 : 500,
+              textDecoration: sortBy === 'newest' ? 'underline' : 'none',
+              textUnderlineOffset: 4,
+              fontFamily: 'inherit', cursor: 'pointer',
+            }}>
+            Newest first
+          </button>
+        </div>
+      )}
+
+      {/* Manager pending queue */}
+      {isManager && pendingForManager.length > 0 && (
+        <div style={{ marginBottom: 22 }}>
+          <SectionLabel>Awaiting approval</SectionLabel>
+          {pendingForManager.map(renderCard)}
+        </div>
+      )}
+
+      {/* Body */}
+      {isManager ? (
+        openForManager.length > 0 && (
+          <div style={{ marginBottom: 22 }}>
+            <SectionLabel>Open on the board</SectionLabel>
+            {openForManager.map(renderCard)}
+          </div>
+        )
+      ) : (
+        visibleForStaff.length > 0 && (
+          <div style={{ marginBottom: 22 }}>
+            {visibleForStaff.map(renderCard)}
+          </div>
+        )
+      )}
+
+      {/* Your own requests — staff only, since manager sees all in main list */}
+      {!isManager && myRequests.length > 0 && (
+        <div style={{ marginBottom: 22 }}>
+          <SectionLabel>Your requests</SectionLabel>
+          {myRequests.map(renderCard)}
+        </div>
+      )}
+
+      {/* Empty state */}
+      {totalCount === 0 && (
+        <EmptyState sub="When a teammate needs cover, it'll show up here.">
+          No cover needed right now.
+        </EmptyState>
+      )}
+    </>
   );
 }
 
-
-// ─── StaffScheduleView — editorial schedule, cover-aware ────────────────
-// Combines the patterns Luke liked:
-//   • Contextual greeting line ("3 classes · Karis needs cover Wednesday")
-//   • Week-strip day-picker showing dots for busy/cover days at a glance
-//   • Vertical status bars on class rows (coral=cover, forest=yours, taupe=others)
-//   • Editorial day section headers (Playfair, restrained)
-//   • Pinned cover-needed cards stand out from the timeline of regular classes
-// Three views:
-//   • Mine — just your own classes (default)
-//   • Everyone — all classes, yours emphasised
-//   • Cover board lives in its own bottom-nav tab.
-
-
-
-// ─── StaffScheduleView — editorial schedule inspired by the Luova reference ──
-// Personal greeting + pinned cover cards + week-strip pills + clean timeline.
-
-
-// ─── StaffScheduleView — purpose-built: see classes, request cover, navigate months ──
-// Layout priority:
-//   1. Cover needed (urgent — surfaced top, horizontal scroll if multiple)
-//   2. Always-visible month grid for navigation (jump months ahead)
-//   3. View tabs (Mine / Everyone)
-//   4. Timeline of classes for the selected week
+const pillStyle = {
+  fontSize: 11, fontWeight: 500,
+  color: '#5c4a38',
+  background: '#f5f1e8',
+  border: '1px solid #efe7d2',
+  borderRadius: 999,
+  padding: '4px 10px',
+  letterSpacing: '0.02em',
+};
 
 
 // ─── StaffScheduleView — purpose-built ───────────────────────────────────
@@ -11831,7 +12055,6 @@ function CoverPage({ data, currentUser, isManager, onClassClick }) {
 // Toggleable. Cover-needed surfaced by bottom-nav badge + coral indicators.
 function StaffScheduleView({ data, currentUser, onClassClick }) {
   const [view, setView] = useState('mine'); // 'mine' | 'everyone'
-  const [showCalendar, setShowCalendar] = useState(true);
 
   // Defensive
   const allClasses = data?.classes || [];
@@ -11952,62 +12175,15 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
 
   return (
     <>
-      {/* Title with calendar toggle */}
-      <div style={{
-        display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
-        padding: '12px 4px 18px',
-      }}>
-        <div>
-          <div style={{
-            fontSize: 10, color: '#a59478', fontWeight: 600,
-            letterSpacing: '0.18em', textTransform: 'uppercase', marginBottom: 6,
-          }}>
-            Your week
-          </div>
-          <h1 style={{
-            fontFamily: '"Playfair Display", Georgia, serif',
-            fontSize: 28, fontWeight: 400, margin: 0,
-            color: '#1a2620', lineHeight: 1.1, letterSpacing: '-0.015em',
-          }}>
-            Schedule
-          </h1>
-        </div>
-        <button onClick={() => setShowCalendar(s => !s)} className="salus-btn"
-          style={{
-            display: 'flex', alignItems: 'center', gap: 4,
-            background: '#f5f1e8',
-            border: '1px solid #efe7d2',
-            borderRadius: 999, padding: '6px 6px',
-            cursor: 'pointer', fontFamily: 'inherit',
-          }}>
-          <div style={{
-            padding: '4px 10px', borderRadius: 999,
-            background: showCalendar ? 'transparent' : '#fffdf7',
-            color: showCalendar ? '#a59478' : '#1a2620',
-            display: 'flex', alignItems: 'center',
-          }}>
-            <ListChecks size={14} />
-          </div>
-          <div style={{
-            padding: '4px 10px', borderRadius: 999,
-            background: showCalendar ? '#fffdf7' : 'transparent',
-            color: showCalendar ? '#1a2620' : '#a59478',
-            display: 'flex', alignItems: 'center',
-          }}>
-            <Calendar size={14} />
-          </div>
-        </button>
-      </div>
-
       {/* Month grid — pill cells with count on top, day below */}
-      {showCalendar && (
-        <div style={{
-          background: '#fffdf7',
-          border: '1px solid #efe7d2',
-          borderRadius: 16,
-          padding: '16px 14px 14px',
-          marginBottom: 18,
-        }}>
+      <div style={{
+        background: '#fffdf7',
+        border: '1px solid #efe7d2',
+        borderRadius: 16,
+        padding: '16px 14px 14px',
+        marginTop: 12,
+        marginBottom: 18,
+      }}>
           {/* Month nav */}
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -12122,8 +12298,7 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
               );
             })}
           </div>
-        </div>
-      )}
+      </div>
 
       {/* View tabs */}
       <div style={{
