@@ -1636,39 +1636,6 @@ export default function SalusStaff() {
         }
       `}</style>
 
-      {/* Preview-as-staff banner — only when manager has toggled view-as on */}
-      {previewingAsStaff && (
-        <div style={{
-          position: 'sticky', top: 0, zIndex: 50,
-          padding: '8px 14px',
-          paddingTop: 'calc(8px + env(safe-area-inset-top, 0px))',
-          background: '#1a2620', color: '#fffdf7',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-          fontSize: 12,
-        }}>
-          <span style={{ letterSpacing: '0.04em' }}>
-            <span style={{ opacity: 0.6, marginRight: 6 }}>👁</span>
-            Viewing as staff — manager features hidden
-          </span>
-          <button
-            onClick={toggleViewAsStaff}
-            className="salus-btn"
-            style={{
-              background: 'transparent',
-              color: '#fffdf7',
-              border: '1px solid rgba(255, 253, 247, 0.3)',
-              padding: '4px 12px', borderRadius: 999,
-              fontSize: 11, fontWeight: 500, letterSpacing: '0.08em',
-              textTransform: 'uppercase', cursor: 'pointer',
-              fontFamily: 'inherit',
-            }}
-          >
-            Switch back
-          </button>
-        </div>
-      )}
-
-      {/* Header */}
       {/* Main */}
       <main className={tab === 'chat' ? 'salus-main salus-main-chat' : 'salus-main'} style={tab === 'chat' ? styles.mainChat : styles.main}>
         {tab === 'home' && (
@@ -1701,14 +1668,6 @@ export default function SalusStaff() {
             onCreateFeedback={() => setModal({ type: 'createFeedback' })}
             onOpenFeedback={(id) => setModal({ type: 'feedbackDetail', id })}
             onMarkBroadcastRead={markBroadcastRead}
-          />
-        )}
-        {(tab === 'timetable' || tab === 'cover') && (
-          <StatusBar
-            data={data}
-            currentUser={currentUser}
-            isManager={isManager}
-            onJumpTo={setTab}
           />
         )}
 
