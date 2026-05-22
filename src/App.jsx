@@ -10330,6 +10330,212 @@ function MonthView({ classes, coverRequests, currentUser, onDayClick }) {
 // ─── MyDayHero — personal command center at the top of Home ──────────────
 // Replaces the generic greeting. Shows: today's hero, this week's earnings,
 // up next, other classes today, birthdays.
+// ─── HomeHero — big editorial hero card with photo + up-next overlay ────
+// Inspired by the Interstellar reference: dramatic photo, greeting overlay
+// top-left, key class info overlaid bottom with a CTA button. Drops in
+// above the rest of the Home content.
+function HomeHero({ data, currentUser, isManager, brandPhoto, onClassClick }) {
+  const now = new Date();
+  const hour = now.getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const firstName = currentUser?.name?.split(' ')[0] || 'there';
+  const todayIso = now.toISOString().slice(0, 10);
+
+  // Photo
+  const heroPhoto = currentUser?.homePhotoUrl
+    || brandPhoto
+    || '/brand/reformer.jpg';
+
+  // Next class
+  const myUpcoming = (data?.classes || [])
+    .filter(c => c.coachId === currentUser?.id && c.date >= todayIso)
+    .sort((a, b) => (`${a.date} ${a.time}`).localeCompare(`${b.date} ${b.time}`));
+  const upNext = myUpcoming[0];
+
+  // Saved (heart) — local state, matches cover board pattern
+  const [hearted, setHearted] = useState(false);
+
+  const studioLabel = (s) => {
+    if (s === 'reformer') return 'Reformer studio';
+    if (s === 'hybrid') return 'Hybrid studio';
+    return 'Studio';
+  };
+
+  // Contextual subtitle — friendly one-liner under the class title
+  const heroSubtitle = (() => {
+    if (!upNext) return 'Take a breath. No classes on your schedule right now.';
+    const d = new Date(upNext.date);
+    const isToday = upNext.date === todayIso;
+    const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1);
+    const isTomorrow = upNext.date === tomorrow.toISOString().slice(0, 10);
+    if (isToday) {
+      const [hh, mm] = (upNext.time || '00:00').split(':').map(Number);
+      const classDt = new Date(); classDt.setHours(hh, mm, 0, 0);
+      const minutes = Math.round((classDt.getTime() - now.getTime()) / 60000);
+      if (minutes < 0) return "Today's session. You're teaching now.";
+      if (minutes < 60) return `Starting in ${minutes} minutes. Set up the room and breathe.`;
+      const hrs = Math.floor(minutes / 60);
+      return `Coming up in ${hrs} hour${hrs > 1 ? 's' : ''}. Plenty of time.`;
+    }
+    if (isTomorrow) return "Tomorrow's class. A good day to prepare your flow.";
+    return `Your next class is ${d.toLocaleDateString('en-GB', { weekday: 'long' })}.`;
+  })();
+
+  // Bottom metadata line — like "2014 · 2h 49m · 8.7/10" in the reference
+  const metadataParts = upNext ? [
+    upNext.date === todayIso ? 'Today' : new Date(upNext.date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }),
+    upNext.time,
+    upNext.durationMin ? `${upNext.durationMin} min` : null,
+    studioLabel(upNext.studio),
+  ].filter(Boolean) : [];
+
+  return (
+    <>
+      {/* Header row — separate from the hero image, clean and minimal */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 14,
+        padding: '14px 4px 20px',
+      }}>
+        <UserAvatar user={currentUser} size={44} fontSize={17} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontSize: 12, color: '#a59478', fontWeight: 500,
+            letterSpacing: '0.02em',
+          }}>
+            {greeting}
+          </div>
+          <div style={{
+            fontFamily: '"Playfair Display", Georgia, serif',
+            fontSize: 19, fontWeight: 500, color: '#1a2620',
+            letterSpacing: '-0.01em', marginTop: 2, lineHeight: 1.2,
+          }}>
+            {firstName}
+          </div>
+        </div>
+        <button className="salus-btn" style={{
+          width: 36, height: 36, borderRadius: 18,
+          background: '#f5f1e8', border: '1px solid #efe7d2',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: '#5c4a38', cursor: 'pointer',
+        }}>
+          <MoreHorizontal size={16} />
+        </button>
+      </div>
+
+      {/* Hero image card — cinematic, like the Interstellar reference */}
+      <div
+        onClick={() => upNext && onClassClick?.(upNext.id)}
+        style={{
+          position: 'relative',
+          height: 460,
+          borderRadius: 22,
+          overflow: 'hidden',
+          marginBottom: 26,
+          backgroundImage: `url(${heroPhoto})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          boxShadow: '0 4px 16px rgba(26, 38, 32, 0.12)',
+          cursor: upNext ? 'pointer' : 'default',
+        }}>
+        {/* Gradient — heavier at the bottom for legibility */}
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: 'linear-gradient(to bottom, rgba(26,38,32,0.10) 0%, rgba(26,38,32,0.05) 35%, rgba(26,38,32,0.85) 75%, rgba(26,38,32,0.95) 100%)',
+        }} />
+
+        {/* Right side icons — heart, bell, menu (Luova/Interstellar reference) */}
+        <div style={{
+          position: 'absolute', right: 18, bottom: 130,
+          display: 'flex', flexDirection: 'column', gap: 18,
+        }}>
+          <button onClick={(e) => { e.stopPropagation(); setHearted(h => !h); }} className="salus-btn"
+            style={{
+              background: 'transparent', border: 'none', padding: 0,
+              color: '#fffdf7', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+            <Heart size={22} fill={hearted ? '#fffdf7' : 'none'} strokeWidth={hearted ? 0 : 1.8} />
+          </button>
+          <button onClick={(e) => e.stopPropagation()} className="salus-btn"
+            style={{
+              background: 'transparent', border: 'none', padding: 0,
+              color: '#fffdf7', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+            <Bell size={20} strokeWidth={1.8} />
+          </button>
+          <button onClick={(e) => e.stopPropagation()} className="salus-btn"
+            style={{
+              background: 'transparent', border: 'none', padding: 0,
+              color: '#fffdf7', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+            <MoreHorizontal size={20} strokeWidth={1.8} />
+          </button>
+        </div>
+
+        {/* Bottom block — class name + subtitle + metadata */}
+        <div style={{
+          position: 'absolute', bottom: 0, left: 0, right: 0,
+          padding: '24px 24px 22px',
+          color: '#fffdf7',
+        }}>
+          {upNext ? (
+            <>
+              <div style={{
+                fontFamily: '"Playfair Display", Georgia, serif',
+                fontSize: 34, fontWeight: 500, color: '#fffdf7',
+                letterSpacing: '-0.022em', lineHeight: 1.05,
+                marginBottom: 10,
+              }}>
+                {upNext.type}
+              </div>
+              <div style={{
+                fontSize: 13, color: 'rgba(255, 253, 247, 0.85)',
+                lineHeight: 1.5, marginBottom: 16,
+                maxWidth: '88%',
+              }}>
+                {heroSubtitle}
+              </div>
+              <div style={{
+                fontSize: 11, color: 'rgba(255, 253, 247, 0.7)',
+                letterSpacing: '0.04em',
+                display: 'flex', alignItems: 'center', gap: 8,
+                flexWrap: 'wrap',
+              }}>
+                {metadataParts.map((part, i) => (
+                  <React.Fragment key={i}>
+                    {i > 0 && <span style={{ opacity: 0.5 }}>·</span>}
+                    <span>{part}</span>
+                  </React.Fragment>
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{
+                fontFamily: '"Playfair Display", Georgia, serif',
+                fontSize: 30, fontWeight: 500, color: '#fffdf7',
+                letterSpacing: '-0.018em', lineHeight: 1.1,
+                marginBottom: 10,
+              }}>
+                A quiet day
+              </div>
+              <div style={{
+                fontSize: 13, color: 'rgba(255, 253, 247, 0.85)',
+                lineHeight: 1.5,
+              }}>
+                {heroSubtitle}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+
 function MyDayHero({ data, currentUser, isManager, onClassClick }) {
   const now = new Date();
   const hour = now.getHours();
@@ -10437,19 +10643,18 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
   };
 
   return (
-    <div style={{ padding: '12px 0 0' }}>
-      {/* Greeting */}
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ ...TYPE.eyebrow, marginBottom: 6 }}>{todayStr}</div>
-        <div style={{ ...TYPE.pageTitle }}>{greeting}, {firstName}</div>
+    <div style={{ padding: '0' }}>
+      {/* Subtitle stats — quick today summary */}
+      {subtitle && subtitle !== 'A quiet day — nothing on your schedule' && (
         <div style={{
           fontFamily: COLOR.serif, fontStyle: 'italic',
           fontSize: 14, color: COLOR.brown,
-          marginTop: 8, lineHeight: 1.4,
+          marginBottom: 16, lineHeight: 1.4,
+          padding: '0 4px',
         }}>
           {subtitle}
         </div>
-      </div>
+      )}
 
       {/* This week's stats — only for coaches with classes */}
       {showEarnings && (
@@ -10481,62 +10686,31 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
         </div>
       )}
 
-      {/* Up next card */}
-      {upNext && (
+      {/* Rest of today's classes — condensed list, only if more than one class today */}
+      {upNext && myToday.length > 1 && (
         <div style={{ marginBottom: 18 }}>
-          <div style={{ ...TYPE.eyebrow, marginBottom: 10 }}>Up next</div>
-          <button
-            onClick={() => onClassClick?.(upNext.id)}
-            className="salus-btn"
-            style={{
-              display: 'flex', gap: 12, padding: '14px 16px',
-              background: COLOR.sand, borderRadius: 12,
-              border: 'none', cursor: 'pointer',
-              width: '100%', textAlign: 'left',
-              fontFamily: 'inherit',
-            }}
-          >
-            <div style={{
-              width: 3, background: classColor(upNext), borderRadius: 2,
-              alignSelf: 'stretch', minHeight: 38,
-            }} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ ...TYPE.itemTitle }}>{upNext.type}</div>
-              <div style={{ fontSize: 12, color: COLOR.moss, marginTop: 4 }}>
-                {upNext.time} · {studioLabel(upNext.studio)}
-              </div>
-              {upNextCountdown && (
-                <div style={{ fontSize: 11, color: COLOR.coral, marginTop: 6, fontStyle: 'italic' }}>
-                  {upNextCountdown}
-                </div>
-              )}
-            </div>
-          </button>
-
-          {/* Rest of today's classes — condensed list */}
-          {myToday.length > 1 && (
-            <div style={{ marginTop: 8, paddingLeft: 15 }}>
-              {myToday.filter(c => c.id !== upNext.id).map(c => (
-                <button
-                  key={c.id}
-                  onClick={() => onClassClick?.(c.id)}
-                  className="salus-btn"
-                  style={{
-                    display: 'flex', justifyContent: 'space-between',
-                    width: '100%', textAlign: 'left',
-                    padding: '8px 0',
-                    borderTop: `1px solid ${COLOR.bone}`,
-                    background: 'transparent', border: 'none',
-                    fontSize: 13, color: COLOR.brown,
-                    fontFamily: 'inherit', cursor: 'pointer',
-                  }}
-                >
-                  <span>{c.type}</span>
-                  <span style={{ color: COLOR.taupe, fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>{c.time}</span>
-                </button>
-              ))}
-            </div>
-          )}
+          <div style={{ ...TYPE.eyebrow, marginBottom: 10 }}>Also today</div>
+          <div style={{ paddingLeft: 4 }}>
+            {myToday.filter(c => c.id !== upNext.id).map(c => (
+              <button
+                key={c.id}
+                onClick={() => onClassClick?.(c.id)}
+                className="salus-btn"
+                style={{
+                  display: 'flex', justifyContent: 'space-between',
+                  width: '100%', textAlign: 'left',
+                  padding: '10px 0',
+                  borderBottom: `1px solid ${COLOR.bone}`,
+                  background: 'transparent', border: 'none',
+                  fontSize: 13, color: COLOR.brown,
+                  fontFamily: 'inherit', cursor: 'pointer',
+                }}
+              >
+                <span>{c.type}</span>
+                <span style={{ color: COLOR.taupe, fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>{c.time}</span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -10651,7 +10825,16 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
 
   return (
     <div style={styles.homeContainer}>
-      {/* My Day hero — replaces the old greeting */}
+      {/* Editorial hero — big photo, greeting overlay, next class overlay */}
+      <HomeHero
+        data={data}
+        currentUser={currentUser}
+        isManager={isManager}
+        brandPhoto={brandPhoto}
+        onClassClick={onClassClick}
+      />
+
+      {/* My Day summary — keeps stats, birthdays. Greeting + Up next now in hero */}
       <MyDayHero
         data={data}
         currentUser={currentUser}
@@ -10666,16 +10849,6 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
         currentUser={currentUser}
         onMarkRead={onMarkBroadcastRead}
       />
-
-      {/* Photo — personal upload wins, brand rotation for managers, hidden for staff */}
-      {homePhoto && (
-        <div style={{
-          height: 140, borderRadius: 20, overflow: 'hidden', marginBottom: 4, position: 'relative',
-          backgroundImage: `url(${homePhoto})`,
-          backgroundSize: 'cover', backgroundPosition: 'center',
-          boxShadow: '0 1px 0 rgba(92, 74, 56, 0.06)',
-        }} />
-      )}
 
       {/* Render widgets in user's chosen order */}
       {widgets.map(widgetKey => {
