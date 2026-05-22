@@ -323,6 +323,16 @@ export default function SalusStaff() {
     return () => window.removeEventListener('salus:openAdmin', handler);
   }, []);
 
+  // Listen for tab switch requests from child components (e.g. home avatar tap → Me)
+  useEffect(() => {
+    const handler = (e) => {
+      const t = e?.detail;
+      if (t && typeof t === 'string') setTab(t);
+    };
+    window.addEventListener('salus:tab', handler);
+    return () => window.removeEventListener('salus:tab', handler);
+  }, []);
+
   // View-as-staff toggle — lets managers preview the staff experience
   const [viewAsStaff, setViewAsStaff] = useState(() => {
     if (typeof localStorage === 'undefined') return false;
@@ -1672,15 +1682,6 @@ export default function SalusStaff() {
             {(coverUnread + chatUnread + dmUnread) > 0 && (
               <span style={styles.bellBtnBadge}>{coverUnread + chatUnread + dmUnread}</span>
             )}
-          </button>
-
-          <button
-            onClick={() => setTab('me')}
-            className="salus-btn"
-            style={styles.headerAvBtn}
-            title="Profile & settings"
-          >
-            <UserAvatar user={currentUser} size={36} fontSize={13} />
           </button>
         </div>
       </header>
@@ -10391,12 +10392,18 @@ function HomeHero({ data, currentUser, isManager, brandPhoto, onClassClick }) {
 
   return (
     <>
-      {/* Header row — separate from the hero image, clean and minimal */}
+      {/* Header row — avatar + greeting. Tap avatar to go to Me. */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 14,
         padding: '14px 4px 20px',
       }}>
-        <UserAvatar user={currentUser} size={44} fontSize={17} />
+        <button onClick={() => { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('salus:tab', { detail: 'me' })); }} className="salus-btn"
+          style={{
+            background: 'transparent', border: 'none', padding: 0, cursor: 'pointer',
+            borderRadius: '50%',
+          }}>
+          <UserAvatar user={currentUser} size={44} fontSize={17} />
+        </button>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
             fontSize: 12, color: '#a59478', fontWeight: 500,
@@ -10412,14 +10419,6 @@ function HomeHero({ data, currentUser, isManager, brandPhoto, onClassClick }) {
             {firstName}
           </div>
         </div>
-        <button className="salus-btn" style={{
-          width: 36, height: 36, borderRadius: 18,
-          background: '#f5f1e8', border: '1px solid #efe7d2',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: '#5c4a38', cursor: 'pointer',
-        }}>
-          <MoreHorizontal size={16} />
-        </button>
       </div>
 
       {/* Hero image card — cinematic, like the Interstellar reference */}
@@ -10443,7 +10442,7 @@ function HomeHero({ data, currentUser, isManager, brandPhoto, onClassClick }) {
           background: 'linear-gradient(to bottom, rgba(26,38,32,0.10) 0%, rgba(26,38,32,0.05) 35%, rgba(26,38,32,0.85) 75%, rgba(26,38,32,0.95) 100%)',
         }} />
 
-        {/* Right side icons — heart, bell, menu (Luova/Interstellar reference) */}
+        {/* Right side — heart to save (bell + more removed; global header and greeting handle those) */}
         <div style={{
           position: 'absolute', right: 18, bottom: 130,
           display: 'flex', flexDirection: 'column', gap: 18,
@@ -10455,22 +10454,6 @@ function HomeHero({ data, currentUser, isManager, brandPhoto, onClassClick }) {
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
             <Heart size={22} fill={hearted ? '#fffdf7' : 'none'} strokeWidth={hearted ? 0 : 1.8} />
-          </button>
-          <button onClick={(e) => e.stopPropagation()} className="salus-btn"
-            style={{
-              background: 'transparent', border: 'none', padding: 0,
-              color: '#fffdf7', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-            <Bell size={20} strokeWidth={1.8} />
-          </button>
-          <button onClick={(e) => e.stopPropagation()} className="salus-btn"
-            style={{
-              background: 'transparent', border: 'none', padding: 0,
-              color: '#fffdf7', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-            <MoreHorizontal size={20} strokeWidth={1.8} />
           </button>
         </div>
 
