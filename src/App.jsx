@@ -333,6 +333,16 @@ export default function SalusStaff() {
     return () => window.removeEventListener('salus:tab', handler);
   }, []);
 
+  // Listen for modal open requests from child components (e.g. home bell/gear)
+  useEffect(() => {
+    const handler = (e) => {
+      const m = e?.detail;
+      if (m && typeof m === 'object') setModal(m);
+    };
+    window.addEventListener('salus:openModal', handler);
+    return () => window.removeEventListener('salus:openModal', handler);
+  }, []);
+
   // View-as-staff toggle — lets managers preview the staff experience
   const [viewAsStaff, setViewAsStaff] = useState(() => {
     if (typeof localStorage === 'undefined') return false;
@@ -1659,33 +1669,6 @@ export default function SalusStaff() {
       )}
 
       {/* Header */}
-      <header className="salus-header" style={styles.header}>
-        <div style={styles.headerLeft}>
-          <div style={styles.logoNew}>
-            <img src="/icon-192.png" alt="Salus" style={styles.logoNewImg} />
-          </div>
-          {!isMobile && (
-            <div style={styles.logoTextWrap}>
-              <div style={styles.logoText}>Salus</div>
-            </div>
-          )}
-        </div>
-
-        <div className="salus-header-right" style={styles.headerRight}>
-          <button
-            onClick={() => setModal({ type: 'notifications' })}
-            className="salus-btn"
-            style={styles.bellBtn}
-            title="Notifications"
-          >
-            <Bell size={18} color={(coverUnread + chatUnread + dmUnread) > 0 ? '#5c4a38' : '#a59478'} />
-            {(coverUnread + chatUnread + dmUnread) > 0 && (
-              <span style={styles.bellBtnBadge}>{coverUnread + chatUnread + dmUnread}</span>
-            )}
-          </button>
-        </div>
-      </header>
-
       {/* Main */}
       <main className={tab === 'chat' ? 'salus-main salus-main-chat' : 'salus-main'} style={tab === 'chat' ? styles.mainChat : styles.main}>
         {tab === 'home' && (
@@ -10392,7 +10375,7 @@ function HomeHero({ data, currentUser, isManager, brandPhoto, onClassClick }) {
 
   return (
     <>
-      {/* Header row — avatar + greeting. Tap avatar to go to Me. */}
+      {/* Header row — avatar + greeting + bell + gear */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 14,
         padding: '14px 4px 20px',
@@ -10419,6 +10402,30 @@ function HomeHero({ data, currentUser, isManager, brandPhoto, onClassClick }) {
             {firstName}
           </div>
         </div>
+        <button
+          onClick={() => { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('salus:openModal', { detail: { type: 'notifications' } })); }}
+          className="salus-btn"
+          style={{
+            width: 38, height: 38, borderRadius: 19,
+            background: '#fffdf7', border: '1px solid #efe7d2',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: '#5c4a38', cursor: 'pointer', position: 'relative',
+          }}
+          title="Notifications">
+          <Bell size={16} strokeWidth={1.8} />
+        </button>
+        <button
+          onClick={() => { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('salus:openModal', { detail: { type: 'settings' } })); }}
+          className="salus-btn"
+          style={{
+            width: 38, height: 38, borderRadius: 19,
+            background: '#fffdf7', border: '1px solid #efe7d2',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: '#5c4a38', cursor: 'pointer',
+          }}
+          title="Settings">
+          <Settings size={16} strokeWidth={1.8} />
+        </button>
       </div>
 
       {/* Hero image card — cinematic, like the Interstellar reference */}
@@ -10442,20 +10449,7 @@ function HomeHero({ data, currentUser, isManager, brandPhoto, onClassClick }) {
           background: 'linear-gradient(to bottom, rgba(26,38,32,0.10) 0%, rgba(26,38,32,0.05) 35%, rgba(26,38,32,0.85) 75%, rgba(26,38,32,0.95) 100%)',
         }} />
 
-        {/* Right side — heart to save (bell + more removed; global header and greeting handle those) */}
-        <div style={{
-          position: 'absolute', right: 18, bottom: 130,
-          display: 'flex', flexDirection: 'column', gap: 18,
-        }}>
-          <button onClick={(e) => { e.stopPropagation(); setHearted(h => !h); }} className="salus-btn"
-            style={{
-              background: 'transparent', border: 'none', padding: 0,
-              color: '#fffdf7', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-            <Heart size={22} fill={hearted ? '#fffdf7' : 'none'} strokeWidth={hearted ? 0 : 1.8} />
-          </button>
-        </div>
+        {/* No floating icons — page-level bell and gear cover those needs */}
 
         {/* Bottom block — class name + subtitle + metadata */}
         <div style={{
@@ -20405,7 +20399,7 @@ const styles = {
   },
 
   main: {
-    padding: '28px 32px 100px',
+    padding: 'calc(env(safe-area-inset-top, 0px) + 8px) 32px 100px',
     maxWidth: 1400,
     margin: '0 auto',
     width: '100%',
@@ -20416,7 +20410,7 @@ const styles = {
   },
   mainChat: {
     position: 'fixed',
-    top: 'calc(60px + env(safe-area-inset-top, 0px))',
+    top: 'env(safe-area-inset-top, 0px)',
     bottom: 'calc(72px + env(safe-area-inset-bottom, 0px))',
     left: 0, right: 0,
     padding: 8,
