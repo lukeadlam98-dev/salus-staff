@@ -19457,19 +19457,23 @@ const styles = {
 
   // ─── TODAY STRIP — horizontal swipeable cards ───
   todayStripWrap: {
-    // Bleed to the edges of the home page (escape the 14px home padding on mobile, 32px on desktop)
+    // Bleed past the 14px home padding so cards can scroll into the edge.
+    // Header + first card sit at 22px from screen edge (8px past home edge)
+    // for a deliberate, visible left margin at rest.
     margin: '0 -14px 20px',
   },
   todayStripHeader: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-    padding: '0 18px', marginBottom: 12,
+    padding: '0 22px', marginBottom: 12,
   },
   todayStripCount: {
     fontSize: 11, color: '#a59478', fontStyle: 'italic',
   },
   todayStripScroll: {
     display: 'flex', gap: 10,
-    padding: '2px 14px 8px',
+    // 22px left = aligns first card with header.
+    // 14px right = small breath so last card isn't slammed to edge.
+    padding: '2px 14px 8px 22px',
     overflowX: 'auto', overflowY: 'hidden',
     scrollSnapType: 'x proximity',
     WebkitOverflowScrolling: 'touch',
