@@ -10723,9 +10723,9 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
         <div style={styles.todayStripWrap}>
           <div style={styles.todayStripHeader}>
             <div style={TYPE.eyebrow}>{stripHeader}</div>
-            <div style={styles.todayStripCount}>
-              {todayItems.length} {todayItems.length === 1 ? 'thing' : 'things'}
-            </div>
+            {todayItems.length > 2 && (
+              <ChevronRight size={14} color="#c4b8a0" />
+            )}
           </div>
           <div className="salus-scroll-h" style={styles.todayStripScroll}>
             {todayItems.map(item => (
@@ -10919,6 +10919,12 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
         isManager={isManager}
         onClassClick={onClassClick}
       />
+
+      {/* ─── Spotlight CTA — cinematic image card promoting one thing ─── */}
+      <SpotlightCard />
+
+      {/* ─── Studio events — horizontal slider of what's happening ─── */}
+      <StudioEvents />
 
       {/* Manager broadcasts — urgent comms */}
       <BroadcastBanner
@@ -11120,6 +11126,134 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
           onClose={() => setShowCustomize(false)}
         />
       )}
+    </div>
+  );
+}
+
+// ─── Spotlight CTA ────────────────────────────────────────────────────────
+// Big cinematic image card promoting one featured thing — like the
+// "Buy, Book & Host" pattern. Default content here is Featured Event style;
+// could later be driven by a manager-editable record in supabase.
+function SpotlightCard() {
+  // TODO: replace this object with a fetch from a `home_spotlights` table
+  // so Luke can update it without a deploy.
+  const spotlight = {
+    photo: '/brand/this-week.jpg',
+    fallbackGradient: 'linear-gradient(135deg, #2d3a30 0%, #1a2620 100%)',
+    eyebrow: 'This week at Salus',
+    title: 'Track Day is back',
+    body: 'Saturday 8 June. The team\u2019s heading to Brands Hatch \u2014 save the date and bring a friend.',
+    cta: 'I\u2019m in',
+    onClick: null, // wire to a modal or RSVP flow later
+  };
+
+  return (
+    <div style={styles.spotlightWrap}>
+      <button
+        onClick={spotlight.onClick || (() => {})}
+        className="salus-btn"
+        style={{
+          ...styles.spotlightCard,
+          background: spotlight.fallbackGradient,
+        }}
+      >
+        {spotlight.photo && (
+          <div
+            style={{
+              ...styles.spotlightPhoto,
+              backgroundImage: `url(${spotlight.photo})`,
+            }}
+          />
+        )}
+        <div style={styles.spotlightGradient} />
+        <div style={styles.spotlightContent}>
+          <div style={styles.spotlightEyebrow}>{spotlight.eyebrow}</div>
+          <h3 style={styles.spotlightTitle}>{spotlight.title}</h3>
+          <p style={styles.spotlightBody}>{spotlight.body}</p>
+          <div style={styles.spotlightCta}>
+            {spotlight.cta}
+          </div>
+        </div>
+      </button>
+    </div>
+  );
+}
+
+// ─── Studio Events ────────────────────────────────────────────────────────
+// Horizontal slider of "what's happening" — track day, run club, RLT, etc.
+// Cards have an atmospheric image (or thematic gradient fallback) + text
+// overlay. Tapping a card could later open a detail/RSVP modal.
+const STUDIO_EVENTS = [
+  {
+    id: 'track-day',
+    photo: '/brand/track-day.jpg',
+    fallbackGradient: 'linear-gradient(160deg, #5c4a38 0%, #1a2620 100%)',
+    eyebrow: 'SAT 8 JUN',
+    title: 'Track Day',
+    meta: '9am · Brands Hatch',
+    going: 6,
+  },
+  {
+    id: 'run-club',
+    photo: '/brand/run-club.jpg',
+    fallbackGradient: 'linear-gradient(160deg, #7a8c5c 0%, #1f3528 100%)',
+    eyebrow: 'EVERY SATURDAY',
+    title: 'Run Club',
+    meta: '9am · Foots Cray Meadows',
+    going: 12,
+  },
+  {
+    id: 'red-light',
+    photo: '/brand/red-light.jpg',
+    fallbackGradient: 'linear-gradient(160deg, #c8442a 0%, #5c4a38 100%)',
+    eyebrow: 'NEW',
+    title: 'Red Light Therapy',
+    meta: 'Now bookable · Reformer Studio',
+    going: null,
+  },
+];
+
+function StudioEvents() {
+  return (
+    <div style={styles.eventsStripWrap}>
+      <div style={styles.eventsStripHeader}>
+        <div style={TYPE.eyebrow}>Happening at Salus</div>
+        <ChevronRight size={14} color="#c4b8a0" />
+      </div>
+      <div className="salus-scroll-h" style={styles.eventsStripScroll}>
+        {STUDIO_EVENTS.map(ev => (
+          <button
+            key={ev.id}
+            className="salus-btn"
+            style={{
+              ...styles.eventCard,
+              background: ev.fallbackGradient,
+            }}
+            aria-label={`${ev.title} — ${ev.eyebrow}`}
+          >
+            {ev.photo && (
+              <div
+                style={{
+                  ...styles.eventCardPhoto,
+                  backgroundImage: `url(${ev.photo})`,
+                }}
+              />
+            )}
+            <div style={styles.eventCardGradient} />
+            <div style={styles.eventCardTopRow}>
+              <span style={styles.eventCardEyebrow}>{ev.eyebrow}</span>
+              <Bookmark size={16} color="rgba(255, 253, 247, 0.85)" strokeWidth={1.8} />
+            </div>
+            <div style={styles.eventCardContent}>
+              <h4 style={styles.eventCardTitle}>{ev.title}</h4>
+              <div style={styles.eventCardMeta}>{ev.meta}</div>
+              {ev.going != null && (
+                <div style={styles.eventCardGoing}>{ev.going} going</div>
+              )}
+            </div>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -19344,8 +19478,9 @@ const styles = {
   todayStripScroll: {
     display: 'flex', gap: 10,
     // 22px left = aligns first card with header.
-    // 14px right = small breath so last card isn't slammed to edge.
-    padding: '2px 14px 8px 22px',
+    // 4px right = cards bleed dramatically off the right edge,
+    // making it visually obvious the strip is swipeable.
+    padding: '2px 4px 8px 22px',
     overflowX: 'auto', overflowY: 'hidden',
     scrollSnapType: 'x proximity',
     WebkitOverflowScrolling: 'touch',
@@ -19383,6 +19518,139 @@ const styles = {
     fontSize: 9, color: '#a59478', fontWeight: 700,
     letterSpacing: '0.12em', textTransform: 'uppercase',
     marginBottom: 3,
+  },
+
+  // ─── SPOTLIGHT CTA (cinematic image card) ───
+  spotlightWrap: {
+    margin: '4px 0 22px',
+  },
+  spotlightCard: {
+    position: 'relative',
+    width: '100%', minHeight: 200,
+    borderRadius: 20,
+    overflow: 'hidden',
+    border: 'none',
+    padding: 0,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    color: '#fffdf7',
+    textAlign: 'left',
+    display: 'block',
+  },
+  spotlightPhoto: {
+    position: 'absolute', inset: 0,
+    backgroundSize: 'cover', backgroundPosition: 'center',
+  },
+  spotlightGradient: {
+    position: 'absolute', inset: 0,
+    background: 'linear-gradient(115deg, rgba(26, 38, 32, 0.85) 0%, rgba(26, 38, 32, 0.55) 55%, rgba(26, 38, 32, 0.2) 100%)',
+  },
+  spotlightContent: {
+    position: 'relative',
+    padding: '24px 22px 22px',
+    display: 'flex', flexDirection: 'column',
+    minHeight: 200,
+  },
+  spotlightEyebrow: {
+    fontSize: 10, color: 'rgba(255, 253, 247, 0.85)',
+    fontWeight: 600, letterSpacing: '0.22em',
+    textTransform: 'uppercase',
+  },
+  spotlightTitle: {
+    fontFamily: '"Playfair Display", Georgia, serif',
+    fontSize: 24, fontWeight: 500, lineHeight: 1.1,
+    letterSpacing: '-0.015em',
+    margin: '8px 0 6px',
+    color: '#fffdf7',
+  },
+  spotlightBody: {
+    fontSize: 13, lineHeight: 1.5,
+    color: 'rgba(255, 253, 247, 0.82)',
+    margin: '0 0 16px',
+    maxWidth: '85%',
+  },
+  spotlightCta: {
+    alignSelf: 'flex-start',
+    marginTop: 'auto',
+    padding: '10px 18px',
+    background: '#c6926a',
+    color: '#1a2620',
+    fontSize: 13, fontWeight: 600,
+    letterSpacing: '0.02em',
+    borderRadius: 999,
+  },
+
+  // ─── EVENTS STRIP (Happening at Salus) ───
+  eventsStripWrap: {
+    margin: '0 -14px 24px',
+  },
+  eventsStripHeader: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    padding: '0 22px', marginBottom: 14,
+  },
+  eventsStripScroll: {
+    display: 'flex', gap: 12,
+    padding: '2px 4px 4px 22px',
+    overflowX: 'auto', overflowY: 'hidden',
+    scrollSnapType: 'x proximity',
+    WebkitOverflowScrolling: 'touch',
+  },
+  eventCard: {
+    position: 'relative',
+    flex: '0 0 auto',
+    width: 240, height: 280,
+    borderRadius: 18,
+    overflow: 'hidden',
+    border: 'none',
+    padding: 0,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    scrollSnapAlign: 'start',
+    color: '#fffdf7',
+    textAlign: 'left',
+    display: 'block',
+  },
+  eventCardPhoto: {
+    position: 'absolute', inset: 0,
+    backgroundSize: 'cover', backgroundPosition: 'center',
+  },
+  eventCardGradient: {
+    position: 'absolute', inset: 0,
+    background: 'linear-gradient(180deg, rgba(0, 0, 0, 0.15) 0%, rgba(0, 0, 0, 0) 35%, rgba(26, 38, 32, 0.85) 100%)',
+  },
+  eventCardTopRow: {
+    position: 'absolute', top: 16, left: 16, right: 16,
+    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+    zIndex: 2,
+  },
+  eventCardEyebrow: {
+    fontSize: 9.5, fontWeight: 700,
+    letterSpacing: '0.16em', textTransform: 'uppercase',
+    color: '#fffdf7',
+    background: 'rgba(255, 253, 247, 0.18)',
+    backdropFilter: 'blur(8px)',
+    padding: '5px 9px', borderRadius: 999,
+    border: '1px solid rgba(255, 253, 247, 0.22)',
+  },
+  eventCardContent: {
+    position: 'absolute', left: 18, right: 18, bottom: 18,
+    zIndex: 2,
+  },
+  eventCardTitle: {
+    fontFamily: '"Playfair Display", Georgia, serif',
+    fontSize: 22, fontWeight: 500, lineHeight: 1.1,
+    letterSpacing: '-0.01em',
+    margin: '0 0 6px',
+    color: '#fffdf7',
+  },
+  eventCardMeta: {
+    fontSize: 12, color: 'rgba(255, 253, 247, 0.82)',
+    lineHeight: 1.4,
+  },
+  eventCardGoing: {
+    fontSize: 10.5, color: 'rgba(255, 253, 247, 0.72)',
+    marginTop: 8,
+    fontStyle: 'italic',
   },
   todayCardTitle: {
     fontSize: 13, color: '#1a2620', fontWeight: 500,
