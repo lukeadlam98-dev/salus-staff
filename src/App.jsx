@@ -20695,9 +20695,11 @@ const styles = {
   mainChat: {
     position: 'fixed',
     top: 'env(safe-area-inset-top, 0px)',
-    bottom: 'calc(72px + env(safe-area-inset-bottom, 0px))',
+    // Match the bottom nav's actual rendered height so the chat input sits
+    // flush against it. Nav = 10px top pad + 46px tab content + 10px+safe-area bottom pad ≈ 66px.
+    bottom: 'calc(66px + env(safe-area-inset-bottom, 0px))',
     left: 0, right: 0,
-    padding: 8,
+    paddingTop: 8, paddingLeft: 8, paddingRight: 8, paddingBottom: 0,
     display: 'flex', flexDirection: 'column',
     overflow: 'hidden',
     boxSizing: 'border-box',
@@ -20864,7 +20866,12 @@ const styles = {
 
   // Chat
   chatContainer: {
-    background: '#fffdf7', borderRadius: 12, border: '1px solid #e8e0cc',
+    background: '#fffdf7',
+    borderRadius: '12px 12px 0 0',
+    borderTop: '1px solid #e8e0cc',
+    borderLeft: '1px solid #e8e0cc',
+    borderRight: '1px solid #e8e0cc',
+    borderBottom: 'none',
     display: 'flex', flexDirection: 'column',
     flex: 1, minHeight: 0,
     overflow: 'hidden',
@@ -21033,7 +21040,7 @@ const styles = {
     padding: '2px 0',
   },
   chatInputRow: {
-    display: 'flex', gap: 8, padding: 16,
+    display: 'flex', gap: 8, padding: '14px 14px 10px',
     borderTop: '1px solid #e8e0cc', background: '#fffdf7',
     flexShrink: 0,
   },
