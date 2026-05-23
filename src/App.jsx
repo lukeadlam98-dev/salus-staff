@@ -1644,6 +1644,9 @@ export default function SalusStaff() {
           .salus-nav { padding: 6px 8px 0 !important; gap: 2px !important; }
           .salus-nav-tab { padding: 8px 10px !important; font-size: 12px !important; }
           .salus-main { padding: 14px 14px 100px !important; }
+          /* Chat tab is fixed-position, no scroll buffer needed.
+             Higher specificity (.A.B) beats .A so this wins. */
+          .salus-main.salus-main-chat { padding: 8px 8px 0 !important; }
           .salus-section-header { gap: 12px !important; }
           .salus-modal-card { max-width: 100% !important; border-radius: 12px !important; }
           .salus-stats-table { overflow-x: auto; -webkit-overflow-scrolling: touch; }
