@@ -6049,10 +6049,23 @@ function BroadcastBanner({ broadcasts, broadcastReads, currentUser, onMarkRead }
     && (!b.expiresAt || b.expiresAt > now)
   );
 
-  if (unread.length === 0) return null;
-  const latest = unread[0];  // already sorted newest-first
+  // Placeholder when no real broadcast is in the queue — gives the home a
+  // human "from the manager" moment until the broadcasts feature is being
+  // used regularly. A real broadcast in the DB will automatically replace it.
+  const usePlaceholder = unread.length === 0;
+  const latest = usePlaceholder
+    ? {
+        id: '__placeholder__',
+        title: null,
+        body: 'Hope you all had a good bank holiday Monday. #wegrowtogether',
+        urgency: 'normal',
+      }
+    : unread[0];
 
   const isUrgent = latest.urgency === 'urgent';
+  const eyebrowText = usePlaceholder
+    ? 'Message from Luke'
+    : (isUrgent ? 'Urgent · From the team' : 'From the team');
 
   return (
     <div style={{
@@ -6068,28 +6081,32 @@ function BroadcastBanner({ broadcasts, broadcastReads, currentUser, onMarkRead }
           color: isUrgent ? COLOR.coral : COLOR.amber,
           marginBottom: 4,
         }}>
-          {isUrgent ? 'Urgent · From the team' : 'From the team'}
+          {eyebrowText}
         </div>
-        <div style={{ ...TYPE.cardTitle, fontSize: 15, marginBottom: 4 }}>
-          {latest.title}
-        </div>
+        {latest.title && (
+          <div style={{ ...TYPE.cardTitle, fontSize: 15, marginBottom: 4 }}>
+            {latest.title}
+          </div>
+        )}
         <div style={{ ...TYPE.body, color: COLOR.brown, lineHeight: 1.5, fontSize: 13 }}>
           {latest.body}
         </div>
-        {unread.length > 1 && (
+        {!usePlaceholder && unread.length > 1 && (
           <div style={{ ...TYPE.metaSmall, marginTop: 8 }}>
             + {unread.length - 1} more
           </div>
         )}
       </div>
-      <button onClick={() => onMarkRead(latest.id)} className="salus-btn" style={{
-        background: 'transparent', border: 'none', padding: 4,
-        color: COLOR.taupe, fontSize: 10, letterSpacing: '0.08em',
-        textTransform: 'uppercase', fontWeight: 500, flexShrink: 0,
-        cursor: 'pointer',
-      }}>
-        Got it
-      </button>
+      {!usePlaceholder && (
+        <button onClick={() => onMarkRead(latest.id)} className="salus-btn" style={{
+          background: 'transparent', border: 'none', padding: 4,
+          color: COLOR.taupe, fontSize: 10, letterSpacing: '0.08em',
+          textTransform: 'uppercase', fontWeight: 500, flexShrink: 0,
+          cursor: 'pointer',
+        }}>
+          Got it
+        </button>
+      )}
     </div>
   );
 }
