@@ -1615,7 +1615,27 @@ export default function SalusStaff() {
         .salus-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
         .salus-scroll::-webkit-scrollbar-track { background: transparent; }
         .salus-scroll::-webkit-scrollbar-thumb { background: #d4cdb8; border-radius: 3px; }
+        .salus-scroll-h::-webkit-scrollbar { display: none; height: 0; }
+        .salus-scroll-h { scrollbar-width: none; -ms-overflow-style: none; }
         .salus-input:focus { outline: none; border-color: #5c4a38 !important; }
+
+        /* Home page full-bleed wrapper — escapes main's horizontal padding
+           so the warm gradient reaches the screen edges. Matches main's
+           14px mobile / 32px desktop padding. */
+        .salus-home-bleed {
+          margin-left: -32px;
+          margin-right: -32px;
+          padding-left: 32px;
+          padding-right: 32px;
+        }
+        @media (max-width: 768px) {
+          .salus-home-bleed {
+            margin-left: -14px;
+            margin-right: -14px;
+            padding-left: 14px;
+            padding-right: 14px;
+          }
+        }
 
         /* Mobile-specific overrides */
         @media (max-width: 768px) {
@@ -10775,7 +10795,7 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
     : (isManager ? brandPhoto : null);
 
   return (
-    <div style={styles.homeContainer}>
+    <div className="salus-home-bleed" style={styles.homePageBackdrop}>
       {/* Editorial hero — big photo, greeting overlay, next class overlay */}
       <HomeHero
         data={data}
@@ -14461,6 +14481,93 @@ function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onEditMes
 
   const totalDmUnread = dmThreads.reduce((sum, t) => sum + t.unread, 0);
 
+  // ─── In-the-studio-today roster ────────────────────────────────
+  // For each teammate, compute their status TODAY:
+  //   rank 0 → teaching now (sage halo, sage dot)
+  //   rank 1 → on FOH shift now (amber dot)
+  //   rank 2 → coming later today (bone dot, no halo)
+  // Done-earlier and off-today are excluded — we want who's *actually around*.
+  const rosterToday = useMemo(() => {
+    const now = new Date();
+    const todayIso = now.toISOString().slice(0, 10);
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const parseHm = (t) => {
+      if (!t) return null;
+      const parts = t.split(':').map(Number);
+      if (Number.isNaN(parts[0])) return null;
+      return parts[0] * 60 + (parts[1] || 0);
+    };
+    const status = {}; // userId -> { rank, kind, label, sortKey }
+
+    // Classes today
+    (data.classes || []).forEach(c => {
+      if (c.date !== todayIso || !c.coachId) return;
+      const start = parseHm(c.time);
+      if (start == null) return;
+      const end = start + (c.dur || 45);
+      const existing = status[c.coachId];
+      if (nowMin >= start && nowMin < end) {
+        // Teaching now — always wins
+        if (!existing || existing.rank > 0) {
+          status[c.coachId] = { rank: 0, kind: 'teaching', label: 'Teaching now', sortKey: end };
+        }
+      } else if (start > nowMin) {
+        // Comes later
+        if (!existing || (existing.rank > 2) || (existing.rank === 2 && existing.sortKey > start)) {
+          status[c.coachId] = { rank: 2, kind: 'later', label: `Teaches ${c.time}`, sortKey: start };
+        }
+      }
+    });
+
+    // FOH shifts today
+    (data.shifts || []).forEach(s => {
+      if (s.date !== todayIso || !s.userId) return;
+      const start = parseHm(s.startTime);
+      const end = parseHm(s.endTime);
+      if (start == null || end == null) return;
+      const existing = status[s.userId];
+      if (nowMin >= start && nowMin < end) {
+        // On FOH now — beats "later", loses to "teaching"
+        if (!existing || existing.rank > 1) {
+          status[s.userId] = { rank: 1, kind: 'on_shift', label: 'On FOH', sortKey: end };
+        }
+      } else if (start > nowMin) {
+        if (!existing || (existing.rank > 2) || (existing.rank === 2 && existing.sortKey > start)) {
+          status[s.userId] = { rank: 2, kind: 'later', label: `FOH ${s.startTime}`, sortKey: start };
+        }
+      }
+    });
+
+    return Object.entries(status)
+      .map(([uid, info]) => {
+        const user = data.users.find(u => u.id === uid && !u.deactivated);
+        return user ? { user, ...info } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.rank - b.rank || a.sortKey - b.sortKey);
+  }, [data.classes, data.shifts, data.users]);
+
+  // Friendly "now" caption — pluralisation + tone
+  const nowVerb = (() => {
+    const teachingCount = rosterToday.filter(r => r.kind === 'teaching').length;
+    const onShiftCount  = rosterToday.filter(r => r.kind === 'on_shift').length;
+    const laterCount    = rosterToday.filter(r => r.kind === 'later').length;
+    if (teachingCount > 0 && onShiftCount > 0) return `${teachingCount} teaching · ${onShiftCount} on FOH`;
+    if (teachingCount > 0) return `${teachingCount} ${teachingCount === 1 ? 'class' : 'classes'} on the floor right now`;
+    if (onShiftCount > 0)  return `${onShiftCount} on FOH right now`;
+    if (laterCount > 0)    return `${laterCount} coming in later`;
+    return 'A quiet one today';
+  })();
+
+  // Silo-style date label: "Saturday, 23 May"
+  const todayLabel = (() => {
+    const d = new Date();
+    const wkday = d.toLocaleDateString('en-GB', { weekday: 'long' });
+    const dayNum = d.getDate();
+    const monthName = d.toLocaleDateString('en-GB', { month: 'long' });
+    return `${wkday}, ${dayNum} ${monthName}`;
+  })();
+
   return (
     <div style={styles.chatContainer}>
       <div style={styles.chatToggleRow}>
@@ -14499,49 +14606,64 @@ function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onEditMes
         />
       ) : (
         <>
-      <div style={styles.chatHeader}>
-        <div style={{ flex: 1 }}>
-          <div style={{
-            fontSize: 10, color: '#a59478', fontWeight: 600,
-            letterSpacing: '0.18em', textTransform: 'uppercase',
-            marginBottom: 4,
-          }}>
-            The studio
-          </div>
-          <h2 style={styles.chatTitle}>Team Salus</h2>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            marginTop: 8,
-          }}>
-            {/* Stacked avatars — small team feel */}
-            <div style={{ display: 'flex' }}>
-              {data.users.slice(0, 5).map((u, i) => (
-                <div key={u.id} style={{
-                  marginLeft: i === 0 ? 0 : -8,
-                  border: '2px solid #fffdf7',
-                  borderRadius: '50%',
-                  background: '#fffdf7',
-                  zIndex: 5 - i,
-                }}>
-                  <UserAvatar user={u} size={24} fontSize={10} />
-                </div>
-              ))}
-            </div>
-            <p style={{ ...styles.chatSubtitle, margin: 0 }}>
-              {data.users.length} {data.users.length === 1 ? 'teammate' : 'teammates'} · all here together
-            </p>
-          </div>
+      {/* ─── HERO: editorial date block (Silo's "Delivery / Monday, 9/2") ─── */}
+      <div style={styles.chatStudioHero}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={styles.chatStudioEyebrow}>Team chat</div>
+          <h2 style={styles.chatStudioHeroTitle}>{todayLabel}</h2>
+          <div style={styles.chatStudioNowLine}>{nowVerb}</div>
         </div>
         {isManager && data.messages.length > 0 && (
           <button
             onClick={onClearAll}
             className="salus-btn"
-            style={styles.chatClearAllBtn}
-            title="Delete every message in the chat"
+            style={styles.chatHeaderIconBtn}
+            title="Clear chat"
+            aria-label="Clear chat"
           >
-            <Trash2 size={14} />
-            <span>Clear chat</span>
+            <Trash2 size={15} />
           </button>
+        )}
+      </div>
+
+      {/* ─── SECTION: in-the-studio roster (Silo's "AVAILABLE SUPPLIERS") ─── */}
+      <div style={styles.chatStudioRosterSection}>
+        <div style={styles.chatStudioSectionHeader}>
+          <div style={styles.chatStudioEyebrow}>In the studio</div>
+          {rosterToday.length > 0 && (
+            <div style={styles.chatStudioSectionMeta}>
+              {rosterToday.length} {rosterToday.length === 1 ? 'today' : 'today'}
+            </div>
+          )}
+        </div>
+
+        {rosterToday.length > 0 ? (
+          <div className="salus-scroll-h" style={styles.chatRosterScroll}>
+            {rosterToday.map(({ user, kind, label }) => {
+              const statusColor =
+                kind === 'teaching' ? '#5b6d3f' :
+                kind === 'on_shift' ? '#8a5a2e' :
+                                      '#a59478';
+              return (
+                <div key={user.id} style={styles.chatRosterItem}>
+                  <div style={styles.chatRosterAvatarWrap}>
+                    <UserAvatar user={user} size={68} fontSize={22} />
+                  </div>
+                  <div style={styles.chatRosterName}>
+                    {(user.name || '').split(' ')[0]}
+                  </div>
+                  <div style={{ ...styles.chatRosterStatusLine, color: statusColor }}>
+                    {label}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={styles.chatRosterQuiet}>
+            <Sparkles size={14} style={{ color: '#a59478' }} />
+            <span>No one scheduled today — a good day to say hi.</span>
+          </div>
         )}
       </div>
 
@@ -19172,6 +19294,18 @@ const styles = {
 
   // ─── HOME (cover-first dashboard) ───
   homeContainer: { padding: '0 0 100px' },
+
+  // Home-only warm gradient backdrop. Three layers, all very subtle:
+  //   1) Linear cream → warmer cream (top to bottom, candlelit feel)
+  //   2) Amber radial wash at bottom-center (golden-hour glow, 16%)
+  //   3) Sage radial whisper top-right (depth, 8%)
+  // Total opacity of warm layers stays under ~24% combined to keep it whispered, not pink.
+  // Combined with `salus-home-bleed` class to escape main's padding.
+  homePageBackdrop: {
+    padding: '0 0 100px',
+    background: 'radial-gradient(ellipse 110% 55% at 50% 105%, rgba(198, 146, 106, 0.16) 0%, rgba(198, 146, 106, 0) 65%), radial-gradient(ellipse 55% 35% at 78% 10%, rgba(122, 130, 92, 0.08) 0%, rgba(122, 130, 92, 0) 70%), linear-gradient(180deg, #fffdf7 0%, #fbf4e6 100%)',
+    minHeight: '100%',
+  },
   homeGreeting: { padding: '24px 0 24px' },
   homeH1: { fontFamily: '"Playfair Display", serif', fontSize: 30, fontWeight: 400, color: '#1a2620', margin: 0, letterSpacing: '-0.015em', lineHeight: 1.1 },
   homeGreetSub: { fontSize: 13, color: '#7a8270', marginTop: 6, margin: 0, letterSpacing: '0.01em' },
@@ -20732,6 +20866,91 @@ const styles = {
     flex: 1, minHeight: 0,
     overflow: 'hidden',
   },
+
+  // ─── EDITORIAL CHAT HEADER (Silo-inspired: hero date + roster section) ───
+  chatStudioHero: {
+    padding: '24px 22px 18px',
+    background: '#fffdf7',
+    display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+    gap: 12,
+    flexShrink: 0,
+  },
+  chatStudioEyebrow: {
+    fontSize: 10, color: '#a59478', fontWeight: 600,
+    letterSpacing: '0.22em', textTransform: 'uppercase',
+  },
+  chatStudioHeroTitle: {
+    fontFamily: '"Playfair Display", Georgia, serif',
+    fontSize: 30, color: '#1a2620', lineHeight: 1.05,
+    letterSpacing: '-0.015em', fontWeight: 500,
+    margin: '8px 0 0',
+  },
+  chatStudioNowLine: {
+    fontSize: 12.5, color: '#7a8270', marginTop: 8,
+    fontStyle: 'italic', lineHeight: 1.4,
+  },
+  chatHeaderIconBtn: {
+    width: 34, height: 34, borderRadius: '50%',
+    background: 'transparent', border: '1px solid #ebe3cf',
+    color: '#a59478', cursor: 'pointer', flexShrink: 0,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontFamily: 'inherit',
+    marginTop: 4,
+  },
+  chatStudioRosterSection: {
+    padding: '6px 0 20px',
+    background: '#fffdf7',
+    borderBottom: '1px solid #ebe3cf',
+    flexShrink: 0,
+  },
+  chatStudioSectionHeader: {
+    display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+    padding: '0 22px',
+    marginBottom: 16,
+  },
+  chatStudioSectionMeta: {
+    fontSize: 11, color: '#a59478',
+    fontStyle: 'italic',
+    letterSpacing: '0.02em',
+  },
+  chatRosterScroll: {
+    display: 'flex', gap: 10,
+    overflowX: 'auto', overflowY: 'hidden',
+    padding: '2px 22px 4px',
+    scrollSnapType: 'x proximity',
+    WebkitOverflowScrolling: 'touch',
+  },
+  chatRosterItem: {
+    display: 'flex', flexDirection: 'column', alignItems: 'center',
+    flexShrink: 0, gap: 4, width: 80,
+    scrollSnapAlign: 'start',
+  },
+  chatRosterAvatarWrap: {
+    width: 68, height: 68, borderRadius: '50%',
+    overflow: 'hidden',
+  },
+  chatRosterName: {
+    fontSize: 13, color: '#1a2620', fontWeight: 500,
+    marginTop: 10, lineHeight: 1.2,
+    maxWidth: 80, textAlign: 'center',
+    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+    width: '100%',
+  },
+  chatRosterStatusLine: {
+    fontSize: 11, fontWeight: 400,
+    fontStyle: 'italic', lineHeight: 1.3,
+    textAlign: 'center', maxWidth: 80,
+    marginTop: 2,
+    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+    width: '100%',
+  },
+  chatRosterQuiet: {
+    display: 'flex', alignItems: 'center', gap: 8,
+    margin: '0 22px', padding: '12px 14px', borderRadius: 12,
+    background: '#faf6ec', border: '1px solid #ebe3cf',
+    fontSize: 12.5, color: '#7a8270', fontStyle: 'italic',
+  },
+
   chatHeader: {
     padding: '14px 18px', borderBottom: '1px solid #e8e0cc',
     display: 'flex', alignItems: 'center', gap: 12,
@@ -20796,7 +21015,7 @@ const styles = {
     fontSize: 12, fontFamily: 'inherit', cursor: 'pointer', fontWeight: 600,
   },
   messagesList: {
-    flex: 1, overflowY: 'auto', padding: '18px 22px',
+    flex: 1, overflowY: 'auto', padding: '20px 22px',
     display: 'flex', flexDirection: 'column', gap: 4,
   },
   message: { display: 'flex', flexDirection: 'column' },
