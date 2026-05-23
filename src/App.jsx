@@ -10525,7 +10525,7 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
     .sort((a, b) => (a.time || '').localeCompare(b.time || ''));
 
   // My FOH shift today
-  const myFohToday = (data.fohShifts || []).filter(s => s.date === todayIso && s.userId === currentUser.id);
+  const myFohToday = (data.shifts || []).filter(s => s.date === todayIso && s.userId === currentUser.id);
 
   // Editorial subtitle — "3 classes · FOH shift"
   // (Trainer mentions removed — the In-the-studio chat strip + greeting already cover who's around.)
@@ -10601,8 +10601,11 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
     return meta.bg || COLOR.bone;
   };
 
-  // Build today's schedule strip — classes + FOH shifts, sorted chronologically.
-  // Used by the horizontal swipeable strip below.
+  // Build today's schedule strip — classes + FOH shifts.
+  // If today has stuff: show today only (no day prefix).
+  // Else: fall back to the next 7 days (cards get day-of-week prefix).
+  // This ensures the strip is almost always present, giving the home page a
+  // tactile horizontal-swipe moment.
   const nowMin = now.getHours() * 60 + now.getMinutes();
   const parseHm = (t) => {
     if (!t) return null;
@@ -10610,46 +10613,74 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
     if (Number.isNaN(parts[0])) return null;
     return parts[0] * 60 + (parts[1] || 0);
   };
-  const todayItems = (() => {
-    const items = [];
-    myToday.forEach(cls => {
-      const startMin = parseHm(cls.time);
-      const endMin = startMin != null ? startMin + (cls.dur || 45) : null;
-      items.push({
-        id: cls.id,
-        kind: 'class',
-        sortKey: startMin ?? 9999,
-        isPast: endMin != null && nowMin > endMin,
-        isLive: startMin != null && endMin != null && nowMin >= startMin && nowMin < endMin,
-        timeLabel: cls.time || '—',
-        title: cls.type || 'Class',
-        meta: `${cls.dur || 45} min · ${STUDIOS[cls.studio]?.short || ''}`.trim().replace(/·\s*$/, ''),
-        accentColor: classColor(cls),
-        accentBg: classBg(cls),
-      });
-    });
-    myFohToday.forEach(s => {
-      const startMin = parseHm(s.startTime);
-      const endMin = parseHm(s.endTime);
-      items.push({
-        id: s.id,
-        kind: 'foh',
-        sortKey: startMin ?? 9999,
-        isPast: endMin != null && nowMin > endMin,
-        isLive: startMin != null && endMin != null && nowMin >= startMin && nowMin < endMin,
-        timeLabel: s.startTime || '—',
-        title: 'FOH',
-        meta: s.endTime ? `until ${s.endTime}` : 'reception',
-        accentColor: COLOR.amber,
-        accentBg: '#fef0d8',
-      });
-    });
-    items.sort((a, b) => a.sortKey - b.sortKey);
-    // First non-past item is "Up next"
-    const upNextIdx = items.findIndex(i => !i.isPast);
-    if (upNextIdx >= 0) items[upNextIdx].isUpNext = !items[upNextIdx].isLive;
-    return items;
-  })();
+  const buildClassItem = (cls, isToday) => {
+    const startMin = parseHm(cls.time);
+    const endMin = startMin != null ? startMin + (cls.dur || 45) : null;
+    const studio = STUDIOS[cls.studio]?.short || '';
+    return {
+      id: cls.id,
+      kind: 'class',
+      date: cls.date,
+      sortKey: `${cls.date} ${cls.time || ''}`,
+      isToday,
+      isPast: isToday && endMin != null && nowMin > endMin,
+      isLive: isToday && startMin != null && endMin != null && nowMin >= startMin && nowMin < endMin,
+      dayPrefix: isToday ? null : new Date(cls.date).toLocaleDateString('en-GB', { weekday: 'short' }),
+      timeLabel: cls.time || '—',
+      title: cls.type || 'Class',
+      meta: studio ? `${cls.dur || 45} min · ${studio}` : `${cls.dur || 45} min`,
+      accentColor: classColor(cls),
+      accentBg: classBg(cls),
+    };
+  };
+  const buildFohItem = (s, isToday) => {
+    const startMin = parseHm(s.startTime);
+    const endMin = parseHm(s.endTime);
+    return {
+      id: s.id,
+      kind: 'foh',
+      date: s.date,
+      sortKey: `${s.date} ${s.startTime || ''}`,
+      isToday,
+      isPast: isToday && endMin != null && nowMin > endMin,
+      isLive: isToday && startMin != null && endMin != null && nowMin >= startMin && nowMin < endMin,
+      dayPrefix: isToday ? null : new Date(s.date).toLocaleDateString('en-GB', { weekday: 'short' }),
+      timeLabel: s.startTime || '—',
+      title: 'FOH',
+      meta: s.endTime ? `until ${s.endTime}` : 'reception',
+      accentColor: COLOR.amber,
+      accentBg: '#fef0d8',
+    };
+  };
+
+  // Today's items
+  const todayItemsRaw = [
+    ...myToday.map(c => buildClassItem(c, true)),
+    ...myFohToday.map(s => buildFohItem(s, true)),
+  ].sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+
+  // Upcoming items (next 7 days, today excluded) — only used as fallback
+  const sevenDaysOut = new Date(now);
+  sevenDaysOut.setDate(sevenDaysOut.getDate() + 7);
+  const sevenDaysIso = sevenDaysOut.toISOString().slice(0, 10);
+  const upcomingClasses = (data.classes || [])
+    .filter(c => c.coachId === currentUser.id && c.date > todayIso && c.date <= sevenDaysIso)
+    .map(c => buildClassItem(c, false));
+  const upcomingFoh = (data.shifts || [])
+    .filter(s => s.userId === currentUser.id && s.date > todayIso && s.date <= sevenDaysIso)
+    .map(s => buildFohItem(s, false));
+  const upcomingItemsRaw = [...upcomingClasses, ...upcomingFoh]
+    .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
+    .slice(0, 10);
+
+  const stripUsesToday = todayItemsRaw.length > 0;
+  const todayItems = stripUsesToday ? todayItemsRaw : upcomingItemsRaw;
+  const stripHeader = stripUsesToday ? 'Today' : 'Coming up';
+  // Mark "Up next" — only meaningful for today's strip
+  if (stripUsesToday) {
+    const upNextIdx = todayItems.findIndex(i => !i.isPast && !i.isLive);
+    if (upNextIdx >= 0) todayItems[upNextIdx].isUpNext = true;
+  }
   const hasTodayStrip = todayItems.length > 0;
 
   const studioLabel = (s) => {
@@ -10673,12 +10704,13 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
         </div>
       )}
 
-      {/* Today strip — horizontal swipeable cards for tactile interaction.
-          Bleeds to the edges of the home content (escapes the 14px home padding). */}
+      {/* Today/Coming-up strip — horizontal swipeable cards for tactile interaction.
+          Bleeds to the edges of the home content (escapes the 14px home padding).
+          Shows today's items if any, else falls back to next 7 days. */}
       {hasTodayStrip && (
         <div style={styles.todayStripWrap}>
           <div style={styles.todayStripHeader}>
-            <div style={TYPE.eyebrow}>Today</div>
+            <div style={TYPE.eyebrow}>{stripHeader}</div>
             <div style={styles.todayStripCount}>
               {todayItems.length} {todayItems.length === 1 ? 'thing' : 'things'}
             </div>
@@ -10695,13 +10727,16 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
                   borderLeft: `3px solid ${item.accentColor}`,
                   cursor: item.kind === 'class' ? 'pointer' : 'default',
                 }}
-                aria-label={`${item.timeLabel} ${item.title}`}
+                aria-label={`${item.dayPrefix ? item.dayPrefix + ' ' : ''}${item.timeLabel} ${item.title}`}
               >
                 {item.isLive && (
                   <span style={{ ...styles.todayCardBadge, color: '#5b6d3f' }}>● Now</span>
                 )}
                 {item.isUpNext && !item.isLive && (
                   <span style={styles.todayCardBadge}>Up next</span>
+                )}
+                {item.dayPrefix && (
+                  <div style={styles.todayCardDayPrefix}>{item.dayPrefix}</div>
                 )}
                 <div style={styles.todayCardTime}>{item.timeLabel}</div>
                 <div style={styles.todayCardTitle}>{item.title}</div>
@@ -19457,6 +19492,11 @@ const styles = {
     lineHeight: 1, letterSpacing: '-0.015em',
     fontVariantNumeric: 'tabular-nums',
     marginTop: 2,
+  },
+  todayCardDayPrefix: {
+    fontSize: 9, color: '#a59478', fontWeight: 700,
+    letterSpacing: '0.12em', textTransform: 'uppercase',
+    marginBottom: 3,
   },
   todayCardTitle: {
     fontSize: 13, color: '#1a2620', fontWeight: 500,
