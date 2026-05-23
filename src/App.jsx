@@ -10923,10 +10923,8 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
       {/* ─── Spotlight CTA — cinematic image card promoting one thing ─── */}
       <SpotlightCard />
 
-      {/* ─── Studio events — horizontal slider of what's happening ─── */}
-      <StudioEvents />
-
-      {/* Manager broadcasts — urgent comms */}
+      {/* Manager broadcasts — message from the studio, sits between Spotlight
+          and the widget stack as the primary "news" surface. */}
       <BroadcastBanner
         broadcasts={data.broadcasts || []}
         broadcastReads={data.broadcastReads || []}
@@ -10937,7 +10935,10 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
       {/* Render widgets in user's chosen order */}
       {widgets.map(widgetKey => {
         switch (widgetKey) {
-          case 'cover': return (
+          case 'cover':
+            // Hide entirely when nothing needs cover — no "all shifts covered" empty state.
+            if (totalCoverAttention === 0) return null;
+            return (
             <div key="cover" style={styles.homeCarouselSection}>
               <div style={styles.homeCarouselHeader}>
                 <div style={styles.homeCarouselEyebrow}>
@@ -10952,45 +10953,33 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
                   </button>
                 )}
               </div>
-              {totalCoverAttention === 0 ? (
-                <div style={styles.homeAllCoveredCard}>
-                  <div style={styles.homeAllCoveredCheck}>
-                    <Check size={18} strokeWidth={2.4} />
+              <div className="salus-scroll-h" style={styles.homeCarouselTrack}>
+                {openCovers.map((req, idx) => (
+                  <div key={req.id} style={styles.homeCarouselCard}>
+                    <CoverHomeCard
+                      req={req}
+                      users={data.users}
+                      interested={data.users.filter(u => req.interestedCovers?.includes(u.id))}
+                      urgent={idx === 0}
+                      onClick={() => onClassClick(req.cls.id)}
+                      onClaim={() => onClaim(req)}
+                      currentUser={currentUser}
+                    />
                   </div>
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: '#1a2620' }}>All shifts covered</div>
-                    <div style={{ fontSize: 12, color: '#a59478', marginTop: 2 }}>Nothing on the board right now.</div>
+                ))}
+                {pendingForManager.map(req => (
+                  <div key={req.id} style={styles.homeCarouselCard}>
+                    <CoverHomeCard
+                      req={req}
+                      users={data.users}
+                      interested={[]}
+                      pending={true}
+                      onClick={() => onClassClick(req.cls.id)}
+                      currentUser={currentUser}
+                    />
                   </div>
-                </div>
-              ) : (
-                <div className="salus-scroll-h" style={styles.homeCarouselTrack}>
-                  {openCovers.map((req, idx) => (
-                    <div key={req.id} style={styles.homeCarouselCard}>
-                      <CoverHomeCard
-                        req={req}
-                        users={data.users}
-                        interested={data.users.filter(u => req.interestedCovers?.includes(u.id))}
-                        urgent={idx === 0}
-                        onClick={() => onClassClick(req.cls.id)}
-                        onClaim={() => onClaim(req)}
-                        currentUser={currentUser}
-                      />
-                    </div>
-                  ))}
-                  {pendingForManager.map(req => (
-                    <div key={req.id} style={styles.homeCarouselCard}>
-                      <CoverHomeCard
-                        req={req}
-                        users={data.users}
-                        interested={[]}
-                        pending={true}
-                        onClick={() => onClassClick(req.cls.id)}
-                        currentUser={currentUser}
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
+                ))}
+              </div>
             </div>
           );
 
@@ -11073,34 +11062,20 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
           case 'tours': return <ToursTile key="tours" data={data} currentUser={currentUser} onOpenTour={onOpenTour} />;
           case 'tasks': return <TasksTile key="tasks" data={data} currentUser={currentUser} isManager={isManager} onCreate={onCreateTask} onOpenTask={onOpenTask} onOpenAll={onOpenAllTasks} />;
 
-          case 'request_cover': return (
-            <button key="request_cover" onClick={onRequestCover} style={styles.homeRequestCard} className="salus-btn">
-              <div style={styles.homeRequestIcon}><Plus size={18} /></div>
-              <div style={{ flex: 1, textAlign: 'left' }}>
-                <div style={styles.homeRequestTitle}>
-                  {isManager ? 'Post a shift for cover' : 'I need cover for one of my classes'}
-                </div>
-                <div style={styles.homeRequestSub}>Your team will see it instantly</div>
-              </div>
-            </button>
-          );
-
-          case 'hire_studio': return (
-            <button key="hire_studio" onClick={onHireStudio} style={styles.homeHireCard} className="salus-btn">
-              <div style={styles.homeHireIcon}><Calendar size={18} /></div>
-              <div style={{ flex: 1, textAlign: 'left' }}>
-                <div style={styles.homeRequestTitle}>Hire a studio</div>
-                <div style={styles.homeRequestSub}>For a 1:1 session or private event</div>
-              </div>
-            </button>
-          );
-
-          case 'total_hours':  return null; // removed — "This week" stats now cover this
-          case 'quote':        return <QuoteWidget key="quote" />;
-          case 'chat_preview': return null; // removed — chat lives in its own tab
+          case 'request_cover': return null; // removed per Luke — too cluttered
+          case 'hire_studio':   return null; // removed per Luke
+          case 'total_hours':   return null; // removed — "This week" stats now cover this
+          case 'quote':         return <QuoteWidget key="quote" />;
+          case 'chat_preview':  return null; // removed — chat lives in its own tab
           default: return null;
         }
       })}
+
+      {/* ─── Studio events — horizontal slider of what's happening.
+          Lives at the bottom as the "community moment" — separated from the
+          Spotlight CTA by the manager broadcast + widgets so the page doesn't
+          stack two image-heavy sections back-to-back. */}
+      <StudioEvents />
 
       {/* Customize home — prominent link at the bottom */}
       <button onClick={() => setShowCustomize(true)} className="salus-btn" style={{
@@ -11419,13 +11394,11 @@ const ALL_WIDGETS = [
   { key: 'tasks',         group: 'attention', label: 'Tasks',                 Icon: ListChecks,    desc: 'Your task list',                              managerOnly: true },
   { key: 'upcoming',      group: 'day',       label: 'Your upcoming classes', Icon: Calendar,      desc: 'Your next teaching slots' },
   { key: 'tours',         group: 'day',       label: 'Tours',                 Icon: MapPin,        desc: 'Upcoming tours from Google Calendar',         managerOnly: true },
-  { key: 'request_cover', group: 'actions',   label: 'Request cover',         Icon: Plus,          desc: 'Quick button to post a cover request' },
-  { key: 'hire_studio',   group: 'actions',   label: 'Hire a studio',         Icon: Building2,     desc: 'Quick button to book the studio' },
   { key: 'quote',         group: 'extras',    label: 'Quote of the day',      Icon: Quote,         desc: 'A different quote each day' },
 ];
 
-const DEFAULT_WIDGETS_MANAGER = ['cover', 'upcoming', 'tours', 'tasks', 'request_cover', 'hire_studio'];
-const DEFAULT_WIDGETS_STAFF   = ['upcoming', 'request_cover', 'hire_studio'];
+const DEFAULT_WIDGETS_MANAGER = ['cover', 'upcoming', 'tours', 'tasks'];
+const DEFAULT_WIDGETS_STAFF   = ['upcoming'];
 
 const WIDGET_GROUPS = [
   { key: 'attention', label: 'Needs your attention' },
