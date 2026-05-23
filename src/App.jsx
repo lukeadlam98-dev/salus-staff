@@ -10716,45 +10716,32 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
             </div>
           </div>
           <div className="salus-scroll-h" style={styles.todayStripScroll}>
-            {todayItems.map(item => {
-              // Convert accent hex (#rrggbb) → rgba with low alpha for the subtle border
-              const hexToRgba = (hex, a) => {
-                const h = (hex || '#c6926a').replace('#', '');
-                const n = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
-                const r = parseInt(n.slice(0, 2), 16);
-                const g = parseInt(n.slice(2, 4), 16);
-                const b = parseInt(n.slice(4, 6), 16);
-                return `rgba(${r}, ${g}, ${b}, ${a})`;
-              };
-              return (
-                <button
-                  key={`${item.kind}-${item.id}`}
-                  onClick={() => item.kind === 'class' && onClassClick && onClassClick(item.id)}
-                  className="salus-btn"
-                  style={{
-                    ...styles.todayCard,
-                    ...(item.isPast ? styles.todayCardPast : {}),
-                    background: item.accentBg,
-                    borderColor: hexToRgba(item.accentColor, 0.18),
-                    cursor: item.kind === 'class' ? 'pointer' : 'default',
-                  }}
-                  aria-label={`${item.dayPrefix ? item.dayPrefix + ' ' : ''}${item.timeLabel} ${item.title}`}
-                >
-                  {item.isLive && (
-                    <span style={{ ...styles.todayCardBadge, color: '#5b6d3f' }}>● Now</span>
-                  )}
-                  {item.isUpNext && !item.isLive && (
-                    <span style={styles.todayCardBadge}>Up next</span>
-                  )}
-                  {item.dayPrefix && (
-                    <div style={styles.todayCardDayPrefix}>{item.dayPrefix}</div>
-                  )}
-                  <div style={styles.todayCardTime}>{item.timeLabel}</div>
-                  <div style={styles.todayCardTitle}>{item.title}</div>
-                  <div style={styles.todayCardMeta}>{item.meta}</div>
-                </button>
-              );
-            })}
+            {todayItems.map(item => (
+              <button
+                key={`${item.kind}-${item.id}`}
+                onClick={() => item.kind === 'class' && onClassClick && onClassClick(item.id)}
+                className="salus-btn"
+                style={{
+                  ...styles.todayCard,
+                  ...(item.isPast ? styles.todayCardPast : {}),
+                  cursor: item.kind === 'class' ? 'pointer' : 'default',
+                }}
+                aria-label={`${item.dayPrefix ? item.dayPrefix + ' ' : ''}${item.timeLabel} ${item.title}`}
+              >
+                {item.isLive && (
+                  <span style={{ ...styles.todayCardBadge, color: '#5b6d3f' }}>● Now</span>
+                )}
+                {item.isUpNext && !item.isLive && (
+                  <span style={styles.todayCardBadge}>Up next</span>
+                )}
+                {item.dayPrefix && (
+                  <div style={styles.todayCardDayPrefix}>{item.dayPrefix}</div>
+                )}
+                <div style={styles.todayCardTime}>{item.timeLabel}</div>
+                <div style={styles.todayCardTitle}>{item.title}</div>
+                <div style={styles.todayCardMeta}>{item.meta}</div>
+              </button>
+            ))}
           </div>
         </div>
       )}
@@ -19480,8 +19467,8 @@ const styles = {
   },
   todayCard: {
     flex: '0 0 auto', width: 138, minHeight: 108,
-    background: '#fffdf7', // overridden inline per item with CLASS_TYPES.bg tint
-    border: '1px solid transparent', // overridden inline with low-alpha accent
+    background: '#fffdf7',
+    border: '1px solid #efe7d2',
     borderRadius: 14,
     padding: '12px 14px',
     display: 'flex', flexDirection: 'column',
@@ -19508,7 +19495,7 @@ const styles = {
     marginTop: 2,
   },
   todayCardDayPrefix: {
-    fontSize: 9, color: '#7a6b54', fontWeight: 700,
+    fontSize: 9, color: '#a59478', fontWeight: 700,
     letterSpacing: '0.12em', textTransform: 'uppercase',
     marginBottom: 3,
   },
@@ -19519,7 +19506,7 @@ const styles = {
     display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2,
   },
   todayCardMeta: {
-    fontSize: 9.5, color: '#7a6b54',
+    fontSize: 9.5, color: '#a59478',
     letterSpacing: '0.08em', textTransform: 'uppercase',
     fontWeight: 600, marginTop: 'auto', paddingTop: 8,
   },
