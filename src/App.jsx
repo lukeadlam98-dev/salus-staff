@@ -10527,22 +10527,8 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
   // My FOH shift today
   const myFohToday = (data.fohShifts || []).filter(s => s.date === todayIso && s.userId === currentUser.id);
 
-  // Who else is around today (excluding self)
-  const todayTeammates = new Set();
-  data.classes.filter(c => c.date === todayIso).forEach(c => {
-    if (c.coachId && c.coachId !== currentUser.id) todayTeammates.add(c.coachId);
-  });
-  (data.fohShifts || []).filter(s => s.date === todayIso).forEach(s => {
-    if (s.userId && s.userId !== currentUser.id) todayTeammates.add(s.userId);
-  });
-  const teammateNames = Array.from(todayTeammates)
-    .map(id => data.users.find(u => u.id === id))
-    .filter(Boolean)
-    .map(u => u.name?.split(' ')[0])
-    .filter(Boolean)
-    .slice(0, 3);
-
-  // Editorial subtitle — "3 classes · FOH shift · with Karis and Mike"
+  // Editorial subtitle — "3 classes · FOH shift"
+  // (Trainer mentions removed — the In-the-studio chat strip + greeting already cover who's around.)
   const subtitle = (() => {
     const parts = [];
     if (myToday.length > 0) {
@@ -10550,13 +10536,6 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
     }
     if (myFohToday.length > 0) {
       parts.push('FOH shift');
-    }
-    if (teammateNames.length === 1) {
-      parts.push(`with ${teammateNames[0]}`);
-    } else if (teammateNames.length === 2) {
-      parts.push(`with ${teammateNames[0]} and ${teammateNames[1]}`);
-    } else if (teammateNames.length >= 3) {
-      parts.push(`with ${teammateNames[0]}, ${teammateNames[1]} and others`);
     }
     return parts.length > 0 ? parts.join(' · ') : 'A quiet day — nothing on your schedule';
   })();
@@ -10577,6 +10556,14 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
   const sessionRate = currentUser.sessionRatePence || 3000;
   const weeklyEarningsPence = sessionRate * myWeekCount;
   const showEarnings = isCoach && myWeekCount > 0;
+
+  // Shifts/classes needing cover THIS WEEK (system-wide, glanceable stat)
+  // Counts open + pending cover requests whose class falls within the current week.
+  const weekCoverNeeded = (data.coverRequests || []).filter(r => {
+    if (r.status !== 'open' && r.status !== 'pending') return false;
+    const cls = data.classes.find(c => c.id === r.classId);
+    return cls && cls.date >= weekStartIso && cls.date <= weekEndIso;
+  }).length;
 
   // Up next — first future class today
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
@@ -10630,7 +10617,7 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
         </div>
       )}
 
-      {/* This week's stats — only for coaches with classes */}
+      {/* This week's stats — only for coaches with classes. Order: classes → earnings → cover needed. */}
       {showEarnings && (
         <div style={{
           padding: '14px 16px', marginBottom: 16,
@@ -10638,8 +10625,19 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
           background: COLOR.cream,
         }}>
           <div style={{ ...TYPE.eyebrow, marginBottom: 10 }}>This week</div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 22 }}>
-            <div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 18 }}>
+            {/* Classes */}
+            <div style={{ flex: '0 0 auto' }}>
+              <div style={{ fontFamily: COLOR.serif, fontSize: 22, color: COLOR.forest, lineHeight: 1, letterSpacing: '-0.015em' }}>
+                {myWeekCount}
+              </div>
+              <div style={{ fontSize: 10, color: COLOR.taupe, marginTop: 5, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                {myWeekCount === 1 ? 'Class' : 'Classes'}
+              </div>
+            </div>
+            <div style={{ width: 1, height: 36, background: COLOR.bone }} />
+            {/* Earnings */}
+            <div style={{ flex: '0 0 auto' }}>
               <div style={{ fontFamily: COLOR.serif, fontSize: 22, color: COLOR.forest, lineHeight: 1, letterSpacing: '-0.015em' }}>
                 £{Math.round(weeklyEarningsPence / 100).toLocaleString('en-GB')}
               </div>
@@ -10648,12 +10646,16 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
               </div>
             </div>
             <div style={{ width: 1, height: 36, background: COLOR.bone }} />
-            <div>
-              <div style={{ fontFamily: COLOR.serif, fontSize: 22, color: COLOR.forest, lineHeight: 1, letterSpacing: '-0.015em' }}>
-                {myWeekCount}
+            {/* Cover needed this week (system-wide) */}
+            <div style={{ flex: '0 0 auto' }}>
+              <div style={{
+                fontFamily: COLOR.serif, fontSize: 22, lineHeight: 1, letterSpacing: '-0.015em',
+                color: weekCoverNeeded > 0 ? COLOR.coral : COLOR.forest,
+              }}>
+                {weekCoverNeeded}
               </div>
               <div style={{ fontSize: 10, color: COLOR.taupe, marginTop: 5, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                {myWeekCount === 1 ? 'Class' : 'Classes'}
+                Need cover
               </div>
             </div>
           </div>
@@ -10948,9 +10950,9 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
             </button>
           );
 
-          case 'total_hours': return <TotalHoursWidget key="total_hours" data={data} currentUser={currentUser} />;
-          case 'quote':       return <QuoteWidget key="quote" />;
-          case 'chat_preview': return <ChatPreviewWidget key="chat_preview" data={data} currentUser={currentUser} onViewChat={onViewChat} />;
+          case 'total_hours':  return null; // removed — "This week" stats now cover this
+          case 'quote':        return <QuoteWidget key="quote" />;
+          case 'chat_preview': return null; // removed — chat lives in its own tab
           default: return null;
         }
       })}
@@ -11143,11 +11145,9 @@ const ALL_WIDGETS = [
   { key: 'cover',         group: 'attention', label: 'Cover requests',        Icon: CoverIcon,     desc: 'Classes and shifts that need cover' },
   { key: 'tasks',         group: 'attention', label: 'Tasks',                 Icon: ListChecks,    desc: 'Your task list',                              managerOnly: true },
   { key: 'upcoming',      group: 'day',       label: 'Your upcoming classes', Icon: Calendar,      desc: 'Your next teaching slots' },
-  { key: 'total_hours',   group: 'day',       label: 'Hours this week',       Icon: Clock,         desc: 'Your scheduled hours (classes plus FOH)' },
   { key: 'tours',         group: 'day',       label: 'Tours',                 Icon: MapPin,        desc: 'Upcoming tours from Google Calendar',         managerOnly: true },
   { key: 'request_cover', group: 'actions',   label: 'Request cover',         Icon: Plus,          desc: 'Quick button to post a cover request' },
   { key: 'hire_studio',   group: 'actions',   label: 'Hire a studio',         Icon: Building2,     desc: 'Quick button to book the studio' },
-  { key: 'chat_preview',  group: 'extras',    label: 'Team chat preview',     Icon: MessageCircle, desc: 'Latest messages from team chat' },
   { key: 'quote',         group: 'extras',    label: 'Quote of the day',      Icon: Quote,         desc: 'A different quote each day' },
 ];
 
