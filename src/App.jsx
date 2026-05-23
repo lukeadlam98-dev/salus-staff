@@ -8,7 +8,8 @@ import {
   Inbox, Shield, RefreshCw, MapPin, Target, Phone, AtSign, Briefcase,
   RotateCcw as CoverIcon, ListChecks, Quote, Building2, MessageCircle,
   Home as HomeIcon, FileText, User as UserIcon, Settings as SettingsIcon,
-  Package, ExternalLink
+  Package, ExternalLink,
+  Star, Trophy, Medal, Crown, Gem
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import {
@@ -3207,17 +3208,17 @@ function MyStatsCard({ data, currentUser }) {
     cursor = addDays(cursor, -7);
   }
 
-  // Achievements (badges)
+  // Achievements (badges) — luxury lucide-react icons, no emoji
   const totalActivity = completed.length + completedShifts.length;
   const achievements = [
-    { id: 'first',     name: 'First class', desc: 'Taught your first session', threshold: 1,   value: totalActivity, icon: '🎯' },
-    { id: 'ten',       name: '10 in',       desc: '10 sessions taught',       threshold: 10,  value: totalActivity, icon: '⭐' },
-    { id: 'fifty',     name: 'Fifty club',  desc: '50 sessions taught',       threshold: 50,  value: totalActivity, icon: '🏅' },
-    { id: 'century',   name: 'Centurion',   desc: '100 sessions taught',      threshold: 100, value: totalActivity, icon: '💯' },
-    { id: 'cover5',    name: 'Cover hero',  desc: '5 cover shifts claimed',   threshold: 5,   value: coversClaimedByMe.length, icon: '🦸' },
-    { id: 'streak4',   name: '1-month streak',  desc: '4 weeks in a row',     threshold: 4,   value: streak, icon: '🔥' },
-    { id: 'streak12',  name: '3-month streak',  desc: '12 weeks in a row',    threshold: 12,  value: streak, icon: '🔥' },
-    { id: 'streak26',  name: 'Half-year streak', desc: '26 weeks in a row',   threshold: 26,  value: streak, icon: '🔥' },
+    { id: 'first',     name: 'First class',      desc: 'Taught your first session', threshold: 1,   value: totalActivity, Icon: Target,  tint: '#5c4a38' },
+    { id: 'ten',       name: '10 in',            desc: '10 sessions taught',        threshold: 10,  value: totalActivity, Icon: Star,    tint: '#c6926a' },
+    { id: 'fifty',     name: 'Fifty club',       desc: '50 sessions taught',        threshold: 50,  value: totalActivity, Icon: Medal,   tint: '#c6926a' },
+    { id: 'century',   name: 'Centurion',        desc: '100 sessions taught',       threshold: 100, value: totalActivity, Icon: Trophy,  tint: '#c6926a' },
+    { id: 'cover5',    name: 'Cover hero',       desc: '5 cover shifts claimed',    threshold: 5,   value: coversClaimedByMe.length, Icon: Shield, tint: '#7a8c5c' },
+    { id: 'streak4',   name: '1-month streak',   desc: '4 weeks in a row',          threshold: 4,   value: streak, Icon: Flame, tint: '#c6926a' },
+    { id: 'streak12',  name: '3-month streak',   desc: '12 weeks in a row',         threshold: 12,  value: streak, Icon: Flame, tint: '#c8442a' },
+    { id: 'streak26',  name: 'Half-year streak', desc: '26 weeks in a row',         threshold: 26,  value: streak, Icon: Crown, tint: '#5c4a38' },
   ];
 
   // Find next milestone
@@ -3280,11 +3281,12 @@ function MyStatsCard({ data, currentUser }) {
         </div>
       )}
 
-      {/* Achievement badges */}
+      {/* Achievement badges — luxury icons in soft circle */}
       <div style={styles.statsBadgesLabel}>Achievements</div>
       <div style={styles.statsBadgesGrid}>
         {achievements.map(a => {
           const unlocked = a.value >= a.threshold;
+          const IconCmp = a.Icon;
           return (
             <div key={a.id}
               title={`${a.name} · ${a.desc}${unlocked ? '' : ` (${a.value}/${a.threshold})`}`}
@@ -3293,7 +3295,20 @@ function MyStatsCard({ data, currentUser }) {
                 ...(unlocked ? styles.statsBadgeUnlocked : styles.statsBadgeLocked),
               }}
             >
-              <div style={{ fontSize: 22, opacity: unlocked ? 1 : 0.3, filter: unlocked ? 'none' : 'grayscale(1)' }}>{a.icon}</div>
+              <div style={{
+                width: 44, height: 44, borderRadius: 22,
+                background: unlocked ? '#f5f1e8' : '#efe7d2',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: unlocked ? a.tint : '#d4cdb8',
+                marginBottom: 6,
+              }}>
+                <IconCmp
+                  size={20}
+                  strokeWidth={1.6}
+                  fill={unlocked ? a.tint : 'none'}
+                  color={unlocked ? a.tint : '#d4cdb8'}
+                />
+              </div>
               <div style={styles.statsBadgeName}>{a.name}</div>
             </div>
           );
@@ -12163,12 +12178,13 @@ const pillStyle = {
 // showing class count on top, day number below. Selected day filled forest.
 // Toggleable. Cover-needed surfaced by bottom-nav badge + coral indicators.
 function StaffScheduleView({ data, currentUser, onClassClick }) {
-  const [view, setView] = useState('mine'); // 'mine' | 'everyone'
+  const [view, setView] = useState('mine'); // 'mine' | 'everyone' | 'hire'
 
   // Defensive
   const allClasses = data?.classes || [];
   const allUsers = data?.users || [];
   const allCovers = data?.coverRequests || [];
+  const allBookings = data?.bookings || [];
 
   // selectedDate drives both the month grid and the week shown below
   const now = new Date();
@@ -12249,16 +12265,51 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
   const goNextMonth = () => setSelectedDate(new Date(monthYear, monthIdx + 1, 1));
 
   // Filter classes for the visible week
-  const visibleClasses = (() => {
-    const weekClasses = allClasses.filter(c => c.date >= weekStartIso && c.date <= weekEndIso);
-    if (view === 'mine') return weekClasses.filter(c => c.coachId === currentUser.id);
-    return weekClasses;
+  // Convert items into a unified shape (class OR booking) for the timeline
+  const classToItem = (c) => ({
+    id: 'cls:' + c.id,
+    kind: 'class',
+    date: c.date,
+    time: c.time,
+    durationMin: c.durationMin,
+    title: c.type,
+    studio: c.studio,
+    coachId: c.coachId,
+    raw: c,
+  });
+  const bookingToItem = (b) => ({
+    id: 'bkg:' + b.id,
+    kind: 'booking',
+    date: b.date,
+    time: b.startTime,
+    endTime: b.endTime,
+    durationMin: (() => {
+      if (!b.startTime || !b.endTime) return null;
+      const [sh, sm] = b.startTime.split(':').map(Number);
+      const [eh, em] = b.endTime.split(':').map(Number);
+      return (eh * 60 + em) - (sh * 60 + sm);
+    })(),
+    title: b.title || (b.bookingType === 'private_session' ? 'Private session' : 'Studio hire'),
+    studio: b.studio,
+    hirerName: b.hirerName,
+    bookingType: b.bookingType,
+    raw: b,
+  });
+
+  const visibleItems = (() => {
+    const weekClasses = allClasses.filter(c => c.date >= weekStartIso && c.date <= weekEndIso).map(classToItem);
+    const weekBookings = allBookings.filter(b => b.date >= weekStartIso && b.date <= weekEndIso).map(bookingToItem);
+
+    if (view === 'hire') return weekBookings;
+    if (view === 'mine') return weekClasses.filter(i => i.coachId === currentUser.id);
+    // Everyone view: classes + hire bookings interleaved
+    return [...weekClasses, ...weekBookings];
   })();
 
   const byDate = {};
-  visibleClasses.forEach(c => {
-    if (!byDate[c.date]) byDate[c.date] = [];
-    byDate[c.date].push(c);
+  visibleItems.forEach(item => {
+    if (!byDate[item.date]) byDate[item.date] = [];
+    byDate[item.date].push(item);
   });
   Object.keys(byDate).forEach(d => byDate[d].sort((a, b) => (a.time || '').localeCompare(b.time || '')));
 
@@ -12414,7 +12465,7 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
         display: 'flex', gap: 22, padding: '0 4px 8px',
         borderBottom: '1px solid #efe7d2', marginBottom: 18,
       }}>
-        {[['mine', 'Mine'], ['everyone', 'Everyone']].map(([key, label]) => {
+        {[['mine', 'Mine'], ['everyone', 'Everyone'], ['hire', 'Hire']].map(([key, label]) => {
           const isActive = view === key;
           return (
             <button key={key}
@@ -12435,15 +12486,15 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
       </div>
 
       {/* Timeline — week of selectedDate */}
-      {visibleClasses.length === 0 ? (
-        <EmptyState sub={view === 'mine' ? 'A quiet week — enjoy.' : 'Nothing on the studio schedule.'}>
-          {view === 'mine' ? 'No classes this week.' : 'Empty week.'}
+      {visibleItems.length === 0 ? (
+        <EmptyState sub={view === 'mine' ? 'A quiet week — enjoy.' : view === 'hire' ? 'No studio hires this week.' : 'Nothing on the studio schedule.'}>
+          {view === 'mine' ? 'No classes this week.' : view === 'hire' ? 'No hires booked.' : 'Empty week.'}
         </EmptyState>
       ) : (
         weekDates.map(d => {
           const iso = toIso(d);
-          const dayClasses = byDate[iso] || [];
-          if (dayClasses.length === 0) return null;
+          const dayItems = byDate[iso] || [];
+          if (dayItems.length === 0) return null;
           const isToday = iso === todayIso;
           const dayName = d.toLocaleDateString('en-GB', { weekday: 'long' });
           const dayNum = d.getDate();
@@ -12460,20 +12511,89 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
                 {dayName} {dayNum}
               </div>
 
-              {dayClasses.map((c, idx) => {
+              {dayItems.map((item, idx) => {
+                // BOOKING/HIRE row
+                if (item.kind === 'booking') {
+                  const b = item.raw;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('salus:openModal', { detail: { type: 'bookingDetail', id: b.id } })); }}
+                      className="salus-btn"
+                      style={{
+                        display: 'flex', gap: 18, padding: '8px 4px 18px 4px',
+                        background: 'transparent', border: 'none',
+                        cursor: 'pointer', textAlign: 'left',
+                        width: '100%', fontFamily: 'inherit',
+                        opacity: view === 'everyone' ? 0.78 : 1,
+                        borderBottom: idx === dayItems.length - 1 ? 'none' : '1px solid #f5ecd6',
+                        marginBottom: idx === dayItems.length - 1 ? 0 : 4,
+                      }}>
+                      <div style={{ flexShrink: 0, minWidth: 52, paddingTop: 4 }}>
+                        <div style={{
+                          fontSize: 13, fontWeight: 500, color: '#1a2620',
+                          fontVariantNumeric: 'tabular-nums', letterSpacing: '0.02em',
+                        }}>
+                          {item.time}
+                        </div>
+                        {item.durationMin ? (
+                          <div style={{
+                            fontSize: 11, color: '#a59478', marginTop: 4,
+                            fontVariantNumeric: 'tabular-nums',
+                          }}>
+                            {item.durationMin}m
+                          </div>
+                        ) : null}
+                      </div>
+
+                      {/* Amber bar — hires get a distinctive accent */}
+                      <div style={{
+                        width: 2,
+                        background: '#c6926a',
+                        borderRadius: 2,
+                        alignSelf: 'stretch',
+                        minHeight: 44,
+                        flexShrink: 0,
+                      }} />
+
+                      <div style={{ flex: 1, minWidth: 0, paddingTop: 2 }}>
+                        <div style={{
+                          fontSize: 9, color: '#c6926a', fontWeight: 600,
+                          letterSpacing: '0.14em', textTransform: 'uppercase',
+                          marginBottom: 6,
+                        }}>
+                          {item.bookingType === 'private_session' ? 'Private session' : 'Hire'}
+                        </div>
+                        <div style={{
+                          fontFamily: '"Playfair Display", Georgia, serif',
+                          fontSize: 17, fontWeight: 500, color: '#1a2620',
+                          letterSpacing: '-0.005em', lineHeight: 1.25,
+                        }}>
+                          {item.title}
+                        </div>
+                        <div style={{ fontSize: 12, color: '#7a8270', marginTop: 6, lineHeight: 1.4 }}>
+                          {studioLabel(item.studio)}
+                          {item.hirerName && <> · {item.hirerName}</>}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                }
+
+                // CLASS row (default)
+                const c = item.raw;
                 const isMine = c.coachId === currentUser.id;
                 const needsCover = openCoversAll.some(r => r.cls.id === c.id);
                 const isDimmed = view === 'everyone' && !isMine && !needsCover;
                 const coverReq = openCoversAll.find(r => r.cls.id === c.id);
                 const requesterFirstName = coverReq ? coachName(coverReq.requestedBy) : '';
 
-                // Unified colour: vertical bar carries the status, time stays forest
                 const barColor = needsCover ? '#c8442a' : isMine ? classColor(c) : '#d4cdb8';
                 const barWidth = needsCover ? 3 : isMine ? 2 : 1;
 
                 return (
                   <button
-                    key={c.id}
+                    key={item.id}
                     onClick={() => onClassClick?.(c.id)}
                     className="salus-btn"
                     style={{
@@ -12482,8 +12602,8 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
                       cursor: 'pointer', textAlign: 'left',
                       width: '100%', fontFamily: 'inherit',
                       opacity: isDimmed ? 0.45 : 1,
-                      borderBottom: idx === dayClasses.length - 1 ? 'none' : '1px solid #f5ecd6',
-                      marginBottom: idx === dayClasses.length - 1 ? 0 : 4,
+                      borderBottom: idx === dayItems.length - 1 ? 'none' : '1px solid #f5ecd6',
+                      marginBottom: idx === dayItems.length - 1 ? 0 : 4,
                     }}>
                     {/* Time — always forest (unified palette) */}
                     <div style={{ flexShrink: 0, minWidth: 52, paddingTop: 4 }}>
@@ -12529,7 +12649,6 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
                       }}>
                         {c.type}
                       </div>
-                      {/* Unified subtitle colour: moss for all secondary meta */}
                       <div style={{ fontSize: 12, color: '#7a8270', marginTop: 6, lineHeight: 1.4 }}>
                         {studioLabel(c.studio)}
                         {view !== 'mine' && c.coachId && (
@@ -14382,8 +14501,36 @@ function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onEditMes
         <>
       <div style={styles.chatHeader}>
         <div style={{ flex: 1 }}>
+          <div style={{
+            fontSize: 10, color: '#a59478', fontWeight: 600,
+            letterSpacing: '0.18em', textTransform: 'uppercase',
+            marginBottom: 4,
+          }}>
+            The studio
+          </div>
           <h2 style={styles.chatTitle}>Team Salus</h2>
-          <p style={styles.chatSubtitle}>{data.users.length} members</p>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            marginTop: 8,
+          }}>
+            {/* Stacked avatars — small team feel */}
+            <div style={{ display: 'flex' }}>
+              {data.users.slice(0, 5).map((u, i) => (
+                <div key={u.id} style={{
+                  marginLeft: i === 0 ? 0 : -8,
+                  border: '2px solid #fffdf7',
+                  borderRadius: '50%',
+                  background: '#fffdf7',
+                  zIndex: 5 - i,
+                }}>
+                  <UserAvatar user={u} size={24} fontSize={10} />
+                </div>
+              ))}
+            </div>
+            <p style={{ ...styles.chatSubtitle, margin: 0 }}>
+              {data.users.length} {data.users.length === 1 ? 'teammate' : 'teammates'} · all here together
+            </p>
+          </div>
         </div>
         {isManager && data.messages.length > 0 && (
           <button
@@ -14484,8 +14631,49 @@ function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onEditMes
           );
         })}
         {data.messages.length === 0 && (
-          <div style={styles.chatEmpty}>
-            No messages yet. Be the first to say hello.
+          <div style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+            justifyContent: 'center', padding: '60px 24px', textAlign: 'center',
+            gap: 18,
+          }}>
+            <div style={{
+              width: 64, height: 64, borderRadius: 32,
+              background: '#f5f1e8',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: '#5c4a38',
+            }}>
+              <MessageCircle size={26} strokeWidth={1.5} />
+            </div>
+            <div>
+              <div style={{
+                fontFamily: '"Playfair Display", Georgia, serif',
+                fontSize: 22, fontWeight: 500, color: '#1a2620',
+                letterSpacing: '-0.01em', marginBottom: 8,
+              }}>
+                Welcome to the studio chat
+              </div>
+              <div style={{
+                fontSize: 13, color: '#7a8270', lineHeight: 1.5,
+                maxWidth: 280,
+              }}>
+                This is your space — share class wins, ask for cover, drop a kind word.
+                We work better when we talk.
+              </div>
+            </div>
+            <button onClick={() => {
+              const t = document.querySelector('input.salus-input');
+              if (t) t.focus();
+            }} className="salus-btn"
+              style={{
+                marginTop: 6,
+                padding: '10px 22px',
+                background: '#1a2620', color: '#fffdf7',
+                border: 'none', borderRadius: 999,
+                fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase',
+                fontFamily: 'inherit', cursor: 'pointer', fontWeight: 600,
+              }}>
+              Say hello
+            </button>
           </div>
         )}
       </div>
@@ -18983,7 +19171,7 @@ const styles = {
   },
 
   // ─── HOME (cover-first dashboard) ───
-  homeContainer: { padding: '0 20px 100px' },
+  homeContainer: { padding: '0 0 100px' },
   homeGreeting: { padding: '24px 0 24px' },
   homeH1: { fontFamily: '"Playfair Display", serif', fontSize: 30, fontWeight: 400, color: '#1a2620', margin: 0, letterSpacing: '-0.015em', lineHeight: 1.1 },
   homeGreetSub: { fontSize: 13, color: '#7a8270', marginTop: 6, margin: 0, letterSpacing: '0.01em' },
