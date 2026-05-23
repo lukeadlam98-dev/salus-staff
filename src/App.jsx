@@ -10596,6 +10596,61 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
     const meta = (CLASS_TYPES && CLASS_TYPES[cls.type]) || {};
     return meta.color || COLOR.amber;
   };
+  const classBg = (cls) => {
+    const meta = (CLASS_TYPES && CLASS_TYPES[cls.type]) || {};
+    return meta.bg || COLOR.bone;
+  };
+
+  // Build today's schedule strip — classes + FOH shifts, sorted chronologically.
+  // Used by the horizontal swipeable strip below.
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const parseHm = (t) => {
+    if (!t) return null;
+    const parts = t.split(':').map(Number);
+    if (Number.isNaN(parts[0])) return null;
+    return parts[0] * 60 + (parts[1] || 0);
+  };
+  const todayItems = (() => {
+    const items = [];
+    myToday.forEach(cls => {
+      const startMin = parseHm(cls.time);
+      const endMin = startMin != null ? startMin + (cls.dur || 45) : null;
+      items.push({
+        id: cls.id,
+        kind: 'class',
+        sortKey: startMin ?? 9999,
+        isPast: endMin != null && nowMin > endMin,
+        isLive: startMin != null && endMin != null && nowMin >= startMin && nowMin < endMin,
+        timeLabel: cls.time || '—',
+        title: cls.type || 'Class',
+        meta: `${cls.dur || 45} min · ${STUDIOS[cls.studio]?.short || ''}`.trim().replace(/·\s*$/, ''),
+        accentColor: classColor(cls),
+        accentBg: classBg(cls),
+      });
+    });
+    myFohToday.forEach(s => {
+      const startMin = parseHm(s.startTime);
+      const endMin = parseHm(s.endTime);
+      items.push({
+        id: s.id,
+        kind: 'foh',
+        sortKey: startMin ?? 9999,
+        isPast: endMin != null && nowMin > endMin,
+        isLive: startMin != null && endMin != null && nowMin >= startMin && nowMin < endMin,
+        timeLabel: s.startTime || '—',
+        title: 'FOH',
+        meta: s.endTime ? `until ${s.endTime}` : 'reception',
+        accentColor: COLOR.amber,
+        accentBg: '#fef0d8',
+      });
+    });
+    items.sort((a, b) => a.sortKey - b.sortKey);
+    // First non-past item is "Up next"
+    const upNextIdx = items.findIndex(i => !i.isPast);
+    if (upNextIdx >= 0) items[upNextIdx].isUpNext = !items[upNextIdx].isLive;
+    return items;
+  })();
+  const hasTodayStrip = todayItems.length > 0;
 
   const studioLabel = (s) => {
     if (s === 'reformer') return 'Reformer studio';
@@ -10605,8 +10660,9 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
 
   return (
     <div style={{ padding: '0' }}>
-      {/* Subtitle stats — quick today summary */}
-      {subtitle && subtitle !== 'A quiet day — nothing on your schedule' && (
+      {/* Subtitle stats — only when the visual strip below isn't showing
+          (i.e. quiet day with nothing on schedule, OR strip would be empty) */}
+      {!hasTodayStrip && subtitle && (
         <div style={{
           fontFamily: COLOR.serif, fontStyle: 'italic',
           fontSize: 14, color: COLOR.brown,
@@ -10614,6 +10670,45 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
           padding: '0 4px',
         }}>
           {subtitle}
+        </div>
+      )}
+
+      {/* Today strip — horizontal swipeable cards for tactile interaction.
+          Bleeds to the edges of the home content (escapes the 14px home padding). */}
+      {hasTodayStrip && (
+        <div style={styles.todayStripWrap}>
+          <div style={styles.todayStripHeader}>
+            <div style={TYPE.eyebrow}>Today</div>
+            <div style={styles.todayStripCount}>
+              {todayItems.length} {todayItems.length === 1 ? 'thing' : 'things'}
+            </div>
+          </div>
+          <div className="salus-scroll-h" style={styles.todayStripScroll}>
+            {todayItems.map(item => (
+              <button
+                key={`${item.kind}-${item.id}`}
+                onClick={() => item.kind === 'class' && onClassClick && onClassClick(item.id)}
+                className="salus-btn"
+                style={{
+                  ...styles.todayCard,
+                  ...(item.isPast ? styles.todayCardPast : {}),
+                  borderLeft: `3px solid ${item.accentColor}`,
+                  cursor: item.kind === 'class' ? 'pointer' : 'default',
+                }}
+                aria-label={`${item.timeLabel} ${item.title}`}
+              >
+                {item.isLive && (
+                  <span style={{ ...styles.todayCardBadge, color: '#5b6d3f' }}>● Now</span>
+                )}
+                {item.isUpNext && !item.isLive && (
+                  <span style={styles.todayCardBadge}>Up next</span>
+                )}
+                <div style={styles.todayCardTime}>{item.timeLabel}</div>
+                <div style={styles.todayCardTitle}>{item.title}</div>
+                <div style={styles.todayCardMeta}>{item.meta}</div>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -10662,47 +10757,8 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
         </div>
       )}
 
-      {/* Rest of today's classes — condensed list, only if more than one class today */}
-      {upNext && myToday.length > 1 && (
-        <div style={{ marginBottom: 18 }}>
-          <div style={{ ...TYPE.eyebrow, marginBottom: 10 }}>Also today</div>
-          <div style={{ paddingLeft: 4 }}>
-            {myToday.filter(c => c.id !== upNext.id).map(c => (
-              <button
-                key={c.id}
-                onClick={() => onClassClick?.(c.id)}
-                className="salus-btn"
-                style={{
-                  display: 'flex', justifyContent: 'space-between',
-                  width: '100%', textAlign: 'left',
-                  padding: '10px 0',
-                  borderBottom: `1px solid ${COLOR.bone}`,
-                  background: 'transparent', border: 'none',
-                  fontSize: 13, color: COLOR.brown,
-                  fontFamily: 'inherit', cursor: 'pointer',
-                }}
-              >
-                <span>{c.type}</span>
-                <span style={{ color: COLOR.taupe, fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>{c.time}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Today's classes when no "up next" (all past, or none today) */}
-      {!upNext && myToday.length > 0 && (
-        <div style={{ marginBottom: 18 }}>
-          <div style={{ ...TYPE.eyebrow, marginBottom: 10 }}>Today</div>
-          <div style={{
-            padding: '14px 16px', background: COLOR.sand, borderRadius: 12,
-          }}>
-            <div style={{ fontSize: 13, color: COLOR.brown, fontStyle: 'italic' }}>
-              All {myToday.length} {myToday.length === 1 ? 'class is' : 'classes are'} done. Nice.
-            </div>
-          </div>
-        </div>
-      )}
+      {/* "Also today" and "Today done" sections removed — the horizontal Today
+          strip above (todayStripWrap) now handles all of today's schedule. */}
 
       {/* Birthdays */}
       {birthdaysToday.map(u => (
@@ -10830,99 +10886,136 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
       {widgets.map(widgetKey => {
         switch (widgetKey) {
           case 'cover': return (
-            <HomeTile
-              key="cover"
-              title="Needs cover"
-              count={totalCoverAttention}
-              summary={coverSummary}
-              open={coverOpen}
-              onToggle={() => setCoverOpen(o => !o)}
-              urgent={totalCoverAttention > 0}
-              onViewAll={totalCoverAttention > 0 ? onViewAllCover : null}
-            >
+            <div key="cover" style={styles.homeCarouselSection}>
+              <div style={styles.homeCarouselHeader}>
+                <div style={styles.homeCarouselEyebrow}>
+                  <span>Needs cover</span>
+                  {totalCoverAttention > 0 && (
+                    <span style={styles.homeCarouselCount}>{totalCoverAttention}</span>
+                  )}
+                </div>
+                {totalCoverAttention > 0 && (
+                  <button onClick={onViewAllCover} className="salus-btn" style={styles.homeCarouselSeeAll}>
+                    See all <ChevronRight size={12} />
+                  </button>
+                )}
+              </div>
               {totalCoverAttention === 0 ? (
-                <div style={styles.homeEmptyCover}>
-                  <div style={{ fontSize: 22, marginBottom: 4 }}>✓</div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#5c4a38' }}>All shifts covered</div>
-                  <div style={{ fontSize: 11, color: '#a59478', marginTop: 2 }}>Nothing on the board right now.</div>
+                <div style={styles.homeAllCoveredCard}>
+                  <div style={styles.homeAllCoveredCheck}>
+                    <Check size={18} strokeWidth={2.4} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: '#1a2620' }}>All shifts covered</div>
+                    <div style={{ fontSize: 12, color: '#a59478', marginTop: 2 }}>Nothing on the board right now.</div>
+                  </div>
                 </div>
               ) : (
-                <>
+                <div className="salus-scroll-h" style={styles.homeCarouselTrack}>
                   {openCovers.map((req, idx) => (
-                    <CoverHomeCard
-                      key={req.id}
-                      req={req}
-                      users={data.users}
-                      interested={data.users.filter(u => req.interestedCovers?.includes(u.id))}
-                      urgent={idx === 0}
-                      onClick={() => onClassClick(req.cls.id)}
-                      onClaim={() => onClaim(req)}
-                      currentUser={currentUser}
-                    />
+                    <div key={req.id} style={styles.homeCarouselCard}>
+                      <CoverHomeCard
+                        req={req}
+                        users={data.users}
+                        interested={data.users.filter(u => req.interestedCovers?.includes(u.id))}
+                        urgent={idx === 0}
+                        onClick={() => onClassClick(req.cls.id)}
+                        onClaim={() => onClaim(req)}
+                        currentUser={currentUser}
+                      />
+                    </div>
                   ))}
-                  {pendingForManager.length > 0 && (
-                    <>
-                      <div style={{ ...styles.homeSectionTitle, marginTop: 14, marginBottom: 8, color: '#7a8270', paddingLeft: 4 }}>
-                        Awaiting your approval
-                      </div>
-                      {pendingForManager.map(req => (
-                        <CoverHomeCard
-                          key={req.id}
-                          req={req}
-                          users={data.users}
-                          interested={[]}
-                          pending={true}
-                          onClick={() => onClassClick(req.cls.id)}
-                          currentUser={currentUser}
-                        />
-                      ))}
-                    </>
-                  )}
-                </>
+                  {pendingForManager.map(req => (
+                    <div key={req.id} style={styles.homeCarouselCard}>
+                      <CoverHomeCard
+                        req={req}
+                        users={data.users}
+                        interested={[]}
+                        pending={true}
+                        onClick={() => onClassClick(req.cls.id)}
+                        currentUser={currentUser}
+                      />
+                    </div>
+                  ))}
+                </div>
               )}
-            </HomeTile>
+            </div>
           );
 
           case 'upcoming': return (
-            <HomeTile
-              key="upcoming"
-              title="Your upcoming classes"
-              count={myUpcoming.length}
-              summary={daySummary}
-              open={dayOpen}
-              onToggle={() => setDayOpen(o => !o)}
-            >
+            <div key="upcoming" style={styles.homeCarouselSection}>
+              <div style={styles.homeCarouselHeader}>
+                <div style={styles.homeCarouselEyebrow}>
+                  <span>Upcoming</span>
+                  {myUpcoming.length > 0 && (
+                    <span style={{ ...styles.homeCarouselCount, ...styles.homeCarouselCountQuiet }}>
+                      {myUpcoming.length}
+                    </span>
+                  )}
+                </div>
+              </div>
               {myUpcoming.length === 0 ? (
-                <div style={{ ...styles.homeEmptyCover, padding: '18px 14px' }}>
-                  <div style={{ fontSize: 12, color: '#7a8270' }}>Nothing scheduled.</div>
+                <div style={styles.homeAllCoveredCard}>
+                  <div style={{ ...styles.homeAllCoveredCheck, background: '#f5f1e8', color: '#a59478' }}>
+                    <Calendar size={16} strokeWidth={2} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: '#1a2620' }}>Nothing scheduled</div>
+                    <div style={{ fontSize: 12, color: '#a59478', marginTop: 2 }}>No classes in your next 7 days.</div>
+                  </div>
                 </div>
               ) : (
-                <div style={styles.homeDayCard}>
+                <div className="salus-scroll-h" style={styles.homeCarouselTrack}>
                   {myUpcoming.map((cls, idx) => {
                     const isToday = cls.date === todayIso;
-                    const dayPrefix = isToday ? '' : new Date(cls.date).toLocaleDateString('en-GB', { weekday: 'short' });
+                    const d = new Date(cls.date);
+                    const weekday = d.toLocaleDateString('en-GB', { weekday: 'short' });
+                    const dayNum  = d.getDate();
+                    const monthName = d.toLocaleDateString('en-GB', { month: 'short' });
                     return (
                       <button
                         key={cls.id}
                         onClick={() => onClassClick(cls.id)}
                         className="salus-btn"
-                        style={{ ...styles.homeDayRow, ...(idx > 0 ? styles.homeDayRowBorder : {}) }}
+                        style={{
+                          ...styles.homeCarouselCard,
+                          ...styles.homeUpcomingCard,
+                          ...(isToday ? styles.homeUpcomingCardToday : {}),
+                        }}
                       >
-                        <div style={styles.homeDayTime}>
-                          {dayPrefix && <div style={{ fontSize: 9, color: '#a59478', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 600 }}>{dayPrefix}</div>}
+                        <div style={{
+                          ...styles.homeUpcomingDayChip,
+                          ...(isToday ? styles.homeUpcomingDayChipToday : {}),
+                        }}>
+                          {isToday ? 'Today' : `${weekday} · ${dayNum} ${monthName}`}
+                        </div>
+                        <div style={{
+                          ...styles.homeUpcomingTime,
+                          ...(isToday ? styles.homeUpcomingTimeToday : {}),
+                        }}>
                           {cls.time}
                         </div>
-                        <div style={{ flex: 1, textAlign: 'left' }}>
-                          <div style={styles.homeDayTitle}>{cls.type}</div>
-                          <div style={styles.homeDayMeta}>{cls.dur} min · {STUDIOS[cls.studio]?.short}</div>
+                        <div style={{
+                          ...styles.homeUpcomingTitle,
+                          ...(isToday ? styles.homeUpcomingTitleToday : {}),
+                        }}>
+                          {cls.type}
                         </div>
-                        {idx === 0 && isToday && <span style={styles.homeDayTagNow}>Up next</span>}
+                        <div style={{
+                          ...styles.homeUpcomingMeta,
+                          ...(isToday ? styles.homeUpcomingMetaToday : {}),
+                        }}>
+                          {cls.dur} min · {STUDIOS[cls.studio]?.short}
+                        </div>
+                        {idx === 0 && isToday && (
+                          <div style={styles.homeUpcomingPill}>Up next</div>
+                        )}
                       </button>
                     );
                   })}
                 </div>
               )}
-            </HomeTile>
+            </div>
           );
 
           case 'tours': return <ToursTile key="tours" data={data} currentUser={currentUser} onOpenTour={onOpenTour} />;
@@ -19314,6 +19407,68 @@ const styles = {
   },
   homeGreeting: { padding: '24px 0 24px' },
   homeH1: { fontFamily: '"Playfair Display", serif', fontSize: 30, fontWeight: 400, color: '#1a2620', margin: 0, letterSpacing: '-0.015em', lineHeight: 1.1 },
+
+  // ─── TODAY STRIP — horizontal swipeable cards ───
+  todayStripWrap: {
+    // Bleed to the edges of the home page (escape the 14px home padding on mobile, 32px on desktop)
+    margin: '0 -14px 20px',
+  },
+  todayStripHeader: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+    padding: '0 18px', marginBottom: 12,
+  },
+  todayStripCount: {
+    fontSize: 11, color: '#a59478', fontStyle: 'italic',
+  },
+  todayStripScroll: {
+    display: 'flex', gap: 10,
+    padding: '2px 14px 8px',
+    overflowX: 'auto', overflowY: 'hidden',
+    scrollSnapType: 'x proximity',
+    WebkitOverflowScrolling: 'touch',
+  },
+  todayCard: {
+    flex: '0 0 auto', width: 138, minHeight: 108,
+    background: '#fffdf7',
+    border: '1px solid #efe7d2',
+    borderLeft: '3px solid #c6926a', // overridden inline per item
+    borderRadius: 14,
+    padding: '12px 14px',
+    display: 'flex', flexDirection: 'column',
+    position: 'relative',
+    scrollSnapAlign: 'start',
+    textAlign: 'left',
+    fontFamily: 'inherit',
+    boxShadow: '0 1px 2px rgba(92, 74, 56, 0.04)',
+  },
+  todayCardPast: {
+    opacity: 0.5,
+  },
+  todayCardBadge: {
+    position: 'absolute', top: 10, right: 10,
+    fontSize: 8.5, fontWeight: 700,
+    color: '#a59478',
+    letterSpacing: '0.12em',
+    textTransform: 'uppercase',
+  },
+  todayCardTime: {
+    fontFamily: '"Playfair Display", Georgia, serif',
+    fontSize: 22, color: '#1a2620',
+    lineHeight: 1, letterSpacing: '-0.015em',
+    fontVariantNumeric: 'tabular-nums',
+    marginTop: 2,
+  },
+  todayCardTitle: {
+    fontSize: 13, color: '#1a2620', fontWeight: 500,
+    marginTop: 8, lineHeight: 1.25,
+    overflow: 'hidden', textOverflow: 'ellipsis',
+    display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2,
+  },
+  todayCardMeta: {
+    fontSize: 9.5, color: '#a59478',
+    letterSpacing: '0.08em', textTransform: 'uppercase',
+    fontWeight: 600, marginTop: 'auto', paddingTop: 8,
+  },
   homeGreetSub: { fontSize: 13, color: '#7a8270', marginTop: 6, margin: 0, letterSpacing: '0.01em' },
   homeSection: { marginTop: 28 },
   homeSectionHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14, padding: '0 2px' },
@@ -19321,6 +19476,113 @@ const styles = {
   homeSectionCount: { background: 'transparent', color: '#c8442a', padding: '0 0 0 10px', fontSize: 13, fontWeight: 600, letterSpacing: 0, fontFamily: '"Playfair Display", serif' },
   homeSectionLink: { fontSize: 11, color: '#a59478', background: 'none', border: 'none', fontFamily: 'inherit', cursor: 'pointer', padding: 4, letterSpacing: '0.05em' },
   homeEmptyCover: { padding: '32px 20px', background: 'transparent', textAlign: 'center' },
+
+  // ─── Horizontal carousels (tactile, swipe-driven) — replaces collapsible tiles
+  //     for content collections like cover requests and upcoming classes.
+  //     Cards peek from the right edge to invite the swipe. ───
+  homeCarouselSection: {
+    marginTop: 28, marginBottom: 4,
+  },
+  homeCarouselHeader: {
+    display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+    marginBottom: 14, padding: '0 4px',
+  },
+  homeCarouselEyebrow: {
+    fontSize: 10, fontWeight: 600, color: '#7a8270',
+    letterSpacing: '0.18em', textTransform: 'uppercase',
+    display: 'flex', alignItems: 'baseline', gap: 8,
+  },
+  homeCarouselCount: {
+    fontFamily: '"Playfair Display", Georgia, serif',
+    fontSize: 15, fontWeight: 500, letterSpacing: 0,
+    color: '#c8442a', // coral when urgent — caller can override to forest
+  },
+  homeCarouselCountQuiet: {
+    color: '#1a2620',
+  },
+  homeCarouselSeeAll: {
+    fontSize: 11, color: '#a59478',
+    background: 'none', border: 'none',
+    fontFamily: 'inherit', cursor: 'pointer',
+    padding: 4, letterSpacing: '0.05em',
+    display: 'inline-flex', alignItems: 'center', gap: 4,
+  },
+  homeCarouselTrack: {
+    display: 'flex', gap: 12,
+    overflowX: 'auto', overflowY: 'hidden',
+    scrollSnapType: 'x mandatory',
+    WebkitOverflowScrolling: 'touch',
+    margin: '0 -14px',           // bleed past mobile main padding
+    padding: '4px 14px 12px',    // restore inset, plus right peek
+    scrollPaddingLeft: 14,
+  },
+  homeCarouselCard: {
+    scrollSnapAlign: 'start',
+    flexShrink: 0,
+    width: 'calc(86% - 6px)',    // ~14% peek of next card
+    maxWidth: 340,
+  },
+
+  // Empty-state card (replaces the "All shifts covered" tile copy)
+  homeAllCoveredCard: {
+    display: 'flex', alignItems: 'center', gap: 12,
+    padding: '16px 18px', borderRadius: 14,
+    background: '#fffdf7', border: '1px solid #efe7d2',
+  },
+  homeAllCoveredCheck: {
+    width: 36, height: 36, borderRadius: 18,
+    background: '#eef1e8', color: '#7a8c5c',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    flexShrink: 0,
+  },
+
+  // ─── Upcoming class card (used in upcoming carousel) ───
+  homeUpcomingCard: {
+    display: 'flex', flexDirection: 'column',
+    padding: '18px 18px 16px',
+    background: '#fffdf7', borderRadius: 18,
+    border: '1px solid #efe7d2',
+    boxShadow: '0 1px 0 rgba(92, 74, 56, 0.04)',
+    cursor: 'pointer', fontFamily: 'inherit',
+    width: '100%', textAlign: 'left',
+    minHeight: 168,
+  },
+  homeUpcomingCardToday: {
+    background: '#1a2620', borderColor: '#1a2620',
+    color: '#fffdf7',
+  },
+  homeUpcomingDayChip: {
+    display: 'inline-flex', alignItems: 'baseline', gap: 6,
+    fontSize: 10, fontWeight: 700, color: '#a59478',
+    letterSpacing: '0.18em', textTransform: 'uppercase',
+    marginBottom: 'auto',
+  },
+  homeUpcomingDayChipToday: {
+    color: '#c6926a',
+  },
+  homeUpcomingTime: {
+    fontFamily: '"Playfair Display", Georgia, serif',
+    fontSize: 30, lineHeight: 1, color: '#1a2620',
+    letterSpacing: '-0.015em', marginTop: 14,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  homeUpcomingTimeToday: { color: '#fffdf7' },
+  homeUpcomingTitle: {
+    fontSize: 15, fontWeight: 600, color: '#1a2620',
+    marginTop: 10, lineHeight: 1.25,
+  },
+  homeUpcomingTitleToday: { color: '#fffdf7' },
+  homeUpcomingMeta: {
+    fontSize: 11, color: '#7a8270', marginTop: 4,
+    letterSpacing: '0.02em',
+  },
+  homeUpcomingMetaToday: { color: 'rgba(255, 253, 247, 0.65)' },
+  homeUpcomingPill: {
+    alignSelf: 'flex-start', marginTop: 10,
+    fontSize: 9, fontWeight: 700, color: '#c6926a',
+    background: '#fef0d8', padding: '3px 8px', borderRadius: 999,
+    letterSpacing: '0.12em', textTransform: 'uppercase',
+  },
 
   // ─── Collapsible tile (Home) — quieter, more editorial ───
   tile: {
