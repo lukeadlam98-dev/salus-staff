@@ -19301,8 +19301,11 @@ const styles = {
   //   3) Sage radial whisper top-right (depth, 8%)
   // Total opacity of warm layers stays under ~24% combined to keep it whispered, not pink.
   // Combined with `salus-home-bleed` class to escape main's padding.
+  // NOTE: use paddingTop/paddingBottom (not shorthand `padding`) so the
+  // bleed class's responsive padding-left/right keeps working.
   homePageBackdrop: {
-    padding: '0 0 100px',
+    paddingTop: 0,
+    paddingBottom: 100,
     background: 'radial-gradient(ellipse 110% 55% at 50% 105%, rgba(198, 146, 106, 0.16) 0%, rgba(198, 146, 106, 0) 65%), radial-gradient(ellipse 55% 35% at 78% 10%, rgba(122, 130, 92, 0.08) 0%, rgba(122, 130, 92, 0) 70%), linear-gradient(180deg, #fffdf7 0%, #fbf4e6 100%)',
     minHeight: '100%',
   },
@@ -21015,7 +21018,7 @@ const styles = {
     fontSize: 12, fontFamily: 'inherit', cursor: 'pointer', fontWeight: 600,
   },
   messagesList: {
-    flex: 1, overflowY: 'auto', padding: '20px 22px',
+    flex: 1, overflowY: 'auto', padding: '20px 22px 0',
     display: 'flex', flexDirection: 'column', gap: 4,
   },
   message: { display: 'flex', flexDirection: 'column' },
