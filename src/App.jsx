@@ -10783,39 +10783,57 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
           background: COLOR.cream,
         }}>
           <div style={{ ...TYPE.eyebrow, marginBottom: 10 }}>This week</div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 18 }}>
-            {/* Classes */}
-            <div style={{ flex: '0 0 auto' }}>
+          <div style={{ display: 'flex', alignItems: 'stretch', gap: 0 }}>
+            {/* Classes — taps to Schedule */}
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('salus:tab', { detail: 'timetable' }))}
+              className="salus-btn"
+              style={styles.weekStatBtn}
+              aria-label={`${myWeekCount} classes this week, open Schedule`}
+            >
               <div style={{ fontFamily: COLOR.serif, fontSize: 22, color: COLOR.forest, lineHeight: 1, letterSpacing: '-0.015em' }}>
                 {myWeekCount}
               </div>
-              <div style={{ fontSize: 10, color: COLOR.taupe, marginTop: 5, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                {myWeekCount === 1 ? 'Class' : 'Classes'}
+              <div style={styles.weekStatLabel}>
+                <span>{myWeekCount === 1 ? 'Class' : 'Classes'}</span>
+                <ChevronRight size={9} style={{ opacity: 0.5 }} />
               </div>
-            </div>
-            <div style={{ width: 1, height: 36, background: COLOR.bone }} />
-            {/* Earnings */}
-            <div style={{ flex: '0 0 auto' }}>
+            </button>
+            <div style={styles.weekStatDivider} />
+            {/* Earnings — taps to Staff invoices modal */}
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('salus:openModal', { detail: { type: 'staffInvoices' } }))}
+              className="salus-btn"
+              style={styles.weekStatBtn}
+              aria-label={`£${Math.round(weeklyEarningsPence / 100)} estimated this week, open invoice`}
+            >
               <div style={{ fontFamily: COLOR.serif, fontSize: 22, color: COLOR.forest, lineHeight: 1, letterSpacing: '-0.015em' }}>
                 £{Math.round(weeklyEarningsPence / 100).toLocaleString('en-GB')}
               </div>
-              <div style={{ fontSize: 10, color: COLOR.taupe, marginTop: 5, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                Estimated
+              <div style={styles.weekStatLabel}>
+                <span>Estimated</span>
+                <ChevronRight size={9} style={{ opacity: 0.5 }} />
               </div>
-            </div>
-            <div style={{ width: 1, height: 36, background: COLOR.bone }} />
-            {/* Cover needed this week (system-wide) */}
-            <div style={{ flex: '0 0 auto' }}>
+            </button>
+            <div style={styles.weekStatDivider} />
+            {/* Cover needed — taps to Cover tab */}
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('salus:tab', { detail: 'cover' }))}
+              className="salus-btn"
+              style={styles.weekStatBtn}
+              aria-label={`${weekCoverNeeded} need cover this week, open Cover board`}
+            >
               <div style={{
                 fontFamily: COLOR.serif, fontSize: 22, lineHeight: 1, letterSpacing: '-0.015em',
                 color: weekCoverNeeded > 0 ? COLOR.coral : COLOR.forest,
               }}>
                 {weekCoverNeeded}
               </div>
-              <div style={{ fontSize: 10, color: COLOR.taupe, marginTop: 5, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                Need cover
+              <div style={styles.weekStatLabel}>
+                <span>Need cover</span>
+                <ChevronRight size={9} style={{ opacity: 0.5 }} />
               </div>
-            </div>
+            </button>
           </div>
         </div>
       )}
@@ -19451,26 +19469,45 @@ const styles = {
   homeGreeting: { padding: '24px 0 24px' },
   homeH1: { fontFamily: '"Playfair Display", serif', fontSize: 30, fontWeight: 400, color: '#1a2620', margin: 0, letterSpacing: '-0.015em', lineHeight: 1.1 },
 
+  // ─── TAPPABLE THIS WEEK STAT BUTTONS ───
+  weekStatBtn: {
+    flex: '1 1 0', minWidth: 0,
+    display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
+    gap: 5,
+    padding: '4px 0',
+    background: 'none', border: 'none', cursor: 'pointer',
+    fontFamily: 'inherit', textAlign: 'left',
+  },
+  weekStatLabel: {
+    display: 'flex', alignItems: 'center', gap: 3,
+    fontSize: 10, color: '#a59478', fontWeight: 600,
+    letterSpacing: '0.08em', textTransform: 'uppercase',
+  },
+  weekStatDivider: {
+    width: 1, alignSelf: 'stretch', background: '#efe7d2',
+    margin: '2px 14px',
+  },
+
   // ─── TODAY STRIP — horizontal swipeable cards ───
   todayStripWrap: {
     // Bleed past the 14px home padding so cards can scroll into the edge.
-    // Header + first card sit at 22px from screen edge (8px past home edge)
-    // for a deliberate, visible left margin at rest.
+    // Header + first card sit at 14px from screen edge — aligned with the
+    // home content column (This Week block, broadcasts, etc).
     margin: '0 -14px 20px',
   },
   todayStripHeader: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-    padding: '0 22px', marginBottom: 12,
+    padding: '0 14px', marginBottom: 12,
   },
   todayStripCount: {
     fontSize: 11, color: '#a59478', fontStyle: 'italic',
   },
   todayStripScroll: {
     display: 'flex', gap: 10,
-    // 22px left = aligns first card with header.
+    // 14px left = aligns first card with home content edge (This Week block, etc).
     // 4px right = cards bleed dramatically off the right edge,
     // making it visually obvious the strip is swipeable.
-    padding: '2px 4px 8px 22px',
+    padding: '2px 4px 8px 14px',
     overflowX: 'auto', overflowY: 'hidden',
     scrollSnapType: 'x proximity',
     WebkitOverflowScrolling: 'touch',
@@ -19576,11 +19613,11 @@ const styles = {
   },
   eventsStripHeader: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-    padding: '0 22px', marginBottom: 14,
+    padding: '0 14px', marginBottom: 14,
   },
   eventsStripScroll: {
     display: 'flex', gap: 12,
-    padding: '2px 4px 4px 22px',
+    padding: '2px 4px 4px 14px',
     overflowX: 'auto', overflowY: 'hidden',
     scrollSnapType: 'x proximity',
     WebkitOverflowScrolling: 'touch',
