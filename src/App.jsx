@@ -8,7 +8,7 @@ import {
   Inbox, Shield, RefreshCw, MapPin, Target, Phone, AtSign, Briefcase,
   RotateCcw as CoverIcon, ListChecks, Quote, Building2, MessageCircle,
   Home as HomeIcon, FileText, User as UserIcon, Settings as SettingsIcon,
-  Package, ExternalLink,
+  Package, ExternalLink, CreditCard,
   Star, Trophy, Medal, Crown, Gem
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
@@ -1617,6 +1617,18 @@ export default function SalusStaff() {
         .salus-scroll::-webkit-scrollbar-thumb { background: #d4cdb8; border-radius: 3px; }
         .salus-scroll-h::-webkit-scrollbar { display: none; height: 0; }
         .salus-scroll-h { scrollbar-width: none; -ms-overflow-style: none; }
+        .salus-me-bleed {
+          margin-left: -32px;
+          margin-right: -32px;
+          margin-top: calc(-1 * env(safe-area-inset-top, 0px) - 32px);
+        }
+        @media (max-width: 768px) {
+          .salus-me-bleed {
+            margin-left: -14px;
+            margin-right: -14px;
+            margin-top: calc(-1 * env(safe-area-inset-top, 0px) - 14px);
+          }
+        }
         .salus-input:focus { outline: none; border-color: #5c4a38 !important; }
 
         /* Home page full-bleed wrapper — escapes main's horizontal padding
@@ -15210,338 +15222,211 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
   };
 
   return (
-    <div style={styles.homeContainer}>
-      {/* Profile cover with photo */}
-      <div style={{
-        height: 140, borderRadius: 18, overflow: 'hidden', marginTop: 8, position: 'relative',
-        backgroundImage: 'url(/brand/reformer.jpg)',
-        backgroundSize: 'cover', backgroundPosition: 'center 30%',
-      }}>
-        <div style={{
-          position: 'absolute', inset: 0,
-          background: 'linear-gradient(180deg, rgba(26, 38, 32, 0.0) 0%, rgba(26, 38, 32, 0.55) 100%)',
-        }} />
-      </div>
+    <div style={styles.mePageRoot}>
+      {/* ─── HERO ─── full-bleed photo, centered avatar, name, motto ─── */}
+      <div className="salus-me-bleed" style={styles.meHero}>
+        <div
+          style={{
+            ...styles.meHeroPhoto,
+            backgroundImage: `url(${currentUser.homePhotoUrl || '/brand/reformer.jpg'})`,
+          }}
+        />
+        <div style={styles.meHeroGradient} />
 
-      {/* Profile card — overlapping the cover */}
-      <div style={{
-        background: '#fffdf7', borderRadius: 18,
-        marginTop: -38, marginLeft: 8, marginRight: 8,
-        padding: '20px 22px',
-        display: 'flex', alignItems: 'center', gap: 16,
-        boxShadow: '0 4px 16px rgba(26, 38, 32, 0.08)',
-        position: 'relative', zIndex: 2,
-      }}>
-        <UserAvatar user={currentUser} size={64} fontSize={22} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{
-            fontFamily: '"Playfair Display", serif',
-            fontSize: 20, fontWeight: 500, color: '#1a2620', letterSpacing: '-0.005em',
-          }}>{currentUser.name}</div>
-          <div style={{ fontSize: 11, color: '#a59478', marginTop: 4, letterSpacing: '0.05em', textTransform: 'uppercase', fontWeight: 500 }}>
-            {roleLabel}
-          </div>
-        </div>
-        <button onClick={onOpenSettings} className="salus-btn" style={{
-          background: 'transparent', border: 'none', padding: 4,
-          color: '#a59478', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
-        }}>
-          Edit
-        </button>
-      </div>
-
-      {/* Stats — gamified for coaches/FOH, single hero stat for manager */}
-      {isManager ? (
-        <section style={{ marginTop: 36, padding: '0 8px' }}>
-          <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 14 }}>
-            This week
-          </div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 18 }}>
-            <div style={{
-              fontFamily: '"Playfair Display", serif',
-              fontSize: 56, fontWeight: 400, color: '#1a2620',
-              lineHeight: 1, letterSpacing: '-0.02em',
-            }}>
-              {sessionCount}
-            </div>
-            <div style={{ fontSize: 12, color: '#7a8270', letterSpacing: '0.02em' }}>
-              {sessionCount === 1 ? 'session taught' : 'sessions taught'}
-            </div>
-          </div>
-          {sessionCount > 0 && (
-            <div style={{ marginTop: 16, fontSize: 13, color: '#5c4a38' }}>
-              {Math.round(totalMinutes / 60 * 10) / 10} hours · £{owed} earned
-            </div>
-          )}
-        </section>
-      ) : (
-        <section style={styles.homeSection}>
-          <MyStatsCard data={data} currentUser={currentUser} />
-        </section>
-      )}
-
-      {/* Push notifications — inline, not in a modal */}
-      <section style={styles.homeSection}>
-        <PushNotificationsSection />
-      </section>
-
-      {/* Admin — Me is also Admin. For managers we list each section as a button
-          that opens a focused full-screen modal — safer than embedding the whole
-          AdminPage (whose sub-sections each have their own async/data deps). */}
-      {isManager ? (
-        <section style={styles.homeSection}>
-          <div style={styles.homeSectionHead}>
-            <div style={styles.homeSectionTitle}>Studio admin</div>
-          </div>
-          <div style={styles.meActionsList}>
-            {[
-              { key: 'reports',       label: 'Reports',       sub: 'Email triage and overview',         icon: BarChart3 },
-              { key: 'inbox',         label: 'Inbox',         sub: 'Member messages',                   icon: Inbox },
-              { key: 'cancellations', label: 'Cancellations', sub: 'Booking cancellation tracking',     icon: AlertCircle },
-              { key: 'tours',         label: 'Tours',         sub: 'Prospective member visits',         icon: MapPin },
-              { key: 'stock',         label: 'Stock',         sub: 'Studio inventory',                  icon: Package },
-              { key: 'bookings',      label: 'Studio bookings', sub: 'Hire and external bookings',      icon: Bookmark },
-              { key: 'incidents',     label: 'Incidents',     sub: 'Studio incident log',               icon: AlertOctagon },
-              { key: 'invoices',      label: 'Pay run',       sub: 'Generate coach invoices',           icon: FileText },
-            ].map((item, idx, arr) => {
-              const Icon = item.icon;
-              const isLast = idx === arr.length - 1;
-              return (
-                <button key={item.key}
-                  onClick={() => window.dispatchEvent(new CustomEvent('salus:openAdmin', { detail: { section: item.key } }))}
-                  className="salus-btn"
-                  style={{ ...styles.meActionRow, ...(isLast ? { borderBottom: 'none' } : {}) }}>
-                  <Icon size={18} color="#5c4a38" />
-                  <div style={{ flex: 1, textAlign: 'left' }}>
-                    <div style={{ fontSize: 14, color: '#1a2620' }}>{item.label}</div>
-                    <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>{item.sub}</div>
-                  </div>
-                  <ChevronRight size={16} color="#a59478" />
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      ) : (
-        <section style={styles.homeSection}>
-          <div style={styles.homeSectionHead}>
-            <div style={styles.homeSectionTitle}>Your admin</div>
-          </div>
-          <StaffAdminPage
-            embedded
-            data={data}
-            currentUser={currentUser}
-            emailIntegration={emailIntegration}
-            onConnectGmail={onConnectGmail}
-            onShowExpenses={onShowExpenses}
-            onShowFlows={onShowFlows}
-            onShowTimeOff={onShowTimeOff}
-            onShowStaffInvoices={onShowStaffInvoices}
-          />
-        </section>
-      )}
-
-      {/* Personal admin — managers also teach, so they get the same personal tools as staff */}
-      {isManager && (
-        <section style={styles.homeSection}>
-          <div style={styles.homeSectionHead}>
-            <div style={styles.homeSectionTitle}>Your personal admin</div>
-          </div>
-          <div style={styles.meActionsList}>
-            {(() => {
-              const now = new Date();
-              const monthStartIso = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-              const monthEndIso = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
-              const myMonth = (data.classes || []).filter(c =>
-                c.coachId === currentUser.id && c.date >= monthStartIso && c.date <= monthEndIso
-              );
-              const rate = currentUser.sessionRatePence || 3000;
-              const monthTotal = (rate * myMonth.length) / 100;
-              const monthLabel = now.toLocaleDateString('en-GB', { month: 'long' });
-              return (
-                <button onClick={onShowStaffInvoices} className="salus-btn" style={styles.meActionRow}>
-                  <FileText size={18} color="#5c4a38" />
-                  <div style={{ flex: 1, textAlign: 'left' }}>
-                    <div style={{ fontSize: 14, color: '#1a2620' }}>Your invoice</div>
-                    <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
-                      {monthLabel}: {myMonth.length} {myMonth.length === 1 ? 'class' : 'classes'} · £{monthTotal.toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                    </div>
-                  </div>
-                  <ChevronRight size={16} color="#a59478" />
-                </button>
-              );
-            })()}
-            <button onClick={onShowExpenses} className="salus-btn" style={styles.meActionRow}>
-              <FileText size={18} color="#5c4a38" />
-              <div style={{ flex: 1, textAlign: 'left' }}>
-                <div style={{ fontSize: 14, color: '#1a2620' }}>Expenses</div>
-                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
-                  {data.expenses?.length || 0} receipts · for your tax return
-                </div>
-              </div>
-              <ChevronRight size={16} color="#a59478" />
-            </button>
-            <button onClick={onShowFlows} className="salus-btn" style={styles.meActionRow}>
-              <Bookmark size={18} color="#5c4a38" />
-              <div style={{ flex: 1, textAlign: 'left' }}>
-                <div style={{ fontSize: 14, color: '#1a2620' }}>Flows</div>
-                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
-                  {(data.flows || []).filter(f => !f.archived).length} active · session library
-                </div>
-              </div>
-              <ChevronRight size={16} color="#a59478" />
-            </button>
-            <button onClick={onShowTimeOff} className="salus-btn" style={{ ...styles.meActionRow, borderBottom: 'none' }}>
-              <Calendar size={18} color="#5c4a38" />
-              <div style={{ flex: 1, textAlign: 'left' }}>
-                <div style={{ fontSize: 14, color: '#1a2620' }}>Time off & bank holidays</div>
-                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Upcoming UK bank holidays</div>
-              </div>
-              <ChevronRight size={16} color="#a59478" />
-            </button>
-          </div>
-        </section>
-      )}
-
-      {/* Your team */}
-      <section style={styles.homeSection}>
-        <div style={styles.homeSectionHead}>
-          <div style={styles.homeSectionTitle}>Know your team</div>
-        </div>
-        <div style={styles.meActionsList}>
-          <button onClick={onShowTeam} className="salus-btn" style={styles.meActionRow}>
-            <Users size={18} color="#5c4a38" />
-            <div style={{ flex: 1, textAlign: 'left' }}>
-              <div style={{ fontSize: 14, color: '#1a2620' }}>Your team ({data.users.length})</div>
-              <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>Everyone at Salus House</div>
-            </div>
-            <ChevronRight size={16} color="#a59478" />
+        {/* Top-right edit button */}
+        <div style={styles.meHeroActions}>
+          <button
+            onClick={onOpenSettings}
+            className="salus-btn"
+            style={styles.meHeroIconBtn}
+            aria-label="Edit profile"
+          >
+            <SettingsIcon size={17} strokeWidth={1.8} />
           </button>
         </div>
-      </section>
 
-      {/* Bank details summary */}
-      <section style={styles.homeSection}>
-        <div style={styles.homeSectionHead}>
-          <div style={styles.homeSectionTitle}>Bank details</div>
+        {/* Centered avatar + name + motto */}
+        <div style={styles.meHeroContent}>
+          <div style={styles.meHeroAvatarRing}>
+            <UserAvatar user={currentUser} size={86} fontSize={32} />
+          </div>
+          <h1 style={styles.meHeroName}>{currentUser.name}</h1>
+          <div style={styles.meHeroQuote}>{roleLabel} · Salus House</div>
         </div>
-        <button onClick={onOpenSettings} className="salus-btn" style={styles.meBankCard}>
-          <div style={{ flex: 1, textAlign: 'left' }}>
-            <div style={styles.meBankLabel}>Account</div>
-            <div style={styles.meBankValue}>
-              {currentUser.bankAccount ? maskBank(currentUser.bankAccount) :
-                <span style={{ color: '#c8442a' }}>Not set — tap to add</span>}
+      </div>
+
+      {/* ─── BODY ─── grouped cards ─── */}
+      <div style={styles.meBody}>
+
+        {/* Push notifications — kept as embedded section */}
+        <PushNotificationsSection />
+
+        {/* ── GROUP: Studio admin (manager only) ── */}
+        {isManager && (() => {
+          const items = [
+            { key: 'reports',       icon: BarChart3,    label: 'Reports',         sub: 'Email triage and overview' },
+            { key: 'inbox',         icon: Inbox,        label: 'Inbox',           sub: 'Member messages' },
+            { key: 'cancellations', icon: AlertCircle,  label: 'Cancellations',   sub: 'Booking cancellation tracking' },
+            { key: 'tours',         icon: MapPin,       label: 'Tours',           sub: 'Prospective member visits' },
+            { key: 'stock',         icon: Package,      label: 'Stock',           sub: 'Studio inventory' },
+            { key: 'bookings',      icon: Bookmark,     label: 'Studio bookings', sub: 'Hire and external bookings' },
+            { key: 'incidents',     icon: AlertOctagon, label: 'Incidents',       sub: 'Studio incident log' },
+            { key: 'invoices',      icon: FileText,     label: 'Pay run',         sub: 'Generate coach invoices' },
+          ];
+          return (
+            <div style={styles.meGroupCard}>
+              {items.map((item, idx) => {
+                const Icon = item.icon;
+                const isLast = idx === items.length - 1;
+                return (
+                  <React.Fragment key={item.key}>
+                    <button
+                      onClick={() => window.dispatchEvent(new CustomEvent('salus:openAdmin', { detail: { section: item.key } }))}
+                      className="salus-btn"
+                      style={styles.meGroupRow}
+                    >
+                      <div style={styles.meGroupRowIcon}><Icon size={20} strokeWidth={1.8} /></div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={styles.meGroupRowLabel}>{item.label}</div>
+                        <div style={styles.meGroupRowSub}>{item.sub}</div>
+                      </div>
+                      <ChevronRight size={18} color="#c4b8a0" />
+                    </button>
+                    {!isLast && <div style={styles.meGroupDivider} />}
+                  </React.Fragment>
+                );
+              })}
             </div>
-            {currentUser.bankSortCode && (
-              <>
-                <div style={{ ...styles.meBankLabel, marginTop: 8 }}>Sort code</div>
-                <div style={styles.meBankValue}>{currentUser.bankSortCode}</div>
-              </>
-            )}
-          </div>
-          <ChevronRight size={16} color="#a59478" />
-        </button>
-      </section>
+          );
+        })()}
 
-      {/* View-as-staff toggle — only shown to real managers, always visible (even when previewing) */}
-      {realIsManager && (
-        <section style={styles.homeSection}>
-          <div style={styles.homeSectionHead}>
-            <div style={styles.homeSectionTitle}>View</div>
-          </div>
-          <div style={styles.meActionsList}>
-            <button onClick={onToggleViewAsStaff} className="salus-btn" style={styles.meActionRow}>
-              <Eye size={18} color="#5c4a38" />
-              <div style={{ flex: 1, textAlign: 'left' }}>
-                <div style={{ fontSize: 14, color: '#1a2620' }}>
-                  {viewAsStaff ? 'Switch back to manager view' : 'View as staff'}
-                </div>
-                <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
-                  {viewAsStaff
-                    ? 'You\'re currently previewing what coaches see'
-                    : 'Preview what a coach or FOH member sees'}
-                </div>
-              </div>
-              <div style={{
-                width: 40, height: 22, borderRadius: 999, position: 'relative',
-                background: viewAsStaff ? '#1a2620' : '#d4cdb8',
-                transition: 'background 120ms ease',
-              }}>
-                <div style={{
-                  position: 'absolute',
-                  top: 2, left: viewAsStaff ? 20 : 2,
-                  width: 18, height: 18, borderRadius: '50%',
-                  background: '#fffdf7',
-                  transition: 'left 120ms ease',
-                }} />
-              </div>
-            </button>
-          </div>
-        </section>
-      )}
+        {/* ── GROUP: Your work (personal admin — everyone gets this) ── */}
+        {(() => {
+          const now = new Date();
+          const monthStartIso = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+          const monthEndIso = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+          const myMonth = (data.classes || []).filter(c =>
+            c.coachId === currentUser.id && c.date >= monthStartIso && c.date <= monthEndIso
+          );
+          const rate = currentUser.sessionRatePence || 3000;
+          const monthTotal = (rate * myMonth.length) / 100;
+          const monthLabel = now.toLocaleDateString('en-GB', { month: 'long' });
+          const invoiceSub = myMonth.length > 0
+            ? `${monthLabel}: ${myMonth.length} ${myMonth.length === 1 ? 'class' : 'classes'} · £${monthTotal.toLocaleString('en-GB', { maximumFractionDigits: 0 })}`
+            : `${monthLabel}: nothing yet`;
 
-      {/* Email integration — managers + FOH staff */}
-      {(isManager || currentUser.isFoh) && (
-        <section style={styles.homeSection}>
-          <div style={styles.homeSectionHead}>
-            <div style={styles.homeSectionTitle}>Connected accounts</div>
-          </div>
-          <div style={styles.meActionsList}>
-            {emailIntegration ? (
-              <div style={{ ...styles.meActionRow, cursor: 'default' }}>
-                <div style={{
-                  width: 32, height: 32, borderRadius: 8,
-                  background: '#7a8c5c', color: '#fff',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 14,
-                }}>✉</div>
-                <div style={{ flex: 1, textAlign: 'left' }}>
-                  <div style={{ fontSize: 14, color: '#1a2620' }}>
-                    Gmail · <span style={{ color: '#5c8a5a', fontWeight: 600 }}>Connected</span>
-                  </div>
-                  <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
-                    {emailIntegration.emailAddress || 'Connected'}
-                  </div>
-                </div>
-                <button
-                  onClick={() => {
-                    if (confirm('Disconnect Gmail? Your stored tokens will be deleted.')) {
-                      onDisconnectGmail();
-                    }
-                  }}
-                  className="salus-btn"
-                  style={{ ...styles.btnGhost, color: '#c8442a' }}
-                >
-                  Disconnect
-                </button>
-              </div>
-            ) : (
-              <button onClick={onConnectGmail} className="salus-btn" style={styles.meActionRow}>
-                <div style={{
-                  width: 32, height: 32, borderRadius: 8,
-                  background: '#fef7e8', color: '#c6926a',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 14,
-                }}>✉</div>
-                <div style={{ flex: 1, textAlign: 'left' }}>
-                  <div style={{ fontSize: 14, color: '#1a2620' }}>Connect Gmail</div>
-                  <div style={{ fontSize: 11, color: '#7a8270', marginTop: 1 }}>
-                    Read your inbox for cancellations, refunds, inquiries
-                  </div>
-                </div>
-                <ChevronRight size={16} color="#a59478" />
-              </button>
-            )}
-          </div>
-        </section>
-      )}
+          const items = [
+            { key: 'invoice',  icon: FileText,  label: 'Your invoice',  sub: invoiceSub,                                           onClick: onShowStaffInvoices },
+            { key: 'expenses', icon: Briefcase, label: 'Expenses',      sub: `${data.expenses?.length || 0} receipts · for your tax return`, onClick: onShowExpenses },
+            { key: 'flows',    icon: Bookmark,  label: 'Flows',         sub: `${(data.flows || []).filter(f => !f.archived).length} active · session library`, onClick: onShowFlows },
+            { key: 'timeoff',  icon: Calendar,  label: 'Time off',      sub: 'Bank holidays and leave',                            onClick: onShowTimeOff },
+          ];
+          return (
+            <div style={styles.meGroupCard}>
+              {items.map((item, idx) => {
+                const Icon = item.icon;
+                const isLast = idx === items.length - 1;
+                return (
+                  <React.Fragment key={item.key}>
+                    <button onClick={item.onClick} className="salus-btn" style={styles.meGroupRow}>
+                      <div style={styles.meGroupRowIcon}><Icon size={20} strokeWidth={1.8} /></div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={styles.meGroupRowLabel}>{item.label}</div>
+                        <div style={styles.meGroupRowSub}>{item.sub}</div>
+                      </div>
+                      <ChevronRight size={18} color="#c4b8a0" />
+                    </button>
+                    {!isLast && <div style={styles.meGroupDivider} />}
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          );
+        })()}
 
-      {/* Sign out */}
-      <section style={{ ...styles.homeSection, marginBottom: 40 }}>
-        <button onClick={onSignOut} className="salus-btn" style={styles.meSignOutBtn}>
+        {/* ── GROUP: Account ── */}
+        {(() => {
+          const bankSub = currentUser.bankAccount
+            ? `Account ${maskBank(currentUser.bankAccount)}${currentUser.bankSortCode ? ` · Sort ${currentUser.bankSortCode}` : ''}`
+            : 'Not set — tap to add';
+
+          const items = [
+            { key: 'bank', icon: CreditCard, label: 'Bank details', sub: bankSub, subWarn: !currentUser.bankAccount, onClick: onOpenSettings },
+            { key: 'team', icon: Users,      label: 'Your team',    sub: `${data.users.length} ${data.users.length === 1 ? 'member' : 'members'} at Salus House`, onClick: onShowTeam },
+          ];
+
+          if (isManager || currentUser.isFoh) {
+            items.push({
+              key: 'gmail',
+              icon: Mail,
+              label: emailIntegration ? 'Gmail' : 'Connect Gmail',
+              sub: emailIntegration
+                ? `${emailIntegration.emailAddress || 'Connected'} · tap to disconnect`
+                : 'Read your inbox for cancellations, refunds',
+              onClick: emailIntegration
+                ? () => { if (window.confirm('Disconnect Gmail? Your stored tokens will be deleted.')) onDisconnectGmail(); }
+                : onConnectGmail,
+            });
+          }
+
+          if (realIsManager) {
+            items.push({
+              key: 'view',
+              icon: Eye,
+              label: viewAsStaff ? 'Switch back to manager view' : 'View as staff',
+              sub: viewAsStaff
+                ? "You're currently previewing what coaches see"
+                : 'Preview what a coach or FOH member sees',
+              onClick: onToggleViewAsStaff,
+              rightContent: (
+                <div style={{
+                  width: 40, height: 22, borderRadius: 999, position: 'relative',
+                  background: viewAsStaff ? '#1a2620' : '#d4cdb8',
+                  transition: 'background 120ms ease', flexShrink: 0,
+                }}>
+                  <div style={{
+                    position: 'absolute', top: 2, left: viewAsStaff ? 20 : 2,
+                    width: 18, height: 18, borderRadius: '50%',
+                    background: '#fffdf7', transition: 'left 120ms ease',
+                  }} />
+                </div>
+              ),
+            });
+          }
+
+          return (
+            <div style={styles.meGroupCard}>
+              {items.map((item, idx) => {
+                const Icon = item.icon;
+                const isLast = idx === items.length - 1;
+                return (
+                  <React.Fragment key={item.key}>
+                    <button onClick={item.onClick} className="salus-btn" style={styles.meGroupRow}>
+                      <div style={styles.meGroupRowIcon}><Icon size={20} strokeWidth={1.8} /></div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={styles.meGroupRowLabel}>{item.label}</div>
+                        <div style={{
+                          ...styles.meGroupRowSub,
+                          ...(item.subWarn ? { color: '#c8442a', fontWeight: 500 } : {}),
+                        }}>
+                          {item.sub}
+                        </div>
+                      </div>
+                      {item.rightContent || <ChevronRight size={18} color="#c4b8a0" />}
+                    </button>
+                    {!isLast && <div style={styles.meGroupDivider} />}
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          );
+        })()}
+
+        {/* Sign out */}
+        <button onClick={onSignOut} className="salus-btn" style={{ ...styles.meSignOutBtn, marginTop: 8 }}>
           <LogOut size={16} /> Sign out
         </button>
-      </section>
+      </div>
     </div>
   );
 }
@@ -19779,6 +19664,100 @@ const styles = {
     background: '#fffdf7', borderRadius: 14, padding: 14, border: '1px solid #efe7d2',
   },
   meStatCell: { textAlign: 'center', padding: '8px 4px' },
+  // ─── ME PAGE — new editorial layout ───
+  mePageRoot: {
+    paddingBottom: 100,
+  },
+  meHero: {
+    position: 'relative',
+    height: 360,
+    overflow: 'hidden',
+    background: '#1a2620',
+    marginBottom: 20,
+  },
+  meHeroPhoto: {
+    position: 'absolute', inset: 0,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center center',
+  },
+  meHeroGradient: {
+    position: 'absolute', inset: 0,
+    background: 'linear-gradient(180deg, rgba(26, 38, 32, 0) 0%, rgba(26, 38, 32, 0.45) 55%, rgba(26, 38, 32, 0.85) 100%)',
+  },
+  meHeroActions: {
+    position: 'absolute', top: 'calc(env(safe-area-inset-top, 0px) + 14px)', right: 16,
+    display: 'flex', gap: 10, zIndex: 2,
+  },
+  meHeroIconBtn: {
+    width: 38, height: 38, borderRadius: '50%',
+    background: 'rgba(255, 253, 247, 0.18)',
+    backdropFilter: 'blur(8px)',
+    border: '1px solid rgba(255, 253, 247, 0.25)',
+    color: '#fffdf7',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    cursor: 'pointer', fontFamily: 'inherit',
+  },
+  meHeroContent: {
+    position: 'absolute', left: 0, right: 0, bottom: 28,
+    display: 'flex', flexDirection: 'column', alignItems: 'center',
+    padding: '0 24px',
+    zIndex: 2,
+  },
+  meHeroAvatarRing: {
+    width: 92, height: 92, borderRadius: '50%',
+    padding: 3, background: 'rgba(255, 253, 247, 0.95)',
+    marginBottom: 14,
+    boxShadow: '0 4px 14px rgba(0, 0, 0, 0.18)',
+  },
+  meHeroName: {
+    fontFamily: '"Playfair Display", Georgia, serif',
+    fontSize: 28, fontWeight: 500, color: '#fffdf7',
+    letterSpacing: '-0.015em', margin: 0, textAlign: 'center',
+    lineHeight: 1.1,
+  },
+  meHeroQuote: {
+    fontSize: 13, color: 'rgba(255, 253, 247, 0.82)',
+    fontStyle: 'italic', marginTop: 8, textAlign: 'center',
+    lineHeight: 1.5, maxWidth: 280,
+  },
+  meBody: {
+    display: 'flex', flexDirection: 'column', gap: 18,
+  },
+  meGroupCard: {
+    background: '#fffdf7',
+    borderRadius: 16,
+    overflow: 'hidden',
+    boxShadow: '0 1px 3px rgba(60, 40, 20, 0.05), 0 0 0 1px #efe7d2',
+  },
+  meGroupRow: {
+    width: '100%',
+    display: 'flex', alignItems: 'center', gap: 14,
+    padding: '16px 18px',
+    background: 'none', border: 'none', fontFamily: 'inherit',
+    cursor: 'pointer', textAlign: 'left',
+  },
+  meGroupRowIcon: {
+    width: 24, height: 24, flexShrink: 0,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    color: '#5c4a38',
+  },
+  meGroupRowLabel: {
+    flex: 1, fontSize: 15, color: '#1a2620', fontWeight: 500,
+    lineHeight: 1.25,
+  },
+  meGroupRowSub: {
+    fontSize: 11.5, color: '#7a8270', marginTop: 2, fontWeight: 400,
+    lineHeight: 1.3,
+  },
+  meGroupDivider: {
+    height: 1, background: '#f0eadc',
+    marginLeft: 56,
+  },
+  meHeroLoading: {
+    width: '100%', height: '100%',
+    background: 'linear-gradient(180deg, #5c4a38 0%, #1a2620 100%)',
+  },
+
   meStatNum: { fontFamily: '"Playfair Display", serif', fontSize: 24, fontWeight: 500, color: '#1a2620' },
   meStatLabel: { fontSize: 10, color: '#7a8270', textTransform: 'uppercase', letterSpacing: 0.8, marginTop: 4, fontWeight: 600 },
   meActionsList: { background: '#fffdf7', borderRadius: 14, border: '1px solid #efe7d2', overflow: 'hidden' },
