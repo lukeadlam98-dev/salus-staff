@@ -10945,56 +10945,18 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
     : (isManager ? brandPhoto : null);
 
   return (
-    // The bleed wrapper has all 4 dimensions inline (margin/padding) to bypass
-    // any @media CSS fragility. position: relative + overflow: hidden so the
-    // decorative orbs below position relative to the bleed and stay clipped
-    // inside the page (no horizontal scroll from the orbs).
+    // Home wrapper — bleed dimensions forced inline (bypasses any @media
+    // fragility). No inner z-index wrapper around content — that would
+    // create a stacking context and break backdrop-filter on cards inside
+    // the strips. Orbs are baked into homePageBackdrop so backdrop-filter
+    // on child cards can blur them through the frost.
     <div className="salus-home-bleed" style={{
       ...styles.homePageBackdrop,
       marginLeft: -14,
       marginRight: -14,
       paddingLeft: 28,
       paddingRight: 28,
-      position: 'relative',
-      overflow: 'hidden',
     }}>
-      {/* ─── Decorative orbs — floating brand-colored blurred blobs.
-          Add personality and "quirky modern" depth, like an abstract painting
-          that the content sits over. aria-hidden + pointer-events: none so
-          they're invisible to screen readers and don't intercept taps. */}
-      <div aria-hidden="true" style={{
-        position: 'absolute',
-        top: 240, right: -80,
-        width: 260, height: 260,
-        borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(198, 146, 106, 0.55) 0%, rgba(198, 146, 106, 0) 70%)',
-        filter: 'blur(40px)',
-        pointerEvents: 'none',
-        zIndex: 0,
-      }} />
-      <div aria-hidden="true" style={{
-        position: 'absolute',
-        top: 720, left: -100,
-        width: 280, height: 280,
-        borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(122, 130, 92, 0.42) 0%, rgba(122, 130, 92, 0) 70%)',
-        filter: 'blur(45px)',
-        pointerEvents: 'none',
-        zIndex: 0,
-      }} />
-      <div aria-hidden="true" style={{
-        position: 'absolute',
-        top: 1200, right: -60,
-        width: 220, height: 220,
-        borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(200, 68, 42, 0.22) 0%, rgba(200, 68, 42, 0) 70%)',
-        filter: 'blur(45px)',
-        pointerEvents: 'none',
-        zIndex: 0,
-      }} />
-
-      {/* Content sits above the orbs */}
-      <div style={{ position: 'relative', zIndex: 1 }}>
       {/* Editorial hero — big photo, greeting overlay, next class overlay */}
       <HomeHero
         data={data}
@@ -11193,7 +11155,6 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
           onClose={() => setShowCustomize(false)}
         />
       )}
-      </div>
     </div>
   );
 }
@@ -19519,21 +19480,26 @@ const styles = {
   // NOTE: use paddingTop/paddingBottom (not shorthand `padding`) so the
   // bleed class's responsive padding-left/right keeps working.
   // ─── HOME BACKDROP ───
-  // Editorial warm-glow background. Three layered radial glows in brand
-  // colors create the "golden hour, abstract ambient light" feel — pushes
-  // the modern editorial direction. Each glow stays under 35% alpha so they
-  // blend softly without going garish.
+  // Atmospheric dreamy backdrop — STRONG colored orbs baked directly into the
+  // page background (not separate divs, which create stacking contexts and
+  // break backdrop-filter on child elements). Three big soft brand-colored
+  // blobs create the "watercolor wash" look from the reference: warm amber
+  // dominating top, sage moss left-middle, soft coral bottom-right. The
+  // backdrop-filter on cards above will blur these colors through the frost,
+  // creating that ethereal "glass over sunset" effect.
   homePageBackdrop: {
     paddingTop: 0,
     paddingBottom: 100,
     background:
-      // Amber "morning sun" top-right — the dominant warm note
-      'radial-gradient(circle 320px at 88% 12%, rgba(198, 146, 106, 0.32) 0%, rgba(198, 146, 106, 0) 62%), ' +
-      // Sage "moss in the corner" middle-left — earthy counterpoint
-      'radial-gradient(circle 340px at 8% 48%, rgba(122, 130, 92, 0.22) 0%, rgba(122, 130, 92, 0) 65%), ' +
-      // Amber "golden hour spill" bottom-right — pulls the warmth down the page
-      'radial-gradient(circle 420px at 95% 88%, rgba(198, 146, 106, 0.26) 0%, rgba(198, 146, 106, 0) 62%), ' +
-      // Base cream gradient for everything else to sit on
+      // BIG amber/peach orb dominating top-right — main warm note
+      'radial-gradient(circle 560px at 85% 8%, rgba(220, 165, 130, 0.55) 0%, rgba(220, 165, 130, 0) 62%), ' +
+      // BIG sage/moss orb middle-left — earthy counterbalance
+      'radial-gradient(circle 500px at 5% 42%, rgba(122, 130, 92, 0.42) 0%, rgba(122, 130, 92, 0) 62%), ' +
+      // Coral accent orb bottom-right — late afternoon glow
+      'radial-gradient(circle 440px at 92% 78%, rgba(200, 100, 70, 0.38) 0%, rgba(200, 100, 70, 0) 62%), ' +
+      // Soft second amber bloom mid-right for layering richness
+      'radial-gradient(circle 380px at 78% 50%, rgba(198, 146, 106, 0.30) 0%, rgba(198, 146, 106, 0) 65%), ' +
+      // Cream base for everything else
       'linear-gradient(180deg, #fffdf7 0%, #fbf4e6 100%)',
     minHeight: '100%',
   },
@@ -19589,16 +19555,15 @@ const styles = {
   },
   todayCard: {
     flex: '0 0 auto', width: 138, minHeight: 108,
-    // The pill on the spotlight is visible because it's a slightly-different-
-    // than-background patch with frost. The pill is light-tinted on a DARK bg.
-    // The cards live on a LIGHT bg, so we invert: subtle FOREST tint over the
-    // cream page = a slightly darker tile, like a quiet shadow. backdrop-filter
-    // softens the warm gradient + orbs behind it. Same design language, flipped
-    // for the bg luminance.
-    background: 'rgba(26, 38, 32, 0.06)',
-    backdropFilter: 'blur(14px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(14px) saturate(160%)',
-    border: '1px solid rgba(26, 38, 32, 0.10)',
+    // Ethereal frosted glass — like the reference login screens. 32% white
+    // veil lets the warm peach + sage + coral orbs glow strongly through.
+    // Heavy 22px blur smooths everything into that "watercolor under glass"
+    // effect. Saturate 180% keeps the orb colors rich after blurring (without
+    // it they'd grey out). Soft white border for the glass edge.
+    background: 'rgba(255, 255, 255, 0.32)',
+    backdropFilter: 'blur(22px) saturate(180%)',
+    WebkitBackdropFilter: 'blur(22px) saturate(180%)',
+    border: '1px solid rgba(255, 255, 255, 0.55)',
     borderRadius: 14,
     padding: '12px 14px',
     display: 'flex', flexDirection: 'column',
@@ -19606,8 +19571,8 @@ const styles = {
     scrollSnapAlign: 'start',
     textAlign: 'left',
     fontFamily: 'inherit',
-    // Soft warm shadow to lift the tile off the page.
-    boxShadow: '0 2px 10px rgba(92, 74, 56, 0.06), 0 10px 24px rgba(198, 146, 106, 0.10)',
+    // Soft warm shadow lifts the tile above the colorful background.
+    boxShadow: '0 2px 12px rgba(92, 74, 56, 0.06), 0 12px 32px rgba(198, 146, 106, 0.14)',
   },
   todayCardPast: {
     opacity: 0.5,
