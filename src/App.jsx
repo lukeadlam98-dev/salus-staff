@@ -19514,10 +19514,10 @@ const styles = {
   },
 
   // ─── TODAY STRIP — horizontal swipeable cards ───
-  // No bleed — slider sits as a normal block within the home content area.
-  // Cards start at the content edge (28px from screen) and scroll horizontally
-  // within the content boundaries. Header has a chevron when items > 2 as
-  // the swipe affordance (no edge-bleed needed).
+  // Header sits contained in content area. Scroll container extends past the
+  // right edge of the content area so cards bleed off the right side of the
+  // screen — iOS-native "more to swipe" affordance. Left side stays aligned
+  // with content edge (28px from screen).
   todayStripWrap: {
     marginBottom: 20,
   },
@@ -19531,6 +19531,10 @@ const styles = {
   todayStripScroll: {
     display: 'flex', gap: 10,
     paddingTop: 2, paddingBottom: 8,
+    // Right edge extends past content area to the screen edge — cards bleed
+    // off the right side. Left edge stays at content edge naturally.
+    marginRight: -28,
+    paddingRight: 4,
     overflowX: 'auto', overflowY: 'hidden',
     scrollSnapType: 'x proximity',
     WebkitOverflowScrolling: 'touch',
@@ -19637,7 +19641,7 @@ const styles = {
   },
 
   // ─── EVENTS STRIP (Happening at Salus) ───
-  // Contained block — no bleed, sits in home content area like everything else.
+  // Same right-bleed pattern as todayStripScroll.
   eventsStripWrap: {
     marginBottom: 24,
   },
@@ -19648,6 +19652,8 @@ const styles = {
   eventsStripScroll: {
     display: 'flex', gap: 12,
     paddingTop: 2, paddingBottom: 4,
+    marginRight: -28,
+    paddingRight: 4,
     overflowX: 'auto', overflowY: 'hidden',
     scrollSnapType: 'x proximity',
     WebkitOverflowScrolling: 'touch',
@@ -19763,8 +19769,11 @@ const styles = {
     overflowX: 'auto', overflowY: 'hidden',
     scrollSnapType: 'x mandatory',
     WebkitOverflowScrolling: 'touch',
-    // Contained — no bleed. Cards scroll within content area.
+    // Right-edge bleed: scroll extends past content area to screen edge,
+    // left edge stays at content edge.
     paddingTop: 4, paddingBottom: 12,
+    marginRight: -28,
+    paddingRight: 4,
     scrollPaddingLeft: 0,
   },
   homeCarouselCard: {
