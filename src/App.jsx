@@ -19587,13 +19587,15 @@ const styles = {
   },
   todayCard: {
     flex: '0 0 auto', width: 138, minHeight: 108,
-    // EXACT same frost recipe as `spotlightEyebrow` and `eventCardEyebrow`:
-    // 18% cream tint + 8px backdrop blur + 22% cream border. Just scaled
-    // to a card instead of a pill. Same design language top to bottom.
-    background: 'rgba(255, 253, 247, 0.18)',
-    backdropFilter: 'blur(8px)',
-    WebkitBackdropFilter: 'blur(8px)',
-    border: '1px solid rgba(255, 253, 247, 0.22)',
+    // Frosty glass tile — like the spotlight pill scaled up to a card, but
+    // adapted for a LIGHT background. A subtle white linear-gradient gives
+    // the "frosty gradient" sheen, the backdrop blur lets the warm page
+    // gradient + orbs glow through the frost, and a soft white border
+    // defines the edge. Text stays black/forest on top for legibility.
+    background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.50) 0%, rgba(255, 255, 255, 0.22) 100%)',
+    backdropFilter: 'blur(14px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(14px) saturate(160%)',
+    border: '1px solid rgba(255, 255, 255, 0.60)',
     borderRadius: 14,
     padding: '12px 14px',
     display: 'flex', flexDirection: 'column',
@@ -19601,8 +19603,8 @@ const styles = {
     scrollSnapAlign: 'start',
     textAlign: 'left',
     fontFamily: 'inherit',
-    // Soft shadow gives the card visual depth without breaking the frost.
-    boxShadow: '0 2px 10px rgba(92, 74, 56, 0.06), 0 10px 24px rgba(198, 146, 106, 0.08)',
+    // Warm two-layer shadow to lift the tile off the page.
+    boxShadow: '0 2px 10px rgba(92, 74, 56, 0.06), 0 10px 30px rgba(198, 146, 106, 0.12)',
   },
   todayCardPast: {
     opacity: 0.5,
