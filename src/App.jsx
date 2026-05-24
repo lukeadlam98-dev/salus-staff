@@ -6070,14 +6070,16 @@ function BroadcastBanner({ broadcasts, broadcastReads, currentUser, onMarkRead }
 
   return (
     <div style={{
-      // Frosted glass — same recipe as todayCard + This Week block so the
-      // whole home reads as one unified glass surface. Warm orbs glow through.
-      background: 'rgba(255, 255, 255, 0.32)',
-      backdropFilter: 'blur(22px) saturate(180%)',
-      WebkitBackdropFilter: 'blur(22px) saturate(180%)',
-      border: '1px solid rgba(255, 255, 255, 0.28)',
+      // Frosted glass + neumorphic depth — same unified recipe as
+      // todayCard + This Week block.
+      background: 'rgba(255, 255, 255, 0.55)',
+      backdropFilter: 'blur(20px) saturate(160%)',
+      WebkitBackdropFilter: 'blur(20px) saturate(160%)',
+      border: '1px solid rgba(255, 255, 255, 0.55)',
       borderRadius: 14, padding: '16px 18px', marginBottom: 18,
-      boxShadow: '0 4px 18px rgba(92, 74, 56, 0.06)',
+      boxShadow:
+        '-4px -4px 14px rgba(255, 255, 255, 0.65), ' +
+        '5px 5px 18px rgba(92, 74, 56, 0.10)',
       display: 'flex', flexDirection: 'column', gap: 10,
     }}>
       {/* "From Luke" pill — same design language as event card date pills */}
@@ -10793,13 +10795,15 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
         <div style={{
           padding: '14px 16px', marginBottom: 16,
           borderRadius: 14,
-          // Frosted glass — same recipe as todayCard so the home reads as
-          // one unified glass system. Warm orbs glow through.
-          background: 'rgba(255, 255, 255, 0.32)',
-          backdropFilter: 'blur(22px) saturate(180%)',
-          WebkitBackdropFilter: 'blur(22px) saturate(180%)',
-          border: '1px solid rgba(255, 255, 255, 0.28)',
-          boxShadow: '0 4px 18px rgba(92, 74, 56, 0.06)',
+          // Frosted glass + neumorphic depth — same recipe as todayCard so
+          // the home reads as one unified raised glass system.
+          background: 'rgba(255, 255, 255, 0.55)',
+          backdropFilter: 'blur(20px) saturate(160%)',
+          WebkitBackdropFilter: 'blur(20px) saturate(160%)',
+          border: '1px solid rgba(255, 255, 255, 0.55)',
+          boxShadow:
+            '-4px -4px 14px rgba(255, 255, 255, 0.65), ' +
+            '5px 5px 18px rgba(92, 74, 56, 0.10)',
         }}>
           <div style={{ ...TYPE.eyebrow, marginBottom: 10 }}>This week</div>
           <div style={{ display: 'flex', alignItems: 'stretch', gap: 0 }}>
@@ -19566,14 +19570,15 @@ const styles = {
   },
   todayCard: {
     flex: '0 0 auto', width: 138, minHeight: 108,
-    // Frosted glass tile — the reference pattern. Heavy blur + saturation
-    // pulls the warm orbs through the frost. Border is barely-there at 28%
-    // (was 55% which read as a "harsh line") so the edge feels diffused,
-    // not stamped.
-    background: 'rgba(255, 255, 255, 0.32)',
-    backdropFilter: 'blur(22px) saturate(180%)',
-    WebkitBackdropFilter: 'blur(22px) saturate(180%)',
-    border: '1px solid rgba(255, 255, 255, 0.28)',
+    // More solid frost (55% vs 32%) so the cards POP off the page — were
+    // blending into the bg before. Still translucent enough that warm orbs
+    // glow through. Added neumorphic dual-shadow: bright highlight from
+    // top-left + soft warm shadow bottom-right = pillowy extruded depth,
+    // like the reference. Cards now feel raised, not flat.
+    background: 'rgba(255, 255, 255, 0.55)',
+    backdropFilter: 'blur(20px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(20px) saturate(160%)',
+    border: '1px solid rgba(255, 255, 255, 0.55)',
     borderRadius: 14,
     padding: '12px 14px',
     display: 'flex', flexDirection: 'column',
@@ -19581,9 +19586,13 @@ const styles = {
     scrollSnapAlign: 'start',
     textAlign: 'left',
     fontFamily: 'inherit',
-    // Whispered shadow only — heavy shadow created the rim/halo effect
-    // that read as a hard line. Just a soft lift now.
-    boxShadow: '0 4px 18px rgba(92, 74, 56, 0.06)',
+    // Neumorphic shadow combo:
+    //   • Top-left: white-cream highlight = light source feel
+    //   • Bottom-right: warm brown shadow = depth & gravity
+    // Equal distances create a symmetric "extruded plate" look.
+    boxShadow:
+      '-4px -4px 14px rgba(255, 255, 255, 0.65), ' +
+      '5px 5px 18px rgba(92, 74, 56, 0.10)',
   },
   todayCardPast: {
     opacity: 0.5,
