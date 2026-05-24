@@ -6081,14 +6081,11 @@ function BroadcastBanner({ broadcasts, broadcastReads, currentUser, onMarkRead }
 
   return (
     <div style={{
-      // Solid warm white tile + layered shadow. No backdrop-filter.
-      // Same recipe as todayCard + This Week.
-      background: '#fdfaf2',
+      // Pure white tile, no shadow — same as todayCard + This Week.
+      background: '#ffffff',
       border: 'none',
       borderRadius: 16, padding: '16px 18px', marginBottom: 18,
-      boxShadow:
-        '0 1px 3px rgba(92, 74, 56, 0.05), ' +
-        '0 12px 32px rgba(92, 74, 56, 0.10)',
+      boxShadow: 'none',
       display: 'flex', flexDirection: 'column', gap: 10,
     }}>
       {/* "From Luke" pill — same design language as event card date pills */}
@@ -10804,13 +10801,10 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
         <div style={{
           padding: '14px 16px', marginBottom: 16,
           borderRadius: 16,
-          // Solid warm white tile + layered shadow (rebuilt clean — no more
-          // backdrop-filter). Same recipe as todayCard.
-          background: '#fdfaf2',
+          // Pure white tile, no shadow — same as todayCard.
+          background: '#ffffff',
           border: 'none',
-          boxShadow:
-            '0 1px 3px rgba(92, 74, 56, 0.05), ' +
-            '0 12px 32px rgba(92, 74, 56, 0.10)',
+          boxShadow: 'none',
         }}>
           <div style={{ ...TYPE.eyebrow, marginBottom: 10 }}>This week</div>
           <div style={{ display: 'flex', alignItems: 'stretch', gap: 0 }}>
@@ -19573,12 +19567,11 @@ const styles = {
   },
   todayCard: {
     flex: '0 0 auto', width: 138, minHeight: 108,
-    // REBUILT — no more backdrop-filter (was creating visible "blurred zone"
-    // outlines on iOS that read as a container box). Solid soft warm white
-    // tile + layered shadow = clean, modern, no rendering artifacts.
-    // The warm page gradient stays visible BETWEEN tiles (not through them),
-    // which gives the same atmospheric warmth without iOS rendering issues.
-    background: '#fdfaf2',
+    // ZERO shadow — shadows were creating visible "darker padding zones"
+    // around each card that read as a container/background. Pure solid
+    // white tile. Visual definition comes only from white-vs-warm-page
+    // contrast. Nothing else.
+    background: '#ffffff',
     border: 'none',
     borderRadius: 16,
     padding: '12px 14px',
@@ -19587,11 +19580,7 @@ const styles = {
     scrollSnapAlign: 'start',
     textAlign: 'left',
     fontFamily: 'inherit',
-    // Layered shadow for proper neumorphic-style depth without any visible
-    // "container" effect. Tight close shadow grounds, wider drift shadow lifts.
-    boxShadow:
-      '0 1px 3px rgba(92, 74, 56, 0.05), ' +
-      '0 12px 32px rgba(92, 74, 56, 0.10)',
+    boxShadow: 'none',
   },
   todayCardPast: {
     opacity: 0.5,
