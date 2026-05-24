@@ -6070,16 +6070,13 @@ function BroadcastBanner({ broadcasts, broadcastReads, currentUser, onMarkRead }
 
   return (
     <div style={{
-      // Softer frost — same diffused recipe as todayCard + This Week.
-      background: 'rgba(255, 255, 255, 0.42)',
-      backdropFilter: 'blur(20px) saturate(160%)',
-      WebkitBackdropFilter: 'blur(20px) saturate(160%)',
+      // Minimal frost — same as todayCard + This Week. No edge tricks.
+      background: 'rgba(255, 255, 255, 0.38)',
+      backdropFilter: 'blur(24px) saturate(170%)',
+      WebkitBackdropFilter: 'blur(24px) saturate(170%)',
       border: 'none',
       borderRadius: 14, padding: '16px 18px', marginBottom: 18,
-      boxShadow:
-        'inset 1px 1px 1px rgba(255, 255, 255, 0.45), ' +
-        '-2px -2px 14px rgba(255, 255, 255, 0.40), ' +
-        '6px 6px 22px rgba(92, 74, 56, 0.08)',
+      boxShadow: '0 6px 28px rgba(92, 74, 56, 0.08)',
       display: 'flex', flexDirection: 'column', gap: 10,
     }}>
       {/* "From Luke" pill — same design language as event card date pills */}
@@ -10795,15 +10792,13 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
         <div style={{
           padding: '14px 16px', marginBottom: 16,
           borderRadius: 14,
-          // Softer frost — same recipe as todayCard. Diffused edge, atmospheric.
-          background: 'rgba(255, 255, 255, 0.42)',
-          backdropFilter: 'blur(20px) saturate(160%)',
-          WebkitBackdropFilter: 'blur(20px) saturate(160%)',
+          // Minimal frost — same recipe as todayCard. No inset, no highlight,
+          // just soft warm drop shadow.
+          background: 'rgba(255, 255, 255, 0.38)',
+          backdropFilter: 'blur(24px) saturate(170%)',
+          WebkitBackdropFilter: 'blur(24px) saturate(170%)',
           border: 'none',
-          boxShadow:
-            'inset 1px 1px 1px rgba(255, 255, 255, 0.45), ' +
-            '-2px -2px 14px rgba(255, 255, 255, 0.40), ' +
-            '6px 6px 22px rgba(92, 74, 56, 0.08)',
+          boxShadow: '0 6px 28px rgba(92, 74, 56, 0.08)',
         }}>
           <div style={{ ...TYPE.eyebrow, marginBottom: 10 }}>This week</div>
           <div style={{ display: 'flex', alignItems: 'stretch', gap: 0 }}>
@@ -19566,13 +19561,13 @@ const styles = {
   },
   todayCard: {
     flex: '0 0 auto', width: 138, minHeight: 108,
-    // Softer frost — 42% (was 55%) so the edge dissolves into the page
-    // instead of stamping a sharp rectangle. Diffused shadows with bigger
-    // blur radii smear the boundary further. Inset highlight provides a
-    // subtle "lit glass edge" effect without using a hard border.
-    background: 'rgba(255, 255, 255, 0.42)',
-    backdropFilter: 'blur(20px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(20px) saturate(160%)',
+    // Minimal frosted plate — no inset (was a 1px white inside-edge line,
+    // which was the sharp boundary), no top-left white highlight (was making
+    // the upper-left edge pop). Just a quiet soft warm shadow underneath +
+    // the frost itself. Card edge dissolves into the page.
+    background: 'rgba(255, 255, 255, 0.38)',
+    backdropFilter: 'blur(24px) saturate(170%)',
+    WebkitBackdropFilter: 'blur(24px) saturate(170%)',
     border: 'none',
     borderRadius: 14,
     padding: '12px 14px',
@@ -19581,15 +19576,8 @@ const styles = {
     scrollSnapAlign: 'start',
     textAlign: 'left',
     fontFamily: 'inherit',
-    // Three-layer soft depth:
-    //   • Inner top-left inset: barely-there glass highlight at the edge
-    //   • Outer top-left: gentle wide highlight (smaller intensity, wider blur)
-    //   • Outer bottom-right: warm soft shadow with big blur
-    // No layer has a hard edge — everything fades.
-    boxShadow:
-      'inset 1px 1px 1px rgba(255, 255, 255, 0.45), ' +
-      '-2px -2px 14px rgba(255, 255, 255, 0.40), ' +
-      '6px 6px 22px rgba(92, 74, 56, 0.08)',
+    // One soft drop shadow — no white highlight, no inset, no edge tricks.
+    boxShadow: '0 6px 28px rgba(92, 74, 56, 0.08)',
   },
   todayCardPast: {
     opacity: 0.5,
