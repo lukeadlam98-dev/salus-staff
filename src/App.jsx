@@ -6070,9 +6070,14 @@ function BroadcastBanner({ broadcasts, broadcastReads, currentUser, onMarkRead }
 
   return (
     <div style={{
-      background: COLOR.cream,
-      border: `1px solid ${COLOR.bone}`,
+      // Frosted glass — same recipe as todayCard + This Week block so the
+      // whole home reads as one unified glass surface. Warm orbs glow through.
+      background: 'rgba(255, 255, 255, 0.32)',
+      backdropFilter: 'blur(22px) saturate(180%)',
+      WebkitBackdropFilter: 'blur(22px) saturate(180%)',
+      border: '1px solid rgba(255, 255, 255, 0.28)',
       borderRadius: 14, padding: '16px 18px', marginBottom: 18,
+      boxShadow: '0 4px 18px rgba(92, 74, 56, 0.06)',
       display: 'flex', flexDirection: 'column', gap: 10,
     }}>
       {/* "From Luke" pill — same design language as event card date pills */}
@@ -10787,8 +10792,14 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
       {showEarnings && (
         <div style={{
           padding: '14px 16px', marginBottom: 16,
-          border: `1px solid ${COLOR.bone}`, borderRadius: 14,
-          background: COLOR.cream,
+          borderRadius: 14,
+          // Frosted glass — same recipe as todayCard so the home reads as
+          // one unified glass system. Warm orbs glow through.
+          background: 'rgba(255, 255, 255, 0.32)',
+          backdropFilter: 'blur(22px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(22px) saturate(180%)',
+          border: '1px solid rgba(255, 255, 255, 0.28)',
+          boxShadow: '0 4px 18px rgba(92, 74, 56, 0.06)',
         }}>
           <div style={{ ...TYPE.eyebrow, marginBottom: 10 }}>This week</div>
           <div style={{ display: 'flex', alignItems: 'stretch', gap: 0 }}>
@@ -19555,15 +19566,14 @@ const styles = {
   },
   todayCard: {
     flex: '0 0 auto', width: 138, minHeight: 108,
-    // Ethereal frosted glass — like the reference login screens. 32% white
-    // veil lets the warm peach + sage + coral orbs glow strongly through.
-    // Heavy 22px blur smooths everything into that "watercolor under glass"
-    // effect. Saturate 180% keeps the orb colors rich after blurring (without
-    // it they'd grey out). Soft white border for the glass edge.
+    // Frosted glass tile — the reference pattern. Heavy blur + saturation
+    // pulls the warm orbs through the frost. Border is barely-there at 28%
+    // (was 55% which read as a "harsh line") so the edge feels diffused,
+    // not stamped.
     background: 'rgba(255, 255, 255, 0.32)',
     backdropFilter: 'blur(22px) saturate(180%)',
     WebkitBackdropFilter: 'blur(22px) saturate(180%)',
-    border: '1px solid rgba(255, 255, 255, 0.55)',
+    border: '1px solid rgba(255, 255, 255, 0.28)',
     borderRadius: 14,
     padding: '12px 14px',
     display: 'flex', flexDirection: 'column',
@@ -19571,8 +19581,9 @@ const styles = {
     scrollSnapAlign: 'start',
     textAlign: 'left',
     fontFamily: 'inherit',
-    // Soft warm shadow lifts the tile above the colorful background.
-    boxShadow: '0 2px 12px rgba(92, 74, 56, 0.06), 0 12px 32px rgba(198, 146, 106, 0.14)',
+    // Whispered shadow only — heavy shadow created the rim/halo effect
+    // that read as a hard line. Just a soft lift now.
+    boxShadow: '0 4px 18px rgba(92, 74, 56, 0.06)',
   },
   todayCardPast: {
     opacity: 0.5,
