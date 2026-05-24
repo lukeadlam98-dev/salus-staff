@@ -1633,8 +1633,8 @@ export default function SalusStaff() {
 
         /* Home page full-bleed wrapper — escapes main's horizontal padding
            so the warm gradient reaches the screen edges. Content sits with
-           a deliberate visible left/right margin (22px mobile, 32px desktop)
-           so the screen edge isn't crowded. */
+           a generous visible left/right margin (28px mobile, 32px desktop).
+           Strips inside still bleed to screen edges via their own escape margins. */
         .salus-home-bleed {
           margin-left: -32px;
           margin-right: -32px;
@@ -1645,8 +1645,8 @@ export default function SalusStaff() {
           .salus-home-bleed {
             margin-left: -14px;
             margin-right: -14px;
-            padding-left: 22px;
-            padding-right: 22px;
+            padding-left: 28px;
+            padding-right: 28px;
           }
         }
 
@@ -6064,50 +6064,57 @@ function BroadcastBanner({ broadcasts, broadcastReads, currentUser, onMarkRead }
     : unread[0];
 
   const isUrgent = latest.urgency === 'urgent';
-  const eyebrowText = usePlaceholder
-    ? 'Message from Luke'
-    : (isUrgent ? 'Urgent · From the team' : 'From the team');
+  const pillLabel = usePlaceholder
+    ? 'From Luke'
+    : (isUrgent ? 'Urgent' : 'From the team');
 
   return (
     <div style={{
-      background: isUrgent ? '#fbe5dd' : COLOR.cream,
-      border: `1px solid ${isUrgent ? '#f0c6b6' : COLOR.bone}`,
-      borderLeft: `4px solid ${isUrgent ? COLOR.coral : COLOR.amber}`,
-      borderRadius: 14, padding: '14px 16px', marginBottom: 18,
-      display: 'flex', alignItems: 'flex-start', gap: 12,
+      background: COLOR.cream,
+      border: `1px solid ${COLOR.bone}`,
+      borderRadius: 14, padding: '16px 18px', marginBottom: 18,
+      display: 'flex', flexDirection: 'column', gap: 10,
     }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{
-          ...TYPE.eyebrow,
-          color: isUrgent ? COLOR.coral : COLOR.amber,
-          marginBottom: 4,
-        }}>
-          {eyebrowText}
-        </div>
-        {latest.title && (
-          <div style={{ ...TYPE.cardTitle, fontSize: 15, marginBottom: 4 }}>
-            {latest.title}
+      {/* "From Luke" pill — same design language as event card date pills */}
+      <div style={{
+        alignSelf: 'flex-start',
+        fontSize: 9.5, fontWeight: 700,
+        letterSpacing: '0.16em', textTransform: 'uppercase',
+        color: isUrgent ? COLOR.coral : COLOR.brown,
+        background: isUrgent ? '#fbe5dd' : '#f5f0e0',
+        border: `1px solid ${isUrgent ? '#f0c6b6' : COLOR.bone}`,
+        padding: '5px 9px', borderRadius: 999,
+      }}>
+        {pillLabel}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {latest.title && (
+            <div style={{ ...TYPE.cardTitle, fontSize: 15, marginBottom: 4 }}>
+              {latest.title}
+            </div>
+          )}
+          <div style={{ ...TYPE.body, color: COLOR.brown, lineHeight: 1.5, fontSize: 13 }}>
+            {latest.body}
           </div>
-        )}
-        <div style={{ ...TYPE.body, color: COLOR.brown, lineHeight: 1.5, fontSize: 13 }}>
-          {latest.body}
+          {!usePlaceholder && unread.length > 1 && (
+            <div style={{ ...TYPE.metaSmall, marginTop: 8 }}>
+              + {unread.length - 1} more
+            </div>
+          )}
         </div>
-        {!usePlaceholder && unread.length > 1 && (
-          <div style={{ ...TYPE.metaSmall, marginTop: 8 }}>
-            + {unread.length - 1} more
-          </div>
+        {!usePlaceholder && (
+          <button onClick={() => onMarkRead(latest.id)} className="salus-btn" style={{
+            background: 'transparent', border: 'none', padding: 4,
+            color: COLOR.taupe, fontSize: 10, letterSpacing: '0.08em',
+            textTransform: 'uppercase', fontWeight: 500, flexShrink: 0,
+            cursor: 'pointer',
+          }}>
+            Got it
+          </button>
         )}
       </div>
-      {!usePlaceholder && (
-        <button onClick={() => onMarkRead(latest.id)} className="salus-btn" style={{
-          background: 'transparent', border: 'none', padding: 4,
-          color: COLOR.taupe, fontSize: 10, letterSpacing: '0.08em',
-          textTransform: 'uppercase', fontWeight: 500, flexShrink: 0,
-          cursor: 'pointer',
-        }}>
-          Got it
-        </button>
-      )}
     </div>
   );
 }
@@ -19491,24 +19498,23 @@ const styles = {
 
   // ─── TODAY STRIP — horizontal swipeable cards ───
   todayStripWrap: {
-    // Bleed past the 22px home padding so cards can scroll into the edge.
-    // Header + first card sit at 22px from screen edge — aligned with the
+    // Bleed past the 28px home padding so cards can scroll into the edge.
+    // Header + first card sit at 28px from screen edge — aligned with the
     // home content column (This Week block, broadcasts, etc).
-    margin: '0 -22px 20px',
+    margin: '0 -28px 20px',
   },
   todayStripHeader: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-    padding: '0 22px', marginBottom: 12,
+    padding: '0 28px', marginBottom: 12,
   },
   todayStripCount: {
     fontSize: 11, color: '#a59478', fontStyle: 'italic',
   },
   todayStripScroll: {
     display: 'flex', gap: 10,
-    // 22px left = aligns first card with home content edge.
-    // 4px right = cards bleed dramatically off the right edge,
-    // making it visually obvious the strip is swipeable.
-    padding: '2px 4px 8px 22px',
+    // 28px left = aligns first card with home content edge (comfortable visible margin).
+    // 4px right = cards bleed dramatically off the right edge, signalling swipe.
+    padding: '2px 4px 8px 28px',
     overflowX: 'auto', overflowY: 'hidden',
     scrollSnapType: 'x proximity',
     WebkitOverflowScrolling: 'touch',
@@ -19580,9 +19586,15 @@ const styles = {
     minHeight: 200,
   },
   spotlightEyebrow: {
-    fontSize: 10, color: 'rgba(255, 253, 247, 0.85)',
-    fontWeight: 600, letterSpacing: '0.22em',
-    textTransform: 'uppercase',
+    alignSelf: 'flex-start',
+    fontSize: 9.5, fontWeight: 700,
+    letterSpacing: '0.16em', textTransform: 'uppercase',
+    color: '#fffdf7',
+    background: 'rgba(255, 253, 247, 0.18)',
+    backdropFilter: 'blur(8px)',
+    WebkitBackdropFilter: 'blur(8px)',
+    padding: '5px 10px', borderRadius: 999,
+    border: '1px solid rgba(255, 253, 247, 0.22)',
   },
   spotlightTitle: {
     fontFamily: '"Playfair Display", Georgia, serif',
@@ -19610,15 +19622,15 @@ const styles = {
 
   // ─── EVENTS STRIP (Happening at Salus) ───
   eventsStripWrap: {
-    margin: '0 -22px 24px',
+    margin: '0 -28px 24px',
   },
   eventsStripHeader: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-    padding: '0 22px', marginBottom: 14,
+    padding: '0 28px', marginBottom: 14,
   },
   eventsStripScroll: {
     display: 'flex', gap: 12,
-    padding: '2px 4px 4px 22px',
+    padding: '2px 4px 4px 28px',
     overflowX: 'auto', overflowY: 'hidden',
     scrollSnapType: 'x proximity',
     WebkitOverflowScrolling: 'touch',
@@ -19707,7 +19719,7 @@ const styles = {
   },
   homeCarouselHeader: {
     display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
-    marginBottom: 14, padding: '0 4px',
+    marginBottom: 14, padding: '0', // header sits at the home content edge (28px)
   },
   homeCarouselEyebrow: {
     fontSize: 10, fontWeight: 600, color: '#7a8270',
@@ -19734,9 +19746,11 @@ const styles = {
     overflowX: 'auto', overflowY: 'hidden',
     scrollSnapType: 'x mandatory',
     WebkitOverflowScrolling: 'touch',
-    margin: '0 -14px',           // bleed past mobile main padding
-    padding: '4px 14px 12px',    // restore inset, plus right peek
-    scrollPaddingLeft: 14,
+    // Escape the 28px home padding so cards can scroll into the right edge.
+    // First card aligns with the home content edge at 28px from screen.
+    margin: '0 -28px',
+    padding: '4px 4px 12px 28px',
+    scrollPaddingLeft: 28,
   },
   homeCarouselCard: {
     scrollSnapAlign: 'start',
