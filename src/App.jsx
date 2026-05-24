@@ -6070,12 +6070,12 @@ function BroadcastBanner({ broadcasts, broadcastReads, currentUser, onMarkRead }
 
   return (
     <div style={{
-      // Frosted glass + neumorphic depth — same unified recipe as
-      // todayCard + This Week block.
+      // Frosted glass + neumorphic depth — no border (shadow alone defines
+      // the edge). Same recipe as todayCard + This Week.
       background: 'rgba(255, 255, 255, 0.55)',
       backdropFilter: 'blur(20px) saturate(160%)',
       WebkitBackdropFilter: 'blur(20px) saturate(160%)',
-      border: '1px solid rgba(255, 255, 255, 0.55)',
+      border: 'none',
       borderRadius: 14, padding: '16px 18px', marginBottom: 18,
       boxShadow:
         '-4px -4px 14px rgba(255, 255, 255, 0.65), ' +
@@ -10795,12 +10795,12 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
         <div style={{
           padding: '14px 16px', marginBottom: 16,
           borderRadius: 14,
-          // Frosted glass + neumorphic depth — same recipe as todayCard so
-          // the home reads as one unified raised glass system.
+          // Frosted glass + neumorphic depth — no border (shadow alone
+          // defines the edge). Same recipe as todayCard.
           background: 'rgba(255, 255, 255, 0.55)',
           backdropFilter: 'blur(20px) saturate(160%)',
           WebkitBackdropFilter: 'blur(20px) saturate(160%)',
-          border: '1px solid rgba(255, 255, 255, 0.55)',
+          border: 'none',
           boxShadow:
             '-4px -4px 14px rgba(255, 255, 255, 0.65), ' +
             '5px 5px 18px rgba(92, 74, 56, 0.10)',
@@ -11214,9 +11214,6 @@ function SpotlightCard() {
           <div style={styles.spotlightEyebrow}>{spotlight.eyebrow}</div>
           <h3 style={styles.spotlightTitle}>{spotlight.title}</h3>
           <p style={styles.spotlightBody}>{spotlight.body}</p>
-          <div style={styles.spotlightCta}>
-            {spotlight.cta}
-          </div>
         </div>
       </button>
     </div>
@@ -19570,15 +19567,13 @@ const styles = {
   },
   todayCard: {
     flex: '0 0 auto', width: 138, minHeight: 108,
-    // More solid frost (55% vs 32%) so the cards POP off the page — were
-    // blending into the bg before. Still translucent enough that warm orbs
-    // glow through. Added neumorphic dual-shadow: bright highlight from
-    // top-left + soft warm shadow bottom-right = pillowy extruded depth,
-    // like the reference. Cards now feel raised, not flat.
+    // Frosted neumorphic plate — no border (true neumorphism uses shadow
+    // alone to define the edge; a visible border read as a hard rectangle).
+    // The dual shadow extrudes the card; the bg tint says "frosted glass".
     background: 'rgba(255, 255, 255, 0.55)',
     backdropFilter: 'blur(20px) saturate(160%)',
     WebkitBackdropFilter: 'blur(20px) saturate(160%)',
-    border: '1px solid rgba(255, 255, 255, 0.55)',
+    border: 'none',
     borderRadius: 14,
     padding: '12px 14px',
     display: 'flex', flexDirection: 'column',
@@ -19586,10 +19581,9 @@ const styles = {
     scrollSnapAlign: 'start',
     textAlign: 'left',
     fontFamily: 'inherit',
-    // Neumorphic shadow combo:
-    //   • Top-left: white-cream highlight = light source feel
-    //   • Bottom-right: warm brown shadow = depth & gravity
-    // Equal distances create a symmetric "extruded plate" look.
+    // Neumorphic dual shadow:
+    //   • Top-left: bright cream highlight (light source)
+    //   • Bottom-right: warm brown shadow (depth)
     boxShadow:
       '-4px -4px 14px rgba(255, 255, 255, 0.65), ' +
       '5px 5px 18px rgba(92, 74, 56, 0.10)',
