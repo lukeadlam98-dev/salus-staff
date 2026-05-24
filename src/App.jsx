@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   Calendar, MessageSquare, Users, BarChart3, AlertCircle, AlertOctagon, Plus,
   Send, ArrowLeftRight, Check, X, Clock, Bell, RotateCcw, Settings, Mail, LogOut, Eye,
-  ChevronLeft, ChevronRight, TrendingUp, Award, Activity, Trash2,
+  ChevronLeft, ChevronRight, ChevronDown, TrendingUp, Award, Activity, Trash2,
   Sparkles, Play, Heart, Flame, Bookmark, MoreHorizontal, Music, Lightbulb,
   Inbox, Shield, RefreshCw, MapPin, Target, Phone, AtSign, Briefcase,
   RotateCcw as CoverIcon, ListChecks, Quote, Building2, MessageCircle,
@@ -2149,6 +2149,19 @@ export default function SalusStaff() {
         <StaffInvoicesModal
           data={data}
           currentUser={currentUser}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal?.type === 'bookOneOnOne' && (
+        <BookOneOnOneModal
+          currentUser={currentUser}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal?.type === 'quickSend' && (
+        <QuickSendModal
+          currentUser={currentUser}
+          kind={modal.kind}
           onClose={() => setModal(null)}
         />
       )}
@@ -6053,6 +6066,10 @@ function StoreCardEditModal({ card, currentUserId, onClose, onSaved }) {
 // ════════════════════════════════════════════════════════════════════════
 
 // ─── BroadcastBanner — shows at top of Home for unread broadcasts ───────
+//
+// Acts as a small "command center" from Luke. Above the divider: his
+// message (or a placeholder). Below the divider: four tool chips that
+// staff can tap to interact with Luke — Book a 1:1, Ask, Kudos, Idea.
 function BroadcastBanner({ broadcasts, broadcastReads, currentUser, onMarkRead }) {
   const readIds = new Set(broadcastReads.map(r => r.broadcastId));
   const now = Date.now();
@@ -6146,7 +6163,516 @@ function BroadcastBanner({ broadcasts, broadcastReads, currentUser, onMarkRead }
           </button>
         )}
       </div>
+
+      {/* ─── Tool chips — interactive manager touchpoints ───
+          Hairline divider above, then a wrap row of 4 glass chips:
+          Book 1:1, Ask, Kudos, Idea. Each opens a modal via the
+          salus:openModal event bus. */}
+      <div style={{
+        marginTop: 4,
+        paddingTop: 14,
+        borderTop: '1px solid rgba(255, 255, 255, 0.32)',
+        display: 'flex', flexWrap: 'wrap', gap: 8,
+      }}>
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent('salus:openModal', { detail: { type: 'bookOneOnOne' } }))}
+          className="salus-btn"
+          style={styles.broadcastChip}
+          aria-label="Book a 1:1 with Luke"
+        >
+          <Calendar size={13} strokeWidth={2.2} />
+          <span>Book 1:1</span>
+        </button>
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent('salus:openModal', { detail: { type: 'quickSend', kind: 'question' } }))}
+          className="salus-btn"
+          style={styles.broadcastChip}
+          aria-label="Ask Luke a question"
+        >
+          <MessageCircle size={13} strokeWidth={2.2} />
+          <span>Ask</span>
+        </button>
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent('salus:openModal', { detail: { type: 'quickSend', kind: 'kudos' } }))}
+          className="salus-btn"
+          style={styles.broadcastChip}
+          aria-label="Send kudos for a teammate"
+        >
+          <Award size={13} strokeWidth={2.2} />
+          <span>Kudos</span>
+        </button>
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent('salus:openModal', { detail: { type: 'quickSend', kind: 'suggestion' } }))}
+          className="salus-btn"
+          style={styles.broadcastChip}
+          aria-label="Share an idea or suggestion"
+        >
+          <Lightbulb size={13} strokeWidth={2.2} />
+          <span>Idea</span>
+        </button>
+      </div>
     </div>
+  );
+}
+
+// ─── BookOneOnOneModal — staff request a 1:1 slot with Luke ────────────
+//
+// Generates available slots over the next 14 weekdays at fixed times
+// (10:00, 11:00, 14:00, 15:00). Staff pick a slot + add an optional
+// reason. Insert into `manager_meetings` table.
+//
+// SQL schema needed (run in Supabase SQL editor):
+//
+//   create table if not exists manager_meetings (
+//     id uuid primary key default gen_random_uuid(),
+//     requester_id uuid references profiles(id) on delete cascade,
+//     slot_date date not null,
+//     slot_time text not null,
+//     reason text,
+//     status text default 'pending',
+//     google_event_id text,
+//     created_at timestamptz default now()
+//   );
+//   alter table manager_meetings enable row level security;
+//   create policy "staff can insert their own" on manager_meetings
+//     for insert with check (auth.uid() = requester_id);
+//   create policy "staff can see their own + managers see all" on manager_meetings
+//     for select using (
+//       auth.uid() = requester_id
+//       OR exists (select 1 from profiles where id = auth.uid() and is_manager = true)
+//     );
+//
+// Future: integration with Google Calendar — populate google_event_id on
+// Luke's acceptance and create a real calendar invite for both parties.
+function BookOneOnOneModal({ currentUser, onClose }) {
+  const [selectedSlot, setSelectedSlot] = useState(null); // { date, time }
+  const [reason, setReason] = useState('');
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState(null);
+  const [sent, setSent] = useState(false);
+
+  // Generate weekday slots over the next 14 days.
+  const slotsByDay = useMemo(() => {
+    const days = [];
+    const SLOT_TIMES = ['10:00', '11:00', '14:00', '15:00'];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    for (let offset = 1; offset <= 14; offset++) {
+      const d = new Date(today);
+      d.setDate(d.getDate() + offset);
+      const dow = d.getDay();
+      if (dow === 0 || dow === 6) continue; // skip weekends
+      const iso = d.toISOString().slice(0, 10);
+      const label = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+      days.push({ iso, label, times: SLOT_TIMES });
+    }
+    return days;
+  }, []);
+
+  const submit = async () => {
+    if (!selectedSlot) {
+      setError('Please pick a slot first');
+      return;
+    }
+    setSending(true);
+    setError(null);
+    try {
+      const { error: insertErr } = await supabase
+        .from('manager_meetings')
+        .insert({
+          requester_id: currentUser.id,
+          slot_date: selectedSlot.date,
+          slot_time: selectedSlot.time,
+          reason: reason.trim() || null,
+          status: 'pending',
+        });
+      if (insertErr) throw insertErr;
+      setSent(true);
+    } catch (e) {
+      // Schema-missing error from PostgREST has code 42P01 or similar.
+      // Surface friendly message; Luke needs to run the migration.
+      if (e?.message?.includes('does not exist') || e?.code === '42P01') {
+        setError('1:1 bookings need a quick setup from Luke. Try again soon.');
+      } else {
+        setError(e?.message || 'Something went wrong. Please try again.');
+      }
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (sent) {
+    const slotDate = new Date(selectedSlot.date).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+    return (
+      <Modal onClose={onClose}>
+        <div style={{ padding: '24px 4px 8px', textAlign: 'center' }}>
+          <div style={{
+            width: 56, height: 56, borderRadius: '50%',
+            background: '#e8efde', margin: '0 auto 16px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Check size={28} color="#5b6d3f" strokeWidth={2.5} />
+          </div>
+          <div style={{ ...TYPE.modalTitle, marginBottom: 8 }}>Request sent</div>
+          <div style={{ fontSize: 14, color: '#5c4a38', lineHeight: 1.5, marginBottom: 24 }}>
+            Luke will confirm your 1:1 for<br />
+            <strong>{slotDate} at {selectedSlot.time}</strong>
+          </div>
+          <button
+            onClick={onClose}
+            className="salus-btn"
+            style={{
+              padding: '12px 28px', borderRadius: 999,
+              background: '#1a2620', color: '#fffdf7',
+              fontSize: 14, fontWeight: 600, letterSpacing: '0.02em',
+              border: 'none', cursor: 'pointer',
+            }}
+          >
+            Done
+          </button>
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ paddingRight: 28 }}>
+        <div style={{ ...TYPE.modalTitle, marginBottom: 6 }}>Book a 1:1 with Luke</div>
+        <div style={{ fontSize: 13, color: '#7a6f5f', marginBottom: 18, lineHeight: 1.5 }}>
+          Pick a time that suits you. Luke will confirm once he's seen it.
+        </div>
+
+        {/* Slot picker — scrollable list of days, each with 4 time chips */}
+        <div style={{
+          maxHeight: 340, overflowY: 'auto', marginBottom: 16,
+          paddingRight: 4,
+        }}>
+          {slotsByDay.map(day => (
+            <div key={day.iso} style={{ marginBottom: 14 }}>
+              <div style={{
+                fontSize: 10, fontWeight: 700, letterSpacing: '0.12em',
+                textTransform: 'uppercase', color: '#a59478',
+                marginBottom: 8,
+              }}>
+                {day.label}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {day.times.map(time => {
+                  const isSelected = selectedSlot?.date === day.iso && selectedSlot?.time === time;
+                  return (
+                    <button
+                      key={time}
+                      onClick={() => setSelectedSlot({ date: day.iso, time })}
+                      className="salus-btn"
+                      style={{
+                        padding: '8px 14px',
+                        borderRadius: 10,
+                        border: isSelected ? '1px solid #1a2620' : '1px solid rgba(92, 74, 56, 0.15)',
+                        background: isSelected ? '#1a2620' : '#fffdf7',
+                        color: isSelected ? '#fffdf7' : '#1a2620',
+                        fontFamily: '"Playfair Display", Georgia, serif',
+                        fontSize: 14,
+                        fontVariantNumeric: 'tabular-nums',
+                        cursor: 'pointer',
+                        appearance: 'none', WebkitAppearance: 'none',
+                      }}
+                    >
+                      {time}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Optional reason */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={{
+            display: 'block', fontSize: 11, fontWeight: 600,
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            color: '#7a6f5f', marginBottom: 6,
+          }}>
+            What's this about? (optional)
+          </label>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="e.g. career chat, scheduling, an idea I want to talk through..."
+            rows={3}
+            style={{
+              width: '100%', padding: '10px 12px',
+              border: '1px solid rgba(92, 74, 56, 0.15)',
+              borderRadius: 10, background: '#fffdf7',
+              fontFamily: 'Inter, system-ui, sans-serif',
+              fontSize: 13, color: '#1a2620',
+              resize: 'vertical', minHeight: 64,
+              boxSizing: 'border-box',
+            }}
+          />
+        </div>
+
+        {error && (
+          <div style={{
+            padding: '10px 12px', marginBottom: 14,
+            background: '#fbe5dd', borderRadius: 10,
+            fontSize: 12, color: '#c8442a',
+          }}>
+            {error}
+          </div>
+        )}
+
+        <button
+          onClick={submit}
+          disabled={sending || !selectedSlot}
+          className="salus-btn"
+          style={{
+            width: '100%', padding: '13px 20px',
+            borderRadius: 999,
+            background: (!selectedSlot || sending) ? '#c4b8a0' : '#1a2620',
+            color: '#fffdf7',
+            fontSize: 14, fontWeight: 600, letterSpacing: '0.02em',
+            border: 'none',
+            cursor: (!selectedSlot || sending) ? 'not-allowed' : 'pointer',
+            transition: 'background 150ms ease',
+          }}
+        >
+          {sending ? 'Sending…' : 'Send request'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── QuickSendModal — Ask Luke / Kudos / Idea (one modal, three kinds) ──
+//
+// Reused for the three smaller broadcast chips. The "kind" prop drives
+// the title, subtitle, placeholder, and which extra fields show.
+//
+// SQL schema needed:
+//
+//   create table if not exists manager_messages (
+//     id uuid primary key default gen_random_uuid(),
+//     sender_id uuid references profiles(id) on delete cascade,
+//     kind text not null check (kind in ('question', 'kudos', 'suggestion')),
+//     body text not null,
+//     target_name text,
+//     status text default 'new',
+//     created_at timestamptz default now()
+//   );
+//   alter table manager_messages enable row level security;
+//   create policy "staff can insert their own" on manager_messages
+//     for insert with check (auth.uid() = sender_id);
+//   create policy "staff see own + managers see all" on manager_messages
+//     for select using (
+//       auth.uid() = sender_id
+//       OR exists (select 1 from profiles where id = auth.uid() and is_manager = true)
+//     );
+function QuickSendModal({ currentUser, kind, onClose }) {
+  const [body, setBody] = useState('');
+  const [targetName, setTargetName] = useState(''); // kudos only
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState(null);
+  const [sent, setSent] = useState(false);
+
+  const config = {
+    question: {
+      title: 'Ask Luke',
+      subtitle: 'Send Luke a quick question or message. He\u2019ll get back to you.',
+      placeholder: 'What\u2019s on your mind?',
+      successText: 'Your message is on its way to Luke.',
+      icon: MessageCircle,
+      iconBg: '#eef0e2', iconColor: '#5b6d3f',
+    },
+    kudos: {
+      title: 'Send kudos',
+      subtitle: 'Spotted a teammate doing something great? Let Luke know.',
+      placeholder: 'What did they do brilliantly?',
+      successText: 'Kudos delivered. Nice work.',
+      icon: Award,
+      iconBg: '#fbe5cf', iconColor: '#9c7855',
+    },
+    suggestion: {
+      title: 'Share an idea',
+      subtitle: 'Got something that could make Salus better? Drop it here.',
+      placeholder: 'What\u2019s your idea?',
+      successText: 'Idea logged. Luke will take a look.',
+      icon: Lightbulb,
+      iconBg: '#fef0d8', iconColor: '#c6926a',
+    },
+  }[kind] || {
+    title: 'Send to Luke',
+    subtitle: '',
+    placeholder: 'Your message…',
+    successText: 'Sent.',
+    icon: Send,
+    iconBg: '#eef0e2', iconColor: '#5b6d3f',
+  };
+
+  const submit = async () => {
+    if (!body.trim()) {
+      setError('Please write something first');
+      return;
+    }
+    if (kind === 'kudos' && !targetName.trim()) {
+      setError('Who deserves the kudos?');
+      return;
+    }
+    setSending(true);
+    setError(null);
+    try {
+      const { error: insertErr } = await supabase
+        .from('manager_messages')
+        .insert({
+          sender_id: currentUser.id,
+          kind,
+          body: body.trim(),
+          target_name: kind === 'kudos' ? targetName.trim() : null,
+          status: 'new',
+        });
+      if (insertErr) throw insertErr;
+      setSent(true);
+    } catch (e) {
+      if (e?.message?.includes('does not exist') || e?.code === '42P01') {
+        setError('This needs a quick setup from Luke. Try again soon.');
+      } else {
+        setError(e?.message || 'Something went wrong. Please try again.');
+      }
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const Icon = config.icon;
+
+  if (sent) {
+    return (
+      <Modal onClose={onClose}>
+        <div style={{ padding: '24px 4px 8px', textAlign: 'center' }}>
+          <div style={{
+            width: 56, height: 56, borderRadius: '50%',
+            background: config.iconBg, margin: '0 auto 16px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Check size={28} color={config.iconColor} strokeWidth={2.5} />
+          </div>
+          <div style={{ ...TYPE.modalTitle, marginBottom: 8 }}>Sent</div>
+          <div style={{ fontSize: 14, color: '#5c4a38', lineHeight: 1.5, marginBottom: 24 }}>
+            {config.successText}
+          </div>
+          <button
+            onClick={onClose}
+            className="salus-btn"
+            style={{
+              padding: '12px 28px', borderRadius: 999,
+              background: '#1a2620', color: '#fffdf7',
+              fontSize: 14, fontWeight: 600, letterSpacing: '0.02em',
+              border: 'none', cursor: 'pointer',
+            }}
+          >
+            Done
+          </button>
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ paddingRight: 28 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: '50%',
+            background: config.iconBg,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <Icon size={20} color={config.iconColor} strokeWidth={2.2} />
+          </div>
+          <div>
+            <div style={{ ...TYPE.modalTitle, marginBottom: 2 }}>{config.title}</div>
+          </div>
+        </div>
+        <div style={{ fontSize: 13, color: '#7a6f5f', marginBottom: 18, lineHeight: 1.5 }}>
+          {config.subtitle}
+        </div>
+
+        {/* Kudos has an extra "who" field */}
+        {kind === 'kudos' && (
+          <div style={{ marginBottom: 14 }}>
+            <label style={{
+              display: 'block', fontSize: 11, fontWeight: 600,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              color: '#7a6f5f', marginBottom: 6,
+            }}>
+              Who?
+            </label>
+            <input
+              type="text"
+              value={targetName}
+              onChange={(e) => setTargetName(e.target.value)}
+              placeholder="Their name"
+              style={{
+                width: '100%', padding: '10px 12px',
+                border: '1px solid rgba(92, 74, 56, 0.15)',
+                borderRadius: 10, background: '#fffdf7',
+                fontFamily: 'Inter, system-ui, sans-serif',
+                fontSize: 14, color: '#1a2620',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+        )}
+
+        <div style={{ marginBottom: 16 }}>
+          <textarea
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            placeholder={config.placeholder}
+            rows={5}
+            autoFocus
+            style={{
+              width: '100%', padding: '12px 14px',
+              border: '1px solid rgba(92, 74, 56, 0.15)',
+              borderRadius: 10, background: '#fffdf7',
+              fontFamily: 'Inter, system-ui, sans-serif',
+              fontSize: 14, color: '#1a2620', lineHeight: 1.5,
+              resize: 'vertical', minHeight: 100,
+              boxSizing: 'border-box',
+            }}
+          />
+        </div>
+
+        {error && (
+          <div style={{
+            padding: '10px 12px', marginBottom: 14,
+            background: '#fbe5dd', borderRadius: 10,
+            fontSize: 12, color: '#c8442a',
+          }}>
+            {error}
+          </div>
+        )}
+
+        <button
+          onClick={submit}
+          disabled={sending}
+          className="salus-btn"
+          style={{
+            width: '100%', padding: '13px 20px',
+            borderRadius: 999,
+            background: sending ? '#c4b8a0' : '#1a2620',
+            color: '#fffdf7',
+            fontSize: 14, fontWeight: 600, letterSpacing: '0.02em',
+            border: 'none',
+            cursor: sending ? 'not-allowed' : 'pointer',
+            transition: 'background 150ms ease',
+          }}
+        >
+          {sending ? 'Sending…' : 'Send'}
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -10579,6 +11105,10 @@ function HomeHero({ data, currentUser, isManager, brandPhoto, onClassClick }) {
 
 
 function MyDayHero({ data, currentUser, isManager, onClassClick }) {
+  // Accordion state for the Today/Coming-up agenda. Collapsed by default
+  // so the home page stays calm; tap the toggle row to reveal all classes.
+  const [agendaExpanded, setAgendaExpanded] = useState(false);
+
   const now = new Date();
   const hour = now.getHours();
   const greeting = hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening';
@@ -10772,57 +11302,85 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
         </div>
       )}
 
-      {/* Today/Coming-up agenda — vertical list inside one white tile.
-          Each row is a class/shift with time on the left, info middle, badge
-          or chevron on the right. Hairline separators between rows. Tap any
-          class row to open class detail. Feels like a clean daily planner,
-          not a scroll of blocky cards. */}
-      {hasTodayStrip && (
-        <div style={styles.todayAgendaWrap}>
-          <div style={TYPE.eyebrow}>{stripHeader}</div>
-          <div style={styles.todayAgendaCard}>
-            {todayItems.map((item, idx) => (
+      {/* Today/Coming-up agenda — accordion. Header row always visible
+          showing class count + "Up next" preview. Tap header to expand
+          and reveal the full list of classes. Collapsed by default so
+          the home stays calm; expand on demand. */}
+      {hasTodayStrip && (() => {
+        const upNextItem = todayItems.find(i => i.isLive) || todayItems.find(i => i.isUpNext) || todayItems.find(i => !i.isPast);
+        const countText = `${todayItems.length} ${todayItems.length === 1 ? 'class' : 'classes'} ${stripUsesToday ? 'today' : 'coming up'}`;
+        return (
+          <div style={styles.todayAgendaWrap}>
+            <div style={TYPE.eyebrow}>{stripHeader}</div>
+            <div style={styles.todayAgendaCard}>
               <button
-                key={`${item.kind}-${item.id}`}
-                onClick={() => item.kind === 'class' && onClassClick && onClassClick(item.id)}
+                onClick={() => setAgendaExpanded(v => !v)}
                 className="salus-btn"
-                style={{
-                  ...styles.todayAgendaRow,
-                  ...(idx > 0 ? { borderTop: '1px solid rgba(26, 38, 32, 0.06)' } : {}),
-                  ...(item.isPast ? { opacity: 0.4 } : {}),
-                  cursor: item.kind === 'class' ? 'pointer' : 'default',
-                }}
-                aria-label={`${item.dayPrefix ? item.dayPrefix + ' ' : ''}${item.timeLabel} ${item.title}`}
+                style={styles.todayAgendaToggle}
+                aria-expanded={agendaExpanded}
+                aria-label={agendaExpanded ? 'Hide schedule' : 'Show schedule'}
               >
-                <div style={styles.todayAgendaTimeCol}>
-                  {item.dayPrefix && (
-                    <div style={styles.todayAgendaDay}>{item.dayPrefix}</div>
+                <div style={styles.todayAgendaToggleContent}>
+                  <div style={styles.todayAgendaToggleTitle}>{countText}</div>
+                  {!agendaExpanded && upNextItem && (
+                    <div style={styles.todayAgendaTogglePreview}>
+                      {upNextItem.isLive ? 'Now' : 'Up next'} · {upNextItem.timeLabel} {upNextItem.title}
+                    </div>
                   )}
-                  <div style={styles.todayAgendaTime}>{item.timeLabel}</div>
                 </div>
-                <div style={styles.todayAgendaInfo}>
-                  <div style={styles.todayAgendaTitle}>{item.title}</div>
-                  <div style={styles.todayAgendaMeta}>{item.meta}</div>
-                </div>
-                <div style={styles.todayAgendaRight}>
-                  {item.isLive ? (
-                    <span style={{ ...styles.todayAgendaBadge, color: '#5b6d3f' }}>● Now</span>
-                  ) : item.isUpNext ? (
-                    <span style={styles.todayAgendaBadge}>Up next</span>
-                  ) : item.kind === 'class' ? (
-                    <ChevronRight size={14} color="#c4b8a0" />
-                  ) : null}
-                </div>
+                <ChevronDown
+                  size={18}
+                  color="#a59478"
+                  style={{
+                    flexShrink: 0,
+                    transform: agendaExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                    transition: 'transform 200ms ease',
+                  }}
+                />
               </button>
-            ))}
+              {agendaExpanded && todayItems.map(item => (
+                <button
+                  key={`${item.kind}-${item.id}`}
+                  onClick={() => item.kind === 'class' && onClassClick && onClassClick(item.id)}
+                  className="salus-btn"
+                  style={{
+                    ...styles.todayAgendaRow,
+                    borderTop: '1px solid rgba(26, 38, 32, 0.06)',
+                    ...(item.isPast ? { opacity: 0.4 } : {}),
+                    cursor: item.kind === 'class' ? 'pointer' : 'default',
+                  }}
+                  aria-label={`${item.dayPrefix ? item.dayPrefix + ' ' : ''}${item.timeLabel} ${item.title}`}
+                >
+                  <div style={styles.todayAgendaTimeCol}>
+                    {item.dayPrefix && (
+                      <div style={styles.todayAgendaDay}>{item.dayPrefix}</div>
+                    )}
+                    <div style={styles.todayAgendaTime}>{item.timeLabel}</div>
+                  </div>
+                  <div style={styles.todayAgendaInfo}>
+                    <div style={styles.todayAgendaTitle}>{item.title}</div>
+                    <div style={styles.todayAgendaMeta}>{item.meta}</div>
+                  </div>
+                  <div style={styles.todayAgendaRight}>
+                    {item.isLive ? (
+                      <span style={{ ...styles.todayAgendaBadge, color: '#5b6d3f' }}>● Now</span>
+                    ) : item.isUpNext ? (
+                      <span style={styles.todayAgendaBadge}>Up next</span>
+                    ) : item.kind === 'class' ? (
+                      <ChevronRight size={14} color="#c4b8a0" />
+                    ) : null}
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* This week — two monogram tiles. Editorial magazine feel.
-          LEFT: Classes count (big serif number) + earnings as footer. Taps to Schedule.
-          RIGHT: Cover needed count + status footer. Taps to Cover board.
-          Replaces the 3-button row that felt cramped and divider-heavy. */}
+          LEFT (white): Classes count + earnings as footer. Taps to invoices modal.
+          RIGHT (brown): Cover needed count + status footer. Taps to Cover board.
+          Brown right tile creates visual contrast so cover demands attention. */}
       {showEarnings && (
         <div style={styles.weekTileWrap}>
           <div style={TYPE.eyebrow}>This week</div>
@@ -10842,23 +11400,24 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
               </div>
             </button>
 
-            {/* RIGHT: cover needed */}
+            {/* RIGHT: cover needed — BROWN tile for contrast.
+                Visual hierarchy: white = info, brown = action. */}
             <button
               onClick={() => window.dispatchEvent(new CustomEvent('salus:tab', { detail: 'cover' }))}
               className="salus-btn"
-              style={styles.weekTile}
+              style={{ ...styles.weekTile, background: '#5c4a38' }}
               aria-label={`${weekCoverNeeded} need cover this week, open Cover board`}
             >
               <div style={{
                 ...styles.weekTileNumber,
-                color: weekCoverNeeded > 0 ? '#c8442a' : '#1a2620',
+                color: '#fffdf7',
               }}>
                 {weekCoverNeeded}
               </div>
-              <div style={styles.weekTileLabel}>
+              <div style={{ ...styles.weekTileLabel, color: '#fffdf7' }}>
                 {weekCoverNeeded === 1 ? 'Needs cover' : 'Need cover'}
               </div>
-              <div style={styles.weekTileFooter}>
+              <div style={{ ...styles.weekTileFooter, color: 'rgba(255, 253, 247, 0.6)' }}>
                 {weekCoverNeeded > 0 ? 'Tap to view' : 'All covered'}
               </div>
             </button>
@@ -11189,15 +11748,18 @@ function SpotlightCard() {
   const spotlight = {
     photo: '/brand/this-week.jpg',
     fallbackGradient: 'linear-gradient(135deg, #2d3a30 0%, #1a2620 100%)',
-    eyebrow: 'This week at Salus',
+    eyebrow: 'Main events',
     title: 'Track Day is back',
     body: 'Saturday 8 June. The team\u2019s heading to Brands Hatch \u2014 save the date and bring a friend.',
-    cta: 'I\u2019m in',
+    cta: 'Find out more',
     onClick: null, // wire to a modal or RSVP flow later
   };
 
   return (
     <div style={styles.spotlightWrap}>
+      {/* Eyebrow lives ABOVE the card now, same hierarchy as "Coming up"
+          and "This week" headers. Plain uppercase text, not a glass pill. */}
+      <div style={{ ...TYPE.eyebrow, marginBottom: 10 }}>{spotlight.eyebrow}</div>
       <button
         onClick={spotlight.onClick || (() => {})}
         className="salus-btn"
@@ -11216,9 +11778,13 @@ function SpotlightCard() {
         )}
         <div style={styles.spotlightGradient} />
         <div style={styles.spotlightContent}>
-          <div style={styles.spotlightEyebrow}>{spotlight.eyebrow}</div>
+          {/* Title up top — gets the room it deserves now that the eyebrow
+              has moved out. Body sits beneath, CTA pinned to bottom-left. */}
           <h3 style={styles.spotlightTitle}>{spotlight.title}</h3>
           <p style={styles.spotlightBody}>{spotlight.body}</p>
+          {/* Liquid glass CTA — same recipe as BroadcastBanner. Frosted
+              translucent pill against the dark photo. */}
+          <span style={styles.spotlightCtaGlass}>{spotlight.cta}</span>
         </div>
       </button>
     </div>
@@ -19582,6 +20148,34 @@ const styles = {
     marginTop: 10,
     // No shadow — keeps with the "solid white tile, contrast from base" approach.
   },
+  // Accordion toggle row — sits at the top of the white tile, always visible.
+  todayAgendaToggle: {
+    width: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    padding: '14px 16px',
+    background: 'transparent',
+    border: 'none',
+    textAlign: 'left',
+    appearance: 'none', WebkitAppearance: 'none',
+    fontFamily: 'inherit',
+    cursor: 'pointer',
+  },
+  todayAgendaToggleContent: {
+    flex: 1, minWidth: 0,
+  },
+  todayAgendaToggleTitle: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 15, fontWeight: 500,
+    color: '#1a2620', lineHeight: 1.3,
+  },
+  todayAgendaTogglePreview: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 12,
+    color: '#7a6f5f', marginTop: 3,
+    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+  },
   todayAgendaRow: {
     width: '100%',
     display: 'flex',
@@ -19669,43 +20263,66 @@ const styles = {
   },
   spotlightContent: {
     position: 'relative',
-    padding: '24px 22px 22px',
+    // Eyebrow has moved outside the card, so content gets more breathing
+    // room at the top. Title starts from a comfortable position rather than
+    // crowding the upper-left.
+    padding: '26px 22px 22px',
     display: 'flex', flexDirection: 'column',
-    minHeight: 200,
-  },
-  spotlightEyebrow: {
-    alignSelf: 'flex-start',
-    fontSize: 9.5, fontWeight: 700,
-    letterSpacing: '0.16em', textTransform: 'uppercase',
-    color: '#fffdf7',
-    background: 'rgba(255, 253, 247, 0.18)',
-    backdropFilter: 'blur(8px)',
-    WebkitBackdropFilter: 'blur(8px)',
-    padding: '5px 10px', borderRadius: 999,
-    border: '1px solid rgba(255, 253, 247, 0.22)',
+    minHeight: 230,
   },
   spotlightTitle: {
     fontFamily: '"Playfair Display", Georgia, serif',
-    fontSize: 24, fontWeight: 500, lineHeight: 1.1,
+    fontSize: 26, fontWeight: 500, lineHeight: 1.1,
     letterSpacing: '-0.015em',
-    margin: '8px 0 6px',
+    margin: '0 0 8px',
     color: '#fffdf7',
   },
   spotlightBody: {
-    fontSize: 13, lineHeight: 1.5,
-    color: 'rgba(255, 253, 247, 0.82)',
-    margin: '0 0 16px',
-    maxWidth: '85%',
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 13, lineHeight: 1.55,
+    color: 'rgba(255, 253, 247, 0.85)',
+    margin: '0 0 18px',
+    maxWidth: '88%',
   },
-  spotlightCta: {
+  // Liquid glass CTA — same recipe as BroadcastBanner. Frosted translucent
+  // pill against the dark photo. Inset highlights give it dimension.
+  spotlightCtaGlass: {
     alignSelf: 'flex-start',
     marginTop: 'auto',
-    padding: '10px 18px',
-    background: '#c6926a',
-    color: '#1a2620',
+    padding: '10px 20px',
+    background: 'linear-gradient(180deg, rgba(255, 255, 255, 0.32) 0%, rgba(255, 255, 255, 0.18) 100%)',
+    backdropFilter: 'blur(20px) saturate(180%)',
+    WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+    border: '1px solid rgba(255, 255, 255, 0.28)',
+    borderRadius: 999,
+    color: '#fffdf7',
+    fontFamily: 'Inter, system-ui, sans-serif',
     fontSize: 13, fontWeight: 600,
     letterSpacing: '0.02em',
+    boxShadow:
+      'inset 0 1px 0 rgba(255, 255, 255, 0.55), ' +
+      'inset 0 -1px 0 rgba(0, 0, 0, 0.08)',
+  },
+
+  // ─── BROADCAST CHIPS — small glass action pills ───
+  // Sit at the bottom of the BroadcastBanner. Each chip is icon + label.
+  // Glass treatment lighter than the spotlight CTA since the banner bg
+  // is already translucent (we don't want chip-on-glass-on-glass overkill).
+  broadcastChip: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '7px 12px',
+    background: 'rgba(255, 253, 247, 0.55)',
+    border: '1px solid rgba(92, 74, 56, 0.12)',
     borderRadius: 999,
+    color: '#5c4a38',
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 12, fontWeight: 600,
+    letterSpacing: '0.01em',
+    cursor: 'pointer',
+    appearance: 'none', WebkitAppearance: 'none',
+    boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.5)',
   },
 
   // ─── EVENTS STRIP (Happening at Salus) ───
