@@ -19514,29 +19514,23 @@ const styles = {
   },
 
   // ─── TODAY STRIP — horizontal swipeable cards ───
+  // No bleed — slider sits as a normal block within the home content area.
+  // Cards start at the content edge (28px from screen) and scroll horizontally
+  // within the content boundaries. Header has a chevron when items > 2 as
+  // the swipe affordance (no edge-bleed needed).
   todayStripWrap: {
-    // Bulletproof bleed: span 100vw regardless of parent padding chain.
-    // marginLeft 'calc(50% - 50vw)' shoves the wrap to the screen's left edge,
-    // width 100vw stretches it to the screen's right edge. Independent of
-    // .salus-home-bleed and .salus-main padding values — no escape math.
-    width: '100vw',
-    marginLeft: 'calc(50% - 50vw)',
-    marginRight: 'calc(50% - 50vw)',
     marginBottom: 20,
   },
   todayStripHeader: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-    // 28px from screen edge — the visible content margin Luke wants.
-    padding: '0 28px', marginBottom: 12,
+    marginBottom: 12,
   },
   todayStripCount: {
     fontSize: 11, color: '#a59478', fontStyle: 'italic',
   },
   todayStripScroll: {
     display: 'flex', gap: 10,
-    // 28px left = first card aligned with header (and with screen content edge).
-    // 4px right = cards bleed dramatically off the right edge for swipe hint.
-    padding: '2px 4px 8px 28px',
+    paddingTop: 2, paddingBottom: 8,
     overflowX: 'auto', overflowY: 'hidden',
     scrollSnapType: 'x proximity',
     WebkitOverflowScrolling: 'touch',
@@ -19643,20 +19637,17 @@ const styles = {
   },
 
   // ─── EVENTS STRIP (Happening at Salus) ───
+  // Contained block — no bleed, sits in home content area like everything else.
   eventsStripWrap: {
-    // 100vw bulletproof bleed (same as todayStripWrap).
-    width: '100vw',
-    marginLeft: 'calc(50% - 50vw)',
-    marginRight: 'calc(50% - 50vw)',
     marginBottom: 24,
   },
   eventsStripHeader: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-    padding: '0 28px', marginBottom: 14,
+    marginBottom: 14,
   },
   eventsStripScroll: {
     display: 'flex', gap: 12,
-    padding: '2px 4px 4px 28px',
+    paddingTop: 2, paddingBottom: 4,
     overflowX: 'auto', overflowY: 'hidden',
     scrollSnapType: 'x proximity',
     WebkitOverflowScrolling: 'touch',
@@ -19772,12 +19763,9 @@ const styles = {
     overflowX: 'auto', overflowY: 'hidden',
     scrollSnapType: 'x mandatory',
     WebkitOverflowScrolling: 'touch',
-    // 100vw bulletproof bleed — same approach as todayStripWrap.
-    width: '100vw',
-    marginLeft: 'calc(50% - 50vw)',
-    marginRight: 'calc(50% - 50vw)',
-    padding: '4px 4px 12px 28px',
-    scrollPaddingLeft: 28,
+    // Contained — no bleed. Cards scroll within content area.
+    paddingTop: 4, paddingBottom: 12,
+    scrollPaddingLeft: 0,
   },
   homeCarouselCard: {
     scrollSnapAlign: 'start',
