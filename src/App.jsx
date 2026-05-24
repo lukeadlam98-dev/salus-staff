@@ -10945,7 +10945,24 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
     : (isManager ? brandPhoto : null);
 
   return (
-    <div className="salus-home-bleed" style={styles.homePageBackdrop}>
+    // NOTE: All four bleed dimensions forced inline — the @media CSS rule
+    // for .salus-home-bleed was being unreliably applied (likely PWA cache
+    // or specificity). Inline styles always win without !important.
+    //
+    // The maths:
+    //   main padding-left: 14px (from .salus-main !important on mobile)
+    //   bleed marginLeft -14: pulls wrap LEFT EDGE to the screen edge (14-14=0)
+    //   bleed paddingLeft 28: content starts at 28px from screen edge
+    //
+    // Strip wraps inside use margin: '0 -28px' to escape this 28px padding
+    // and reach the screen edge for swipe affordance.
+    <div className="salus-home-bleed" style={{
+      ...styles.homePageBackdrop,
+      marginLeft: -14,
+      marginRight: -14,
+      paddingLeft: 28,
+      paddingRight: 28,
+    }}>
       {/* Editorial hero — big photo, greeting overlay, next class overlay */}
       <HomeHero
         data={data}
