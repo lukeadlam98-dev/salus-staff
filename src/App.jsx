@@ -10772,108 +10772,94 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
         </div>
       )}
 
-      {/* Today/Coming-up strip — horizontal swipeable cards for tactile interaction.
-          Bleeds to the edges of the home content (escapes the 14px home padding).
-          Shows today's items if any, else falls back to next 7 days. */}
+      {/* Today/Coming-up agenda — vertical list inside one white tile.
+          Each row is a class/shift with time on the left, info middle, badge
+          or chevron on the right. Hairline separators between rows. Tap any
+          class row to open class detail. Feels like a clean daily planner,
+          not a scroll of blocky cards. */}
       {hasTodayStrip && (
-        <div style={styles.todayStripWrap}>
-          <div style={styles.todayStripHeader}>
-            <div style={TYPE.eyebrow}>{stripHeader}</div>
-            {todayItems.length > 2 && (
-              <ChevronRight size={14} color="#c4b8a0" />
-            )}
-          </div>
-          <div className="salus-scroll-h" style={styles.todayStripScroll}>
-            {todayItems.map(item => (
+        <div style={styles.todayAgendaWrap}>
+          <div style={TYPE.eyebrow}>{stripHeader}</div>
+          <div style={styles.todayAgendaCard}>
+            {todayItems.map((item, idx) => (
               <button
                 key={`${item.kind}-${item.id}`}
                 onClick={() => item.kind === 'class' && onClassClick && onClassClick(item.id)}
                 className="salus-btn"
                 style={{
-                  ...styles.todayCard,
-                  ...(item.isPast ? styles.todayCardPast : {}),
+                  ...styles.todayAgendaRow,
+                  ...(idx > 0 ? { borderTop: '1px solid rgba(26, 38, 32, 0.06)' } : {}),
+                  ...(item.isPast ? { opacity: 0.4 } : {}),
                   cursor: item.kind === 'class' ? 'pointer' : 'default',
                 }}
                 aria-label={`${item.dayPrefix ? item.dayPrefix + ' ' : ''}${item.timeLabel} ${item.title}`}
               >
-                {item.isLive && (
-                  <span style={{ ...styles.todayCardBadge, color: '#5b6d3f' }}>● Now</span>
-                )}
-                {item.isUpNext && !item.isLive && (
-                  <span style={styles.todayCardBadge}>Up next</span>
-                )}
-                {item.dayPrefix && (
-                  <div style={styles.todayCardDayPrefix}>{item.dayPrefix}</div>
-                )}
-                <div style={styles.todayCardTime}>{item.timeLabel}</div>
-                <div style={styles.todayCardTitle}>{item.title}</div>
-                <div style={styles.todayCardMeta}>{item.meta}</div>
+                <div style={styles.todayAgendaTimeCol}>
+                  {item.dayPrefix && (
+                    <div style={styles.todayAgendaDay}>{item.dayPrefix}</div>
+                  )}
+                  <div style={styles.todayAgendaTime}>{item.timeLabel}</div>
+                </div>
+                <div style={styles.todayAgendaInfo}>
+                  <div style={styles.todayAgendaTitle}>{item.title}</div>
+                  <div style={styles.todayAgendaMeta}>{item.meta}</div>
+                </div>
+                <div style={styles.todayAgendaRight}>
+                  {item.isLive ? (
+                    <span style={{ ...styles.todayAgendaBadge, color: '#5b6d3f' }}>● Now</span>
+                  ) : item.isUpNext ? (
+                    <span style={styles.todayAgendaBadge}>Up next</span>
+                  ) : item.kind === 'class' ? (
+                    <ChevronRight size={14} color="#c4b8a0" />
+                  ) : null}
+                </div>
               </button>
             ))}
           </div>
         </div>
       )}
 
-      {/* This week's stats — only for coaches with classes. Order: classes → earnings → cover needed. */}
+      {/* This week — two monogram tiles. Editorial magazine feel.
+          LEFT: Classes count (big serif number) + earnings as footer. Taps to Schedule.
+          RIGHT: Cover needed count + status footer. Taps to Cover board.
+          Replaces the 3-button row that felt cramped and divider-heavy. */}
       {showEarnings && (
-        <div style={{
-          padding: '14px 16px', marginBottom: 16,
-          borderRadius: 16,
-          // Pure white tile, no shadow — same as todayCard.
-          background: '#ffffff',
-          border: 'none',
-          boxShadow: 'none',
-        }}>
-          <div style={{ ...TYPE.eyebrow, marginBottom: 10 }}>This week</div>
-          <div style={{ display: 'flex', alignItems: 'stretch', gap: 0 }}>
-            {/* Classes — taps to Schedule */}
-            <button
-              onClick={() => window.dispatchEvent(new CustomEvent('salus:tab', { detail: 'timetable' }))}
-              className="salus-btn"
-              style={styles.weekStatBtn}
-              aria-label={`${myWeekCount} classes this week, open Schedule`}
-            >
-              <div style={{ fontFamily: COLOR.serif, fontSize: 22, color: COLOR.forest, lineHeight: 1, letterSpacing: '-0.015em' }}>
-                {myWeekCount}
-              </div>
-              <div style={styles.weekStatLabel}>
-                <span>{myWeekCount === 1 ? 'Class' : 'Classes'}</span>
-                <ChevronRight size={9} style={{ opacity: 0.5 }} />
-              </div>
-            </button>
-            <div style={styles.weekStatDivider} />
-            {/* Earnings — taps to Staff invoices modal */}
+        <div style={styles.weekTileWrap}>
+          <div style={TYPE.eyebrow}>This week</div>
+          <div style={styles.weekTileRow}>
+            {/* LEFT: classes + earnings — taps to Staff Invoices modal
+                which shows the breakdown of classes taught + £earned per class. */}
             <button
               onClick={() => window.dispatchEvent(new CustomEvent('salus:openModal', { detail: { type: 'staffInvoices' } }))}
               className="salus-btn"
-              style={styles.weekStatBtn}
-              aria-label={`£${Math.round(weeklyEarningsPence / 100)} estimated this week, open invoice`}
+              style={styles.weekTile}
+              aria-label={`${myWeekCount} classes this week, £${Math.round(weeklyEarningsPence / 100)} estimated, open earnings breakdown`}
             >
-              <div style={{ fontFamily: COLOR.serif, fontSize: 22, color: COLOR.forest, lineHeight: 1, letterSpacing: '-0.015em' }}>
-                £{Math.round(weeklyEarningsPence / 100).toLocaleString('en-GB')}
-              </div>
-              <div style={styles.weekStatLabel}>
-                <span>Estimated</span>
-                <ChevronRight size={9} style={{ opacity: 0.5 }} />
+              <div style={styles.weekTileNumber}>{myWeekCount}</div>
+              <div style={styles.weekTileLabel}>{myWeekCount === 1 ? 'Class' : 'Classes'}</div>
+              <div style={styles.weekTileFooter}>
+                £{Math.round(weeklyEarningsPence / 100).toLocaleString('en-GB')} estimated
               </div>
             </button>
-            <div style={styles.weekStatDivider} />
-            {/* Cover needed — taps to Cover tab */}
+
+            {/* RIGHT: cover needed */}
             <button
               onClick={() => window.dispatchEvent(new CustomEvent('salus:tab', { detail: 'cover' }))}
               className="salus-btn"
-              style={styles.weekStatBtn}
+              style={styles.weekTile}
               aria-label={`${weekCoverNeeded} need cover this week, open Cover board`}
             >
               <div style={{
-                fontFamily: COLOR.serif, fontSize: 22, lineHeight: 1, letterSpacing: '-0.015em',
-                color: weekCoverNeeded > 0 ? COLOR.coral : COLOR.forest,
+                ...styles.weekTileNumber,
+                color: weekCoverNeeded > 0 ? '#c8442a' : '#1a2620',
               }}>
                 {weekCoverNeeded}
               </div>
-              <div style={styles.weekStatLabel}>
-                <span>Need cover</span>
-                <ChevronRight size={9} style={{ opacity: 0.5 }} />
+              <div style={styles.weekTileLabel}>
+                {weekCoverNeeded === 1 ? 'Needs cover' : 'Need cover'}
+              </div>
+              <div style={styles.weekTileFooter}>
+                {weekCoverNeeded > 0 ? 'Tap to view' : 'All covered'}
               </div>
             </button>
           </div>
@@ -10881,7 +10867,7 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
       )}
 
       {/* "Also today" and "Today done" sections removed — the horizontal Today
-          strip above (todayStripWrap) now handles all of today's schedule. */}
+          agenda above (todayAgendaWrap) now handles all of today's schedule. */}
 
       {/* Birthdays */}
       {birthdaysToday.map(u => (
@@ -19536,90 +19522,119 @@ const styles = {
   homeH1: { fontFamily: '"Playfair Display", serif', fontSize: 30, fontWeight: 400, color: '#1a2620', margin: 0, letterSpacing: '-0.015em', lineHeight: 1.1 },
 
   // ─── TAPPABLE THIS WEEK STAT BUTTONS ───
-  weekStatBtn: {
-    flex: '1 1 0', minWidth: 0,
-    display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
-    gap: 5,
-    padding: '4px 0',
-    background: 'none', border: 'none', cursor: 'pointer',
-    fontFamily: 'inherit', textAlign: 'left',
-  },
-  weekStatLabel: {
-    display: 'flex', alignItems: 'center', gap: 3,
-    fontSize: 10, color: '#a59478', fontWeight: 600,
-    letterSpacing: '0.08em', textTransform: 'uppercase',
-  },
-  weekStatDivider: {
-    width: 1, alignSelf: 'stretch', background: '#efe7d2',
-    margin: '2px 14px',
-  },
-
-  // ─── TODAY STRIP — horizontal swipeable cards ───
-  // Header sits contained in content area. Scroll container extends past the
-  // right edge of the content area so cards bleed off the right side of the
-  // screen — iOS-native "more to swipe" affordance. Left side stays aligned
-  // with content edge (28px from screen).
-  todayStripWrap: {
+  // ─── THIS WEEK TILES — two monogram tiles ───
+  // Replaces the cramped 3-stat row. Each tile is a clean white block with
+  // an editorial magazine feel: tiny eyebrow above, big serif number, label,
+  // and a footer detail. Two tiles side by side with gap.
+  weekTileWrap: {
     marginBottom: 20,
   },
-  todayStripHeader: {
-    display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-    marginBottom: 12,
-  },
-  todayStripCount: {
-    fontSize: 11, color: '#a59478', fontStyle: 'italic',
-  },
-  todayStripScroll: {
+  weekTileRow: {
     display: 'flex', gap: 10,
-    paddingTop: 2, paddingBottom: 8,
-    // Right edge extends past content area to the screen edge — cards bleed
-    // off the right side. Left edge stays at content edge naturally.
-    marginRight: -28,
-    paddingRight: 4,
-    overflowX: 'auto', overflowY: 'hidden',
-    scrollSnapType: 'x proximity',
-    // NOTE: '-webkit-overflow-scrolling: touch' is intentionally NOT set —
-    // it breaks backdrop-filter on child elements (iOS bug). Modern iOS
-    // does momentum scrolling natively without this legacy property.
+    marginTop: 10,
   },
-  todayCard: {
-    flex: '0 0 auto', width: 138, minHeight: 108,
-    // ZERO shadow — shadows were creating visible "darker padding zones"
-    // around each card that read as a container/background. Pure solid
-    // white tile. Visual definition comes only from white-vs-warm-page
-    // contrast. Nothing else.
+  weekTile: {
+    flex: '1 1 0', minWidth: 0,
     background: '#ffffff',
-    border: 'none',
     borderRadius: 16,
-    padding: '12px 14px',
-    display: 'flex', flexDirection: 'column',
-    position: 'relative',
-    scrollSnapAlign: 'start',
+    border: 'none', boxShadow: 'none',
+    padding: '18px 18px 16px',
     textAlign: 'left',
+    cursor: 'pointer',
+    appearance: 'none', WebkitAppearance: 'none',
     fontFamily: 'inherit',
-    boxShadow: 'none',
+    display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
+    minHeight: 118,
   },
-  todayCardPast: {
-    opacity: 0.5,
-  },
-  todayCardBadge: {
-    position: 'absolute', top: 10, right: 10,
-    fontSize: 8.5, fontWeight: 700,
-    color: '#a59478',
-    letterSpacing: '0.12em',
-    textTransform: 'uppercase',
-  },
-  todayCardTime: {
+  weekTileNumber: {
     fontFamily: '"Playfair Display", Georgia, serif',
-    fontSize: 22, color: '#1a2620',
-    lineHeight: 1, letterSpacing: '-0.015em',
-    fontVariantNumeric: 'tabular-nums',
-    marginTop: 2,
+    fontSize: 38, fontWeight: 400,
+    color: '#1a2620', lineHeight: 1,
+    letterSpacing: '-0.02em',
+    marginBottom: 6,
   },
-  todayCardDayPrefix: {
-    fontSize: 9, color: '#a59478', fontWeight: 700,
+  weekTileLabel: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 13, fontWeight: 500,
+    color: '#1a2620',
+    letterSpacing: '0.01em',
+  },
+  weekTileFooter: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 11,
+    color: '#7a6f5f',
+    marginTop: 'auto', paddingTop: 10,
+    letterSpacing: '0.02em',
+  },
+
+  // ─── TODAY AGENDA — vertical list inside one white tile ───
+  // Replaces the horizontal scroll of blocky cards. Each row is one
+  // class/shift, with a time column on the left, info in the middle, and
+  // a badge or chevron on the right. Hairline separators between rows.
+  // Feels like a clean daily planner; everything visible at a glance.
+  todayAgendaWrap: {
+    marginBottom: 20,
+  },
+  todayAgendaCard: {
+    background: '#ffffff',
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginTop: 10,
+    // No shadow — keeps with the "solid white tile, contrast from base" approach.
+  },
+  todayAgendaRow: {
+    width: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    padding: '14px 16px',
+    background: 'transparent',
+    border: 'none',
+    textAlign: 'left',
+    appearance: 'none', WebkitAppearance: 'none',
+    fontFamily: 'inherit',
+  },
+  todayAgendaTimeCol: {
+    flexShrink: 0,
+    minWidth: 56,
+  },
+  todayAgendaDay: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 9.5, fontWeight: 700,
+    color: '#a59478',
     letterSpacing: '0.12em', textTransform: 'uppercase',
     marginBottom: 3,
+  },
+  todayAgendaTime: {
+    fontFamily: '"Playfair Display", Georgia, serif',
+    fontSize: 20, color: '#1a2620',
+    lineHeight: 1, letterSpacing: '-0.015em',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  todayAgendaInfo: {
+    flex: 1, minWidth: 0,
+  },
+  todayAgendaTitle: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 15, fontWeight: 500,
+    color: '#1a2620', lineHeight: 1.3,
+    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+  },
+  todayAgendaMeta: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 12,
+    color: '#7a6f5f', marginTop: 2,
+    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+  },
+  todayAgendaRight: {
+    flexShrink: 0,
+    display: 'flex', alignItems: 'center',
+  },
+  todayAgendaBadge: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 9.5, fontWeight: 700,
+    color: '#c6926a',
+    letterSpacing: '0.12em', textTransform: 'uppercase',
   },
 
   // ─── SPOTLIGHT CTA (cinematic image card) ───
@@ -19694,7 +19709,7 @@ const styles = {
   },
 
   // ─── EVENTS STRIP (Happening at Salus) ───
-  // Same right-bleed pattern as todayStripScroll.
+  // Same right-bleed pattern as homeCarouselTrack.
   eventsStripWrap: {
     marginBottom: 24,
   },
@@ -19767,17 +19782,6 @@ const styles = {
     fontSize: 10.5, color: 'rgba(255, 253, 247, 0.72)',
     marginTop: 8,
     fontStyle: 'italic',
-  },
-  todayCardTitle: {
-    fontSize: 13, color: '#1a2620', fontWeight: 500,
-    marginTop: 8, lineHeight: 1.25,
-    overflow: 'hidden', textOverflow: 'ellipsis',
-    display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2,
-  },
-  todayCardMeta: {
-    fontSize: 9.5, color: '#a59478',
-    letterSpacing: '0.08em', textTransform: 'uppercase',
-    fontWeight: 600, marginTop: 'auto', paddingTop: 8,
   },
   homeGreetSub: { fontSize: 13, color: '#7a8270', marginTop: 6, margin: 0, letterSpacing: '0.01em' },
   homeSection: { marginTop: 28 },
