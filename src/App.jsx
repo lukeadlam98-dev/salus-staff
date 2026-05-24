@@ -19511,32 +19511,25 @@ const styles = {
   // NOTE: use paddingTop/paddingBottom (not shorthand `padding`) so the
   // bleed class's responsive padding-left/right keeps working.
   // ─── HOME BACKDROP ───
-  // Earthy "dappled shadow" backdrop — replaces the bright color orbs with
-  // irregular elliptical earth-toned shadows. Reads like sunlight through
-  // plants casting soft shadows on a warm wall. The key tricks:
-  //   1. ELLIPSES, not circles — irregular width/height feels organic, not
-  //      designed. Plants don't cast perfect round shadows.
-  //   2. Deep brown tones (instead of bright peach/coral) — feels grounded
-  //      and earthy, not sunset.
-  //   3. Asymmetric placement — shadows aren't lined up. One tall narrow
-  //      shadow on the right, a wide low one bottom-left, etc.
-  //   4. One soft "light" patch top-left to balance the shadows.
+  // Bright base + subtle brown circle gradients. Reverted from the dramatic
+  // earthy ellipses (too dark) and the bright peach orbs (too vibrant).
+  // Now: nearly-white base with four subtle warm brown circles. The brown
+  // is quiet enough to feel like ambient warmth, not "earthy plant shadows".
   homePageBackdrop: {
     paddingTop: 0,
     paddingBottom: 100,
     background:
-      // Tall narrow shadow right-side — feels like a tall plant silhouette
-      'radial-gradient(ellipse 320px 580px at 92% 45%, rgba(75, 50, 30, 0.20) 0%, rgba(75, 50, 30, 0) 62%), ' +
-      // Wide low shadow bottom-left — like a ground shadow / fallen branch
-      'radial-gradient(ellipse 420px 260px at 5% 78%, rgba(85, 58, 38, 0.18) 0%, rgba(85, 58, 38, 0) 65%), ' +
-      // Smaller asymmetric shadow upper-middle right
-      'radial-gradient(ellipse 220px 340px at 70% 12%, rgba(80, 55, 35, 0.15) 0%, rgba(80, 55, 35, 0) 65%), ' +
-      // Mid-page subtle depth — keeps the middle from going flat
-      'radial-gradient(ellipse 380px 280px at 35% 58%, rgba(95, 65, 42, 0.12) 0%, rgba(95, 65, 42, 0) 70%), ' +
-      // Soft warm "sun" light spilling from top-left
-      'radial-gradient(ellipse 650px 400px at 28% 6%, rgba(245, 220, 188, 0.32) 0%, rgba(245, 220, 188, 0) 60%), ' +
-      // Earthy limewash base — slightly warmer than before, still bright
-      'linear-gradient(180deg, #f6ecd9 0%, #e6d4ba 100%)',
+      // Subtle warm brown circle top-right
+      'radial-gradient(circle 480px at 88% 12%, rgba(155, 115, 80, 0.20) 0%, rgba(155, 115, 80, 0) 65%), ' +
+      // Subtle brown circle middle-left
+      'radial-gradient(circle 440px at 5% 45%, rgba(170, 135, 100, 0.18) 0%, rgba(170, 135, 100, 0) 65%), ' +
+      // Subtle deeper brown circle bottom-right
+      'radial-gradient(circle 380px at 92% 78%, rgba(140, 100, 70, 0.18) 0%, rgba(140, 100, 70, 0) 65%), ' +
+      // Subtle small bloom mid-page for layering richness
+      'radial-gradient(circle 320px at 60% 50%, rgba(165, 130, 95, 0.12) 0%, rgba(165, 130, 95, 0) 65%), ' +
+      // Bright base — more white than grey. Top is nearly pure white with
+      // a whisper of warmth, bottom settles into a soft warm cream.
+      'linear-gradient(180deg, #fefdf9 0%, #f5f1e8 100%)',
     minHeight: '100%',
   },
   homeGreeting: { padding: '24px 0 24px' },
