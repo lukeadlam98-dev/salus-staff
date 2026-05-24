@@ -19515,13 +19515,18 @@ const styles = {
 
   // ─── TODAY STRIP — horizontal swipeable cards ───
   todayStripWrap: {
-    // Bleed past the 28px home padding so cards can scroll into the edge.
-    // Header + first card sit at 28px from screen edge — aligned with the
-    // home content column (This Week block, broadcasts, etc).
-    margin: '0 -28px 20px',
+    // Bulletproof bleed: span 100vw regardless of parent padding chain.
+    // marginLeft 'calc(50% - 50vw)' shoves the wrap to the screen's left edge,
+    // width 100vw stretches it to the screen's right edge. Independent of
+    // .salus-home-bleed and .salus-main padding values — no escape math.
+    width: '100vw',
+    marginLeft: 'calc(50% - 50vw)',
+    marginRight: 'calc(50% - 50vw)',
+    marginBottom: 20,
   },
   todayStripHeader: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+    // 28px from screen edge — the visible content margin Luke wants.
     padding: '0 28px', marginBottom: 12,
   },
   todayStripCount: {
@@ -19529,8 +19534,8 @@ const styles = {
   },
   todayStripScroll: {
     display: 'flex', gap: 10,
-    // 28px left = aligns first card with home content edge (comfortable visible margin).
-    // 4px right = cards bleed dramatically off the right edge, signalling swipe.
+    // 28px left = first card aligned with header (and with screen content edge).
+    // 4px right = cards bleed dramatically off the right edge for swipe hint.
     padding: '2px 4px 8px 28px',
     overflowX: 'auto', overflowY: 'hidden',
     scrollSnapType: 'x proximity',
@@ -19639,7 +19644,11 @@ const styles = {
 
   // ─── EVENTS STRIP (Happening at Salus) ───
   eventsStripWrap: {
-    margin: '0 -28px 24px',
+    // 100vw bulletproof bleed (same as todayStripWrap).
+    width: '100vw',
+    marginLeft: 'calc(50% - 50vw)',
+    marginRight: 'calc(50% - 50vw)',
+    marginBottom: 24,
   },
   eventsStripHeader: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -19763,9 +19772,10 @@ const styles = {
     overflowX: 'auto', overflowY: 'hidden',
     scrollSnapType: 'x mandatory',
     WebkitOverflowScrolling: 'touch',
-    // Escape the 28px home padding so cards can scroll into the right edge.
-    // First card aligns with the home content edge at 28px from screen.
-    margin: '0 -28px',
+    // 100vw bulletproof bleed — same approach as todayStripWrap.
+    width: '100vw',
+    marginLeft: 'calc(50% - 50vw)',
+    marginRight: 'calc(50% - 50vw)',
     padding: '4px 4px 12px 28px',
     scrollPaddingLeft: 28,
   },
@@ -21301,6 +21311,7 @@ const styles = {
     width: '100%',
     flex: 1,
     overflowY: 'auto',
+    overflowX: 'hidden', // prevent 100vw strip wraps from causing horizontal scroll
     overscrollBehavior: 'contain',
     WebkitOverflowScrolling: 'touch',
   },
