@@ -6081,16 +6081,14 @@ function BroadcastBanner({ broadcasts, broadcastReads, currentUser, onMarkRead }
 
   return (
     <div style={{
-      // Radial-gradient bg fades edges + strong shadow for lift.
+      // Solid warm white tile + layered shadow. No backdrop-filter.
       // Same recipe as todayCard + This Week.
-      background: 'radial-gradient(ellipse 115% 115% at 50% 35%, rgba(255, 255, 255, 0.52) 25%, rgba(255, 255, 255, 0.22) 95%)',
-      backdropFilter: 'blur(22px) saturate(170%)',
-      WebkitBackdropFilter: 'blur(22px) saturate(170%)',
+      background: '#fdfaf2',
       border: 'none',
-      borderRadius: 14, padding: '16px 18px', marginBottom: 18,
+      borderRadius: 16, padding: '16px 18px', marginBottom: 18,
       boxShadow:
-        '0 14px 36px rgba(92, 74, 56, 0.14), ' +
-        '0 4px 10px rgba(92, 74, 56, 0.06)',
+        '0 1px 3px rgba(92, 74, 56, 0.05), ' +
+        '0 12px 32px rgba(92, 74, 56, 0.10)',
       display: 'flex', flexDirection: 'column', gap: 10,
     }}>
       {/* "From Luke" pill — same design language as event card date pills */}
@@ -10805,16 +10803,14 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
       {showEarnings && (
         <div style={{
           padding: '14px 16px', marginBottom: 16,
-          borderRadius: 14,
-          // Radial-gradient bg fades edges (no hard line) + strong shadow
-          // gives real lift. Same recipe as todayCard.
-          background: 'radial-gradient(ellipse 115% 115% at 50% 35%, rgba(255, 255, 255, 0.52) 25%, rgba(255, 255, 255, 0.22) 95%)',
-          backdropFilter: 'blur(22px) saturate(170%)',
-          WebkitBackdropFilter: 'blur(22px) saturate(170%)',
+          borderRadius: 16,
+          // Solid warm white tile + layered shadow (rebuilt clean — no more
+          // backdrop-filter). Same recipe as todayCard.
+          background: '#fdfaf2',
           border: 'none',
           boxShadow:
-            '0 14px 36px rgba(92, 74, 56, 0.14), ' +
-            '0 4px 10px rgba(92, 74, 56, 0.06)',
+            '0 1px 3px rgba(92, 74, 56, 0.05), ' +
+            '0 12px 32px rgba(92, 74, 56, 0.10)',
         }}>
           <div style={{ ...TYPE.eyebrow, marginBottom: 10 }}>This week</div>
           <div style={{ display: 'flex', alignItems: 'stretch', gap: 0 }}>
@@ -19577,29 +19573,25 @@ const styles = {
   },
   todayCard: {
     flex: '0 0 auto', width: 138, minHeight: 108,
-    // Two real fixes for "card feels flat AND has a hard line":
-    //   1. Radial gradient bg: opaque in center (52%), dissolves to 22% at
-    //      edges. There's literally no uniform "card-tint" edge anymore —
-    //      the card's tint fades smoothly into the page.
-    //   2. Stronger dual drop shadow: the LIFT comes from the shadow, not
-    //      from opacity contrast at the edge.
-    background: 'radial-gradient(ellipse 115% 115% at 50% 35%, rgba(255, 255, 255, 0.52) 25%, rgba(255, 255, 255, 0.22) 95%)',
-    backdropFilter: 'blur(22px) saturate(170%)',
-    WebkitBackdropFilter: 'blur(22px) saturate(170%)',
+    // REBUILT — no more backdrop-filter (was creating visible "blurred zone"
+    // outlines on iOS that read as a container box). Solid soft warm white
+    // tile + layered shadow = clean, modern, no rendering artifacts.
+    // The warm page gradient stays visible BETWEEN tiles (not through them),
+    // which gives the same atmospheric warmth without iOS rendering issues.
+    background: '#fdfaf2',
     border: 'none',
-    borderRadius: 14,
+    borderRadius: 16,
     padding: '12px 14px',
     display: 'flex', flexDirection: 'column',
     position: 'relative',
     scrollSnapAlign: 'start',
     textAlign: 'left',
     fontFamily: 'inherit',
-    // Strong dual shadow — does the actual lifting work.
-    //   • Wide soft main shadow = "floating above the page"
-    //   • Tight close shadow = grounds the card so it doesn't drift
+    // Layered shadow for proper neumorphic-style depth without any visible
+    // "container" effect. Tight close shadow grounds, wider drift shadow lifts.
     boxShadow:
-      '0 14px 36px rgba(92, 74, 56, 0.14), ' +
-      '0 4px 10px rgba(92, 74, 56, 0.06)',
+      '0 1px 3px rgba(92, 74, 56, 0.05), ' +
+      '0 12px 32px rgba(92, 74, 56, 0.10)',
   },
   todayCardPast: {
     opacity: 0.5,
