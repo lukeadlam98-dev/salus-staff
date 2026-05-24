@@ -19587,8 +19587,13 @@ const styles = {
   },
   todayCard: {
     flex: '0 0 auto', width: 138, minHeight: 108,
-    background: '#fffdf7',
-    border: '1px solid #efe7d2',
+    // Frosted glass — translucent cream with backdrop blur lets the warm
+    // page gradient (and decorative orbs) glow softly through. Same design
+    // language as the event-card pills, just scaled up to a full card.
+    background: 'rgba(255, 253, 247, 0.55)',
+    backdropFilter: 'blur(14px) saturate(140%)',
+    WebkitBackdropFilter: 'blur(14px) saturate(140%)',
+    border: '1px solid rgba(239, 231, 210, 0.7)',
     borderRadius: 14,
     padding: '12px 14px',
     display: 'flex', flexDirection: 'column',
@@ -19596,6 +19601,8 @@ const styles = {
     scrollSnapAlign: 'start',
     textAlign: 'left',
     fontFamily: 'inherit',
+    // Subtle warm shadow for that floaty modern feel — matches Spotlight CTA.
+    boxShadow: '0 2px 8px rgba(92, 74, 56, 0.06), 0 8px 20px rgba(198, 146, 106, 0.08)',
   },
   todayCardPast: {
     opacity: 0.5,
