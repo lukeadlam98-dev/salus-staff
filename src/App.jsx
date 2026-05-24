@@ -6081,11 +6081,29 @@ function BroadcastBanner({ broadcasts, broadcastReads, currentUser, onMarkRead }
 
   return (
     <div style={{
-      // Pure white tile, no shadow — same as todayCard + This Week.
-      background: '#ffffff',
-      border: 'none',
-      borderRadius: 16, padding: '16px 18px', marginBottom: 18,
-      boxShadow: 'none',
+      // ─── LIQUID GLASS EFFECT ───
+      // Inspired by Apple's iOS 26 "Liquid Glass" + the reference Photoshop
+      // overlay. Recipe:
+      //   1. Translucent gradient surface (lit from above, slightly darker
+      //      below) gives the glass its own subtle volume
+      //   2. Backdrop blur + saturate boost = heavy distortion of bg through
+      //      the glass, like looking through a wet pebble
+      //   3. Inset top white highlight = curved glass edge catching light
+      //   4. Inset bottom dark line = subtle refraction/gravity below
+      //   5. Outer soft warm drop shadow = the glass floats
+      //   6. Heavily rounded corners (24px) make it feel like a pill/lens
+      //      rather than a rectangle
+      position: 'relative',
+      background: 'linear-gradient(180deg, rgba(255, 255, 255, 0.32) 0%, rgba(255, 255, 255, 0.18) 100%)',
+      backdropFilter: 'blur(20px) saturate(180%)',
+      WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+      border: '1px solid rgba(255, 255, 255, 0.28)',
+      borderRadius: 24,
+      padding: '20px 22px', marginBottom: 18,
+      boxShadow:
+        'inset 0 1px 0 rgba(255, 255, 255, 0.55), ' +
+        'inset 0 -1px 0 rgba(0, 0, 0, 0.06), ' +
+        '0 10px 28px rgba(92, 74, 56, 0.12)',
       display: 'flex', flexDirection: 'column', gap: 10,
     }}>
       {/* "From Luke" pill — same design language as event card date pills */}
