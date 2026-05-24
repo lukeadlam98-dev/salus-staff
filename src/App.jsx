@@ -19587,13 +19587,15 @@ const styles = {
   },
   todayCard: {
     flex: '0 0 auto', width: 138, minHeight: 108,
-    // Frosted glass — translucent cream with backdrop blur lets the warm
-    // page gradient (and decorative orbs) glow softly through. Same design
-    // language as the event-card pills, just scaled up to a full card.
-    background: 'rgba(255, 253, 247, 0.55)',
-    backdropFilter: 'blur(14px) saturate(140%)',
-    WebkitBackdropFilter: 'blur(14px) saturate(140%)',
-    border: '1px solid rgba(239, 231, 210, 0.7)',
+    // Ethereal frost — only a 28% white veil over the background. The warm
+    // gradient and decorative orbs glow clearly through the card, like the
+    // "Start Today's Session" bar in the reference. Blur is pushed high
+    // (24px) + saturate keeps the colors rich through the frost.
+    background: 'rgba(255, 255, 255, 0.28)',
+    backdropFilter: 'blur(24px) saturate(180%)',
+    WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+    // Softer border — just a hint of edge, not a hard line.
+    border: '1px solid rgba(255, 255, 255, 0.45)',
     borderRadius: 14,
     padding: '12px 14px',
     display: 'flex', flexDirection: 'column',
@@ -19601,8 +19603,8 @@ const styles = {
     scrollSnapAlign: 'start',
     textAlign: 'left',
     fontFamily: 'inherit',
-    // Subtle warm shadow for that floaty modern feel — matches Spotlight CTA.
-    boxShadow: '0 2px 8px rgba(92, 74, 56, 0.06), 0 8px 20px rgba(198, 146, 106, 0.08)',
+    // Tighter, softer shadow — the card should feel light, not heavy.
+    boxShadow: '0 2px 10px rgba(92, 74, 56, 0.05), 0 10px 24px rgba(198, 146, 106, 0.10)',
   },
   todayCardPast: {
     opacity: 0.5,
