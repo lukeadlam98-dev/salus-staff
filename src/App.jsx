@@ -1632,8 +1632,9 @@ export default function SalusStaff() {
         .salus-input:focus { outline: none; border-color: #5c4a38 !important; }
 
         /* Home page full-bleed wrapper — escapes main's horizontal padding
-           so the warm gradient reaches the screen edges. Matches main's
-           14px mobile / 32px desktop padding. */
+           so the warm gradient reaches the screen edges. Content sits with
+           a deliberate visible left/right margin (22px mobile, 32px desktop)
+           so the screen edge isn't crowded. */
         .salus-home-bleed {
           margin-left: -32px;
           margin-right: -32px;
@@ -1644,8 +1645,8 @@ export default function SalusStaff() {
           .salus-home-bleed {
             margin-left: -14px;
             margin-right: -14px;
-            padding-left: 14px;
-            padding-right: 14px;
+            padding-left: 22px;
+            padding-right: 22px;
           }
         }
 
@@ -19490,24 +19491,24 @@ const styles = {
 
   // ─── TODAY STRIP — horizontal swipeable cards ───
   todayStripWrap: {
-    // Bleed past the 14px home padding so cards can scroll into the edge.
-    // Header + first card sit at 14px from screen edge — aligned with the
+    // Bleed past the 22px home padding so cards can scroll into the edge.
+    // Header + first card sit at 22px from screen edge — aligned with the
     // home content column (This Week block, broadcasts, etc).
-    margin: '0 -14px 20px',
+    margin: '0 -22px 20px',
   },
   todayStripHeader: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-    padding: '0 14px', marginBottom: 12,
+    padding: '0 22px', marginBottom: 12,
   },
   todayStripCount: {
     fontSize: 11, color: '#a59478', fontStyle: 'italic',
   },
   todayStripScroll: {
     display: 'flex', gap: 10,
-    // 14px left = aligns first card with home content edge (This Week block, etc).
+    // 22px left = aligns first card with home content edge.
     // 4px right = cards bleed dramatically off the right edge,
     // making it visually obvious the strip is swipeable.
-    padding: '2px 4px 8px 14px',
+    padding: '2px 4px 8px 22px',
     overflowX: 'auto', overflowY: 'hidden',
     scrollSnapType: 'x proximity',
     WebkitOverflowScrolling: 'touch',
@@ -19609,15 +19610,15 @@ const styles = {
 
   // ─── EVENTS STRIP (Happening at Salus) ───
   eventsStripWrap: {
-    margin: '0 -14px 24px',
+    margin: '0 -22px 24px',
   },
   eventsStripHeader: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-    padding: '0 14px', marginBottom: 14,
+    padding: '0 22px', marginBottom: 14,
   },
   eventsStripScroll: {
     display: 'flex', gap: 12,
-    padding: '2px 4px 4px 14px',
+    padding: '2px 4px 4px 22px',
     overflowX: 'auto', overflowY: 'hidden',
     scrollSnapType: 'x proximity',
     WebkitOverflowScrolling: 'touch',
