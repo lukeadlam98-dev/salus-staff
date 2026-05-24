@@ -19491,13 +19491,11 @@ const styles = {
   // NOTE: use paddingTop/paddingBottom (not shorthand `padding`) so the
   // bleed class's responsive padding-left/right keeps working.
   // ─── HOME BACKDROP ───
-  // Atmospheric dreamy backdrop — STRONG colored orbs baked directly into the
-  // page background (not separate divs, which create stacking contexts and
-  // break backdrop-filter on child elements). Three big soft brand-colored
-  // blobs create the "watercolor wash" look from the reference: warm amber
-  // dominating top, sage moss left-middle, soft coral bottom-right. The
-  // backdrop-filter on cards above will blur these colors through the frost,
-  // creating that ethereal "glass over sunset" effect.
+  // Greige limewash base — shifted from creamy yellow (#fffdf7 → #fbf4e6) to
+  // a brighter, more neutral greige. Top is nearly white with just a whisper
+  // of warmth; bottom settles into a soft greige limewash. The brand-colored
+  // orbs pop more against this neutral ground than they did against the
+  // creamier base.
   homePageBackdrop: {
     paddingTop: 0,
     paddingBottom: 100,
@@ -19510,8 +19508,10 @@ const styles = {
       'radial-gradient(circle 440px at 92% 78%, rgba(200, 100, 70, 0.38) 0%, rgba(200, 100, 70, 0) 62%), ' +
       // Soft second amber bloom mid-right for layering richness
       'radial-gradient(circle 380px at 78% 50%, rgba(198, 146, 106, 0.30) 0%, rgba(198, 146, 106, 0) 65%), ' +
-      // Cream base for everything else
-      'linear-gradient(180deg, #fffdf7 0%, #fbf4e6 100%)',
+      // Greige limewash base — top is bright (nearly white with warmth),
+      // bottom settles into soft limewash greige. Brighter than the old cream
+      // base and more "neutral plaster" than "warm cream".
+      'linear-gradient(180deg, #fbfaf6 0%, #ece8de 100%)',
     minHeight: '100%',
   },
   homeGreeting: { padding: '24px 0 24px' },
