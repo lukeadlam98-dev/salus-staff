@@ -19511,26 +19511,32 @@ const styles = {
   // NOTE: use paddingTop/paddingBottom (not shorthand `padding`) so the
   // bleed class's responsive padding-left/right keeps working.
   // ─── HOME BACKDROP ───
-  // All-brown-and-nude palette — sage and coral orbs removed per Luke. Four
-  // layered warm earth tones (amber peach → taupe nude → warm brown → soft
-  // amber) over a greige limewash base. Reads as warm leather / lifted clay
-  // rather than sunset.
+  // Earthy "dappled shadow" backdrop — replaces the bright color orbs with
+  // irregular elliptical earth-toned shadows. Reads like sunlight through
+  // plants casting soft shadows on a warm wall. The key tricks:
+  //   1. ELLIPSES, not circles — irregular width/height feels organic, not
+  //      designed. Plants don't cast perfect round shadows.
+  //   2. Deep brown tones (instead of bright peach/coral) — feels grounded
+  //      and earthy, not sunset.
+  //   3. Asymmetric placement — shadows aren't lined up. One tall narrow
+  //      shadow on the right, a wide low one bottom-left, etc.
+  //   4. One soft "light" patch top-left to balance the shadows.
   homePageBackdrop: {
     paddingTop: 0,
     paddingBottom: 100,
     background:
-      // BIG amber/peach orb dominating top-right — main warm note (kept)
-      'radial-gradient(circle 560px at 85% 8%, rgba(220, 165, 130, 0.55) 0%, rgba(220, 165, 130, 0) 62%), ' +
-      // Soft taupe/nude orb middle-left — replaces the sage. Quiet, neutral
-      // warm grey that pairs with the brown family without going earthy-green.
-      'radial-gradient(circle 500px at 5% 42%, rgba(180, 158, 130, 0.42) 0%, rgba(180, 158, 130, 0) 62%), ' +
-      // Rich warm brown orb bottom-right — replaces the coral. Deeper, more
-      // saturated, hints at espresso/leather rather than peach.
-      'radial-gradient(circle 440px at 92% 78%, rgba(155, 115, 80, 0.42) 0%, rgba(155, 115, 80, 0) 62%), ' +
-      // Soft second amber bloom mid-right for layering richness (kept)
-      'radial-gradient(circle 380px at 78% 50%, rgba(198, 146, 106, 0.30) 0%, rgba(198, 146, 106, 0) 65%), ' +
-      // Greige limewash base — bright top, soft warm settle at bottom.
-      'linear-gradient(180deg, #fbfaf6 0%, #ece8de 100%)',
+      // Tall narrow shadow right-side — feels like a tall plant silhouette
+      'radial-gradient(ellipse 320px 580px at 92% 45%, rgba(75, 50, 30, 0.20) 0%, rgba(75, 50, 30, 0) 62%), ' +
+      // Wide low shadow bottom-left — like a ground shadow / fallen branch
+      'radial-gradient(ellipse 420px 260px at 5% 78%, rgba(85, 58, 38, 0.18) 0%, rgba(85, 58, 38, 0) 65%), ' +
+      // Smaller asymmetric shadow upper-middle right
+      'radial-gradient(ellipse 220px 340px at 70% 12%, rgba(80, 55, 35, 0.15) 0%, rgba(80, 55, 35, 0) 65%), ' +
+      // Mid-page subtle depth — keeps the middle from going flat
+      'radial-gradient(ellipse 380px 280px at 35% 58%, rgba(95, 65, 42, 0.12) 0%, rgba(95, 65, 42, 0) 70%), ' +
+      // Soft warm "sun" light spilling from top-left
+      'radial-gradient(ellipse 650px 400px at 28% 6%, rgba(245, 220, 188, 0.32) 0%, rgba(245, 220, 188, 0) 60%), ' +
+      // Earthy limewash base — slightly warmer than before, still bright
+      'linear-gradient(180deg, #f6ecd9 0%, #e6d4ba 100%)',
     minHeight: '100%',
   },
   homeGreeting: { padding: '24px 0 24px' },
