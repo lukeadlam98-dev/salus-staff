@@ -10945,24 +10945,56 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
     : (isManager ? brandPhoto : null);
 
   return (
-    // NOTE: All four bleed dimensions forced inline — the @media CSS rule
-    // for .salus-home-bleed was being unreliably applied (likely PWA cache
-    // or specificity). Inline styles always win without !important.
-    //
-    // The maths:
-    //   main padding-left: 14px (from .salus-main !important on mobile)
-    //   bleed marginLeft -14: pulls wrap LEFT EDGE to the screen edge (14-14=0)
-    //   bleed paddingLeft 28: content starts at 28px from screen edge
-    //
-    // Strip wraps inside use margin: '0 -28px' to escape this 28px padding
-    // and reach the screen edge for swipe affordance.
+    // The bleed wrapper has all 4 dimensions inline (margin/padding) to bypass
+    // any @media CSS fragility. position: relative + overflow: hidden so the
+    // decorative orbs below position relative to the bleed and stay clipped
+    // inside the page (no horizontal scroll from the orbs).
     <div className="salus-home-bleed" style={{
       ...styles.homePageBackdrop,
       marginLeft: -14,
       marginRight: -14,
       paddingLeft: 28,
       paddingRight: 28,
+      position: 'relative',
+      overflow: 'hidden',
     }}>
+      {/* ─── Decorative orbs — floating brand-colored blurred blobs.
+          Add personality and "quirky modern" depth, like an abstract painting
+          that the content sits over. aria-hidden + pointer-events: none so
+          they're invisible to screen readers and don't intercept taps. */}
+      <div aria-hidden="true" style={{
+        position: 'absolute',
+        top: 240, right: -80,
+        width: 260, height: 260,
+        borderRadius: '50%',
+        background: 'radial-gradient(circle, rgba(198, 146, 106, 0.55) 0%, rgba(198, 146, 106, 0) 70%)',
+        filter: 'blur(40px)',
+        pointerEvents: 'none',
+        zIndex: 0,
+      }} />
+      <div aria-hidden="true" style={{
+        position: 'absolute',
+        top: 720, left: -100,
+        width: 280, height: 280,
+        borderRadius: '50%',
+        background: 'radial-gradient(circle, rgba(122, 130, 92, 0.42) 0%, rgba(122, 130, 92, 0) 70%)',
+        filter: 'blur(45px)',
+        pointerEvents: 'none',
+        zIndex: 0,
+      }} />
+      <div aria-hidden="true" style={{
+        position: 'absolute',
+        top: 1200, right: -60,
+        width: 220, height: 220,
+        borderRadius: '50%',
+        background: 'radial-gradient(circle, rgba(200, 68, 42, 0.22) 0%, rgba(200, 68, 42, 0) 70%)',
+        filter: 'blur(45px)',
+        pointerEvents: 'none',
+        zIndex: 0,
+      }} />
+
+      {/* Content sits above the orbs */}
+      <div style={{ position: 'relative', zIndex: 1 }}>
       {/* Editorial hero — big photo, greeting overlay, next class overlay */}
       <HomeHero
         data={data}
@@ -11161,6 +11193,7 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
           onClose={() => setShowCustomize(false)}
         />
       )}
+      </div>
     </div>
   );
 }
@@ -19485,10 +19518,23 @@ const styles = {
   // Combined with `salus-home-bleed` class to escape main's padding.
   // NOTE: use paddingTop/paddingBottom (not shorthand `padding`) so the
   // bleed class's responsive padding-left/right keeps working.
+  // ─── HOME BACKDROP ───
+  // Editorial warm-glow background. Three layered radial glows in brand
+  // colors create the "golden hour, abstract ambient light" feel — pushes
+  // the modern editorial direction. Each glow stays under 35% alpha so they
+  // blend softly without going garish.
   homePageBackdrop: {
     paddingTop: 0,
     paddingBottom: 100,
-    background: 'radial-gradient(ellipse 110% 55% at 50% 105%, rgba(198, 146, 106, 0.16) 0%, rgba(198, 146, 106, 0) 65%), radial-gradient(ellipse 55% 35% at 78% 10%, rgba(122, 130, 92, 0.08) 0%, rgba(122, 130, 92, 0) 70%), linear-gradient(180deg, #fffdf7 0%, #fbf4e6 100%)',
+    background:
+      // Amber "morning sun" top-right — the dominant warm note
+      'radial-gradient(circle 320px at 88% 12%, rgba(198, 146, 106, 0.32) 0%, rgba(198, 146, 106, 0) 62%), ' +
+      // Sage "moss in the corner" middle-left — earthy counterpoint
+      'radial-gradient(circle 340px at 8% 48%, rgba(122, 130, 92, 0.22) 0%, rgba(122, 130, 92, 0) 65%), ' +
+      // Amber "golden hour spill" bottom-right — pulls the warmth down the page
+      'radial-gradient(circle 420px at 95% 88%, rgba(198, 146, 106, 0.26) 0%, rgba(198, 146, 106, 0) 62%), ' +
+      // Base cream gradient for everything else to sit on
+      'linear-gradient(180deg, #fffdf7 0%, #fbf4e6 100%)',
     minHeight: '100%',
   },
   homeGreeting: { padding: '24px 0 24px' },
@@ -19580,8 +19626,9 @@ const styles = {
   },
   spotlightCard: {
     position: 'relative',
-    width: '100%', minHeight: 200,
-    borderRadius: 20,
+    width: '100%', minHeight: 220,
+    // Pushed border-radius for a softer, more modern feel (was 20, now 24).
+    borderRadius: 24,
     overflow: 'hidden',
     border: 'none',
     padding: 0,
@@ -19590,6 +19637,10 @@ const styles = {
     color: '#fffdf7',
     textAlign: 'left',
     display: 'block',
+    // Lifted, layered shadow — soft, warm, modern. Two layers create depth:
+    // (1) close-in soft shadow for crispness, (2) wider warm-toned shadow
+    // for the "floating in golden hour light" feel.
+    boxShadow: '0 4px 14px rgba(92, 74, 56, 0.10), 0 16px 40px rgba(198, 146, 106, 0.18)',
   },
   spotlightPhoto: {
     position: 'absolute', inset: 0,
