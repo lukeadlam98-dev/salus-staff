@@ -13084,6 +13084,9 @@ const pillStyle = {
 // showing class count on top, day number below. Selected day filled forest.
 // Toggleable. Cover-needed surfaced by bottom-nav badge + coral indicators.
 function StaffScheduleView({ data, currentUser, onClassClick }) {
+  // Calendar accordion state — collapsed by default. The day list below
+  // is the primary view; calendar is "tap to navigate elsewhere".
+  const [calendarExpanded, setCalendarExpanded] = useState(false);
   const [view, setView] = useState('mine'); // 'mine' | 'everyone' | 'hire'
 
   // Defensive
@@ -13092,7 +13095,7 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
   const allCovers = data?.coverRequests || [];
   const allBookings = data?.bookings || [];
 
-  // selectedDate drives both the month grid and the week shown below
+  // selectedDate drives both the calendar accordion and the week shown below
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const [selectedDate, setSelectedDate] = useState(today);
@@ -13119,7 +13122,7 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
     .map(r => ({ ...r, cls: allClasses.find(c => c.id === r.classId) }))
     .filter(r => r.cls);
 
-  // Per-date metadata for month grid
+  // Per-date metadata for calendar grid
   const dateMeta = useMemo(() => {
     const meta = {};
     allClasses.forEach(c => {
@@ -13130,11 +13133,6 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
     });
     return meta;
   }, [allClasses, currentUser.id, openCoversAll]);
-
-  const classColor = (cls) => {
-    const m = (CLASS_TYPES && CLASS_TYPES[cls.type]) || {};
-    return m.color || '#c6926a';
-  };
 
   const studioLabel = (s) => {
     if (s === 'reformer') return 'Reformer studio';
@@ -13147,7 +13145,7 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
     return u?.name?.split(' ')[0] || '';
   };
 
-  // Month grid — 6 rows × 7 cols always
+  // Calendar grid — 6 rows × 7 cols always
   const monthYear = selectedDate.getFullYear();
   const monthIdx = selectedDate.getMonth();
   const firstOfMonth = new Date(monthYear, monthIdx, 1);
@@ -13170,25 +13168,15 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
   const goPrevMonth = () => setSelectedDate(new Date(monthYear, monthIdx - 1, 1));
   const goNextMonth = () => setSelectedDate(new Date(monthYear, monthIdx + 1, 1));
 
-  // Filter classes for the visible week
-  // Convert items into a unified shape (class OR booking) for the timeline
+  // Convert items into unified shape (class OR booking) for the day list
   const classToItem = (c) => ({
-    id: 'cls:' + c.id,
-    kind: 'class',
-    date: c.date,
-    time: c.time,
-    durationMin: c.durationMin,
-    title: c.type,
-    studio: c.studio,
-    coachId: c.coachId,
-    raw: c,
+    id: 'cls:' + c.id, kind: 'class',
+    date: c.date, time: c.time, durationMin: c.durationMin,
+    title: c.type, studio: c.studio, coachId: c.coachId, raw: c,
   });
   const bookingToItem = (b) => ({
-    id: 'bkg:' + b.id,
-    kind: 'booking',
-    date: b.date,
-    time: b.startTime,
-    endTime: b.endTime,
+    id: 'bkg:' + b.id, kind: 'booking',
+    date: b.date, time: b.startTime, endTime: b.endTime,
     durationMin: (() => {
       if (!b.startTime || !b.endTime) return null;
       const [sh, sm] = b.startTime.split(':').map(Number);
@@ -13196,19 +13184,14 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
       return (eh * 60 + em) - (sh * 60 + sm);
     })(),
     title: b.title || (b.bookingType === 'private_session' ? 'Private session' : 'Studio hire'),
-    studio: b.studio,
-    hirerName: b.hirerName,
-    bookingType: b.bookingType,
-    raw: b,
+    studio: b.studio, hirerName: b.hirerName, bookingType: b.bookingType, raw: b,
   });
 
   const visibleItems = (() => {
     const weekClasses = allClasses.filter(c => c.date >= weekStartIso && c.date <= weekEndIso).map(classToItem);
     const weekBookings = allBookings.filter(b => b.date >= weekStartIso && b.date <= weekEndIso).map(bookingToItem);
-
     if (view === 'hire') return weekBookings;
     if (view === 'mine') return weekClasses.filter(i => i.coachId === currentUser.id);
-    // Everyone view: classes + hire bookings interleaved
     return [...weekClasses, ...weekBookings];
   })();
 
@@ -13221,156 +13204,52 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
 
   const monthLabel = selectedDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 
-  // Stats for the selected day (for the pill below the calendar)
-  const selectedDayClasses = (byDate[selectedIso] || []);
-  const selectedDayMineCount = (allClasses.filter(c =>
-    c.date === selectedIso && c.coachId === currentUser.id
-  )).length;
-  const isTodaySelected = selectedIso === todayIso;
-  const selectedDayLabel = isTodaySelected
-    ? 'today'
-    : selectedDate.toLocaleDateString('en-GB', { weekday: 'long' });
+  // Week-of label for the page eyebrow ("Week of 26 May")
+  const weekOfLabel = weekDates[0].toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  const isThisWeek = todayIso >= weekStartIso && todayIso <= weekEndIso;
 
-  // Unified colour palette for this view:
-  // forest #1a2620   primary text, time
-  // moss   #7a8270   secondary text (subtitle, durations)
-  // taupe  #a59478   tertiary / muted (day labels, out-of-month)
-  // sand   #f5f1e8   recessed surface
-  // bone   #efe7d2   border / divider
-  // coral  #c8442a   ONLY for cover-needed status
+  // ── Week summary stats — "your week at a glance" ──
+  const myWeekClasses = allClasses.filter(c =>
+    c.date >= weekStartIso && c.date <= weekEndIso && c.coachId === currentUser.id
+  );
+  const myWeekCount = myWeekClasses.length;
+  const weekCoverNeeded = openCoversAll.filter(r =>
+    r.cls.date >= weekStartIso && r.cls.date <= weekEndIso
+  ).length;
 
   return (
     <>
-      {/* Month grid — pill cells with count on top, day below */}
-      <div style={{
-        background: '#fffdf7',
-        border: '1px solid #efe7d2',
-        borderRadius: 16,
-        padding: '16px 14px 14px',
-        marginTop: 12,
-        marginBottom: 18,
-      }}>
-          {/* Month nav */}
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            marginBottom: 14, padding: '0 4px',
-          }}>
-            <button onClick={goPrevMonth} className="salus-btn" style={{
-              background: 'transparent', border: 'none', padding: 4,
-              color: '#5c4a38', cursor: 'pointer',
-            }}>
-              <ChevronLeft size={18} />
-            </button>
-            <div style={{
-              fontFamily: '"Playfair Display", Georgia, serif',
-              fontSize: 16, fontWeight: 500, color: '#1a2620',
-              letterSpacing: '-0.005em',
-            }}>
-              {monthLabel}
-            </div>
-            <button onClick={goNextMonth} className="salus-btn" style={{
-              background: 'transparent', border: 'none', padding: 4,
-              color: '#5c4a38', cursor: 'pointer',
-            }}>
-              <ChevronRight size={18} />
-            </button>
+      {/* ── Page header — matches Home's editorial title pattern ── */}
+      <PageHeader
+        eyebrow={isThisWeek ? 'This week' : `Week of ${weekOfLabel}`}
+        title="Schedule"
+        compact
+      />
+
+      {/* ── Week summary tiles — Mine / Cover ── */}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 22 }}>
+        <div style={styles.weekTile}>
+          <div style={styles.weekTileNumber}>{myWeekCount}</div>
+          <div style={styles.weekTileLabel}>
+            {myWeekCount === 1 ? 'Class this week' : 'Classes this week'}
           </div>
-
-          {(monthYear !== today.getFullYear() || monthIdx !== today.getMonth()) && (
-            <button onClick={() => setSelectedDate(today)} className="salus-btn" style={{
-              background: 'transparent', border: 'none', padding: '0 0 10px',
-              color: '#c8442a', fontSize: 9, fontWeight: 600,
-              letterSpacing: '0.14em', textTransform: 'uppercase',
-              fontFamily: 'inherit', cursor: 'pointer',
-              display: 'block', margin: '0 auto',
-            }}>
-              ← Jump to today
-            </button>
-          )}
-
-          {/* Weekday header */}
-          <div style={{
-            display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)',
-            gap: 4, marginBottom: 8,
-          }}>
-            {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
-              <div key={i} style={{
-                fontSize: 9, color: '#a59478',
-                letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
-                textAlign: 'center', padding: '2px 0',
-              }}>
-                {d}
-              </div>
-            ))}
+          <div style={styles.weekTileFooter}>
+            {myWeekCount === 0 ? 'A quiet one' : 'Tap rows below for details'}
           </div>
-
-          {/* Day cells — pills */}
-          <div style={{
-            display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)',
-            gap: 4,
-          }}>
-            {gridCells.map((cell, idx) => {
-              const iso = toIso(cell.d);
-              const isToday = iso === todayIso;
-              const isSelected = iso === selectedIso;
-              const m = dateMeta[iso] || { mine: 0, others: 0, cover: 0 };
-              const myCount = m.mine;
-              const hasCover = m.cover > 0;
-              const showCount = view === 'mine' ? myCount > 0 : (m.mine + m.others) > 0;
-              const countToShow = view === 'mine' ? myCount : (m.mine + m.others);
-
-              return (
-                <button
-                  key={idx}
-                  onClick={() => setSelectedDate(new Date(cell.d))}
-                  className="salus-btn"
-                  style={{
-                    aspectRatio: '0.95 / 1',
-                    display: 'flex', flexDirection: 'column',
-                    alignItems: 'center', justifyContent: 'center',
-                    gap: 2,
-                    background: isSelected ? '#1a2620' : '#f5f1e8',
-                    border: isToday && !isSelected ? '1.5px solid #1a2620' : '1px solid transparent',
-                    borderRadius: 10,
-                    cursor: 'pointer',
-                    padding: '4px 0',
-                    opacity: cell.out ? 0.35 : 1,
-                  }}>
-                  {showCount ? (
-                    <div style={{
-                      fontFamily: '"Playfair Display", Georgia, serif',
-                      fontSize: 13, fontWeight: 500,
-                      color: isSelected
-                        ? (hasCover ? '#f0c8b8' : '#fffdf7')
-                        : (hasCover ? '#c8442a' : '#1a2620'),
-                      lineHeight: 1,
-                      fontVariantNumeric: 'tabular-nums',
-                    }}>
-                      {countToShow}
-                    </div>
-                  ) : (
-                    <div style={{ height: 13 }} />
-                  )}
-                  <div style={{
-                    fontSize: 11,
-                    fontWeight: isToday || isSelected ? 500 : 400,
-                    color: isSelected ? '#d4cdb8' : cell.out ? '#a59478' : '#7a8270',
-                    fontVariantNumeric: 'tabular-nums',
-                    lineHeight: 1,
-                  }}>
-                    {cell.d.getDate()}
-                  </div>
-                </button>
-              );
-            })}
+        </div>
+        <div style={{ ...styles.weekTile, background: '#5c4a38' }}>
+          <div style={{ ...styles.weekTileNumber, color: '#fffdf7' }}>{weekCoverNeeded}</div>
+          <div style={{ ...styles.weekTileLabel, color: '#fffdf7' }}>
+            {weekCoverNeeded === 1 ? 'Cover available' : 'Covers available'}
           </div>
+          <div style={{ ...styles.weekTileFooter, color: 'rgba(255, 253, 247, 0.6)' }}>
+            {weekCoverNeeded === 0 ? 'All quiet' : 'Tap to take one'}
+          </div>
+        </div>
       </div>
 
-      {/* View tabs */}
-      <div style={{
-        display: 'flex', gap: 22, padding: '0 4px 8px',
-        borderBottom: '1px solid #efe7d2', marginBottom: 18,
-      }}>
+      {/* ── View tabs — Mine / Everyone / Hire (editorial underline) ── */}
+      <div style={styles.scheduleTabRow}>
         {[['mine', 'Mine'], ['everyone', 'Everyone'], ['hire', 'Hire']].map(([key, label]) => {
           const isActive = view === key;
           return (
@@ -13378,12 +13257,8 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
               onClick={() => setView(key)}
               className="salus-btn"
               style={{
-                padding: '6px 0', background: 'transparent', border: 'none',
-                borderBottom: isActive ? '1.5px solid #1a2620' : '1.5px solid transparent',
-                fontSize: 11, fontWeight: isActive ? 600 : 500,
-                color: isActive ? '#1a2620' : '#a59478',
-                letterSpacing: '0.08em', textTransform: 'uppercase',
-                fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap',
+                ...styles.scheduleTabBtn,
+                ...(isActive ? styles.scheduleTabBtnActive : {}),
               }}>
               {label}
             </button>
@@ -13391,9 +13266,9 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
         })}
       </div>
 
-      {/* Timeline — week of selectedDate */}
+      {/* ── Day list — one white tile per day, hairline-separated rows ── */}
       {visibleItems.length === 0 ? (
-        <EmptyState sub={view === 'mine' ? 'A quiet week — enjoy.' : view === 'hire' ? 'No studio hires this week.' : 'Nothing on the studio schedule.'}>
+        <EmptyState sub={view === 'mine' ? 'A quiet week \u2014 enjoy.' : view === 'hire' ? 'No studio hires this week.' : 'Nothing on the studio schedule.'}>
           {view === 'mine' ? 'No classes this week.' : view === 'hire' ? 'No hires booked.' : 'Empty week.'}
         </EmptyState>
       ) : (
@@ -13406,177 +13281,221 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
           const dayNum = d.getDate();
 
           return (
-            <div key={iso} style={{ marginBottom: 28 }}>
+            <div key={iso} style={{ marginBottom: 22 }}>
+              {/* Day eyebrow — editorial section label */}
               <div style={{
-                fontSize: 10,
+                ...styles.scheduleDayHeader,
                 color: isToday ? '#c8442a' : '#a59478',
-                letterSpacing: '0.18em', textTransform: 'uppercase',
-                fontWeight: 600,
-                padding: '0 4px 14px',
               }}>
-                {dayName} {dayNum}
+                {dayName} {dayNum}{isToday ? ' \u00b7 Today' : ''}
               </div>
 
-              {dayItems.map((item, idx) => {
-                // BOOKING/HIRE row
-                if (item.kind === 'booking') {
-                  const b = item.raw;
+              {/* White tile containing the day's rows */}
+              <div style={styles.scheduleDayCard}>
+                {dayItems.map((item, idx) => {
+                  // BOOKING/HIRE row
+                  if (item.kind === 'booking') {
+                    const b = item.raw;
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('salus:openModal', { detail: { type: 'bookingDetail', id: b.id } })); }}
+                        className="salus-btn"
+                        style={{
+                          ...styles.scheduleRow,
+                          ...(idx > 0 ? { borderTop: '1px solid rgba(26, 38, 32, 0.06)' } : {}),
+                          opacity: view === 'everyone' ? 0.78 : 1,
+                        }}
+                        aria-label={`${item.time} ${item.title}`}
+                      >
+                        <div style={styles.scheduleRowTimeCol}>
+                          <div style={styles.scheduleRowTime}>{item.time}</div>
+                          {item.durationMin ? (
+                            <div style={styles.scheduleRowDuration}>{item.durationMin}m</div>
+                          ) : null}
+                        </div>
+                        <div style={styles.scheduleRowInfo}>
+                          <div style={{ ...styles.scheduleRowBadge, color: '#c6926a' }}>
+                            {item.bookingType === 'private_session' ? 'Private' : 'Hire'}
+                          </div>
+                          <div style={styles.scheduleRowTitle}>{item.title}</div>
+                          <div style={styles.scheduleRowMeta}>
+                            {studioLabel(item.studio)}
+                            {item.hirerName && <> &middot; {item.hirerName}</>}
+                          </div>
+                        </div>
+                        <div style={styles.scheduleRowRight}>
+                          <ChevronRight size={14} color="#c4b8a0" />
+                        </div>
+                      </button>
+                    );
+                  }
+
+                  // CLASS row (default)
+                  const c = item.raw;
+                  const isMine = c.coachId === currentUser.id;
+                  const needsCover = openCoversAll.some(r => r.cls.id === c.id);
+                  const isDimmed = view === 'everyone' && !isMine && !needsCover;
+                  const coverReq = openCoversAll.find(r => r.cls.id === c.id);
+                  const requesterFirstName = coverReq ? coachName(coverReq.requestedBy) : '';
+
                   return (
                     <button
                       key={item.id}
-                      onClick={() => { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('salus:openModal', { detail: { type: 'bookingDetail', id: b.id } })); }}
+                      onClick={() => onClassClick?.(c.id)}
                       className="salus-btn"
                       style={{
-                        display: 'flex', gap: 18, padding: '8px 4px 18px 4px',
-                        background: 'transparent', border: 'none',
-                        cursor: 'pointer', textAlign: 'left',
-                        width: '100%', fontFamily: 'inherit',
-                        opacity: view === 'everyone' ? 0.78 : 1,
-                        borderBottom: idx === dayItems.length - 1 ? 'none' : '1px solid #f5ecd6',
-                        marginBottom: idx === dayItems.length - 1 ? 0 : 4,
-                      }}>
-                      <div style={{ flexShrink: 0, minWidth: 52, paddingTop: 4 }}>
+                        ...styles.scheduleRow,
+                        ...(idx > 0 ? { borderTop: '1px solid rgba(26, 38, 32, 0.06)' } : {}),
+                        opacity: isDimmed ? 0.45 : 1,
+                      }}
+                      aria-label={`${c.time} ${c.type}`}
+                    >
+                      <div style={styles.scheduleRowTimeCol}>
                         <div style={{
-                          fontSize: 13, fontWeight: 500, color: '#1a2620',
-                          fontVariantNumeric: 'tabular-nums', letterSpacing: '0.02em',
-                        }}>
-                          {item.time}
-                        </div>
-                        {item.durationMin ? (
-                          <div style={{
-                            fontSize: 11, color: '#a59478', marginTop: 4,
-                            fontVariantNumeric: 'tabular-nums',
-                          }}>
-                            {item.durationMin}m
-                          </div>
+                          ...styles.scheduleRowTime,
+                          color: needsCover ? '#c8442a' : '#1a2620',
+                        }}>{c.time}</div>
+                        {c.durationMin ? (
+                          <div style={styles.scheduleRowDuration}>{c.durationMin}m</div>
                         ) : null}
                       </div>
-
-                      {/* Amber bar — hires get a distinctive accent */}
-                      <div style={{
-                        width: 2,
-                        background: '#c6926a',
-                        borderRadius: 2,
-                        alignSelf: 'stretch',
-                        minHeight: 44,
-                        flexShrink: 0,
-                      }} />
-
-                      <div style={{ flex: 1, minWidth: 0, paddingTop: 2 }}>
-                        <div style={{
-                          fontSize: 9, color: '#c6926a', fontWeight: 600,
-                          letterSpacing: '0.14em', textTransform: 'uppercase',
-                          marginBottom: 6,
-                        }}>
-                          {item.bookingType === 'private_session' ? 'Private session' : 'Hire'}
+                      <div style={styles.scheduleRowInfo}>
+                        {needsCover && (
+                          <div style={{ ...styles.scheduleRowBadge, color: '#c8442a' }}>
+                            {requesterFirstName ? `${requesterFirstName} needs cover` : 'Needs cover'}
+                          </div>
+                        )}
+                        <div style={styles.scheduleRowTitle}>{c.type}</div>
+                        <div style={styles.scheduleRowMeta}>
+                          {studioLabel(c.studio)}
+                          {view !== 'mine' && c.coachId && (
+                            <> &middot; {isMine ? 'You' : coachName(c.coachId)}</>
+                          )}
                         </div>
-                        <div style={{
-                          fontFamily: '"Playfair Display", Georgia, serif',
-                          fontSize: 17, fontWeight: 500, color: '#1a2620',
-                          letterSpacing: '-0.005em', lineHeight: 1.25,
-                        }}>
-                          {item.title}
-                        </div>
-                        <div style={{ fontSize: 12, color: '#7a8270', marginTop: 6, lineHeight: 1.4 }}>
-                          {studioLabel(item.studio)}
-                          {item.hirerName && <> · {item.hirerName}</>}
-                        </div>
+                      </div>
+                      <div style={styles.scheduleRowRight}>
+                        {needsCover ? (
+                          <span style={styles.scheduleRowCoverPill}>Take it</span>
+                        ) : (
+                          <ChevronRight size={14} color="#c4b8a0" />
+                        )}
                       </div>
                     </button>
                   );
-                }
+                })}
+              </div>
+            </div>
+          );
+        })
+      )}
 
-                // CLASS row (default)
-                const c = item.raw;
-                const isMine = c.coachId === currentUser.id;
-                const needsCover = openCoversAll.some(r => r.cls.id === c.id);
-                const isDimmed = view === 'everyone' && !isMine && !needsCover;
-                const coverReq = openCoversAll.find(r => r.cls.id === c.id);
-                const requesterFirstName = coverReq ? coachName(coverReq.requestedBy) : '';
+      {/* ── Calendar accordion — collapsed by default. Tap to navigate to
+          another week. Keeps the day list as the primary content. ── */}
+      <div style={{ marginTop: 8 }}>
+        <button
+          onClick={() => setCalendarExpanded(v => !v)}
+          className="salus-btn"
+          style={styles.calendarToggle}
+          aria-expanded={calendarExpanded}
+        >
+          <div style={styles.calendarToggleContent}>
+            <div style={styles.calendarToggleTitle}>Jump to another week</div>
+            <div style={styles.calendarToggleSub}>{monthLabel}</div>
+          </div>
+          <ChevronDown
+            size={18}
+            color="#a59478"
+            style={{
+              flexShrink: 0,
+              transform: calendarExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+              transition: 'transform 200ms ease',
+            }}
+          />
+        </button>
 
-                const barColor = needsCover ? '#c8442a' : isMine ? classColor(c) : '#d4cdb8';
-                const barWidth = needsCover ? 3 : isMine ? 2 : 1;
+        {calendarExpanded && (
+          <div style={styles.calendarPanel}>
+            {/* Month nav */}
+            <div style={styles.calendarNavRow}>
+              <button onClick={goPrevMonth} className="salus-btn" style={styles.calendarNavBtn}>
+                <ChevronLeft size={18} />
+              </button>
+              <div style={styles.calendarMonthLabel}>{monthLabel}</div>
+              <button onClick={goNextMonth} className="salus-btn" style={styles.calendarNavBtn}>
+                <ChevronRight size={18} />
+              </button>
+            </div>
+
+            {(monthYear !== today.getFullYear() || monthIdx !== today.getMonth()) && (
+              <button
+                onClick={() => setSelectedDate(today)}
+                className="salus-btn"
+                style={styles.calendarJumpToday}
+              >
+                {'\u2190'} Jump to today
+              </button>
+            )}
+
+            {/* Weekday header */}
+            <div style={styles.calendarWeekdayRow}>
+              {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
+                <div key={i} style={styles.calendarWeekday}>{d}</div>
+              ))}
+            </div>
+
+            {/* Day cells */}
+            <div style={styles.calendarDayGrid}>
+              {gridCells.map((cell, idx) => {
+                const iso = toIso(cell.d);
+                const isToday2 = iso === todayIso;
+                const isSelected = iso === selectedIso;
+                const m = dateMeta[iso] || { mine: 0, others: 0, cover: 0 };
+                const myCount = m.mine;
+                const hasCover = m.cover > 0;
+                const showCount = view === 'mine' ? myCount > 0 : (m.mine + m.others) > 0;
+                const countToShow = view === 'mine' ? myCount : (m.mine + m.others);
 
                 return (
                   <button
-                    key={item.id}
-                    onClick={() => onClassClick?.(c.id)}
+                    key={idx}
+                    onClick={() => {
+                      setSelectedDate(new Date(cell.d));
+                      setCalendarExpanded(false);
+                    }}
                     className="salus-btn"
                     style={{
-                      display: 'flex', gap: 18, padding: '8px 4px 18px 4px',
-                      background: 'transparent', border: 'none',
-                      cursor: 'pointer', textAlign: 'left',
-                      width: '100%', fontFamily: 'inherit',
-                      opacity: isDimmed ? 0.45 : 1,
-                      borderBottom: idx === dayItems.length - 1 ? 'none' : '1px solid #f5ecd6',
-                      marginBottom: idx === dayItems.length - 1 ? 0 : 4,
+                      ...styles.calendarDayBtn,
+                      background: isSelected ? '#1a2620' : '#f5f1e8',
+                      border: isToday2 && !isSelected ? '1.5px solid #1a2620' : '1px solid transparent',
+                      opacity: cell.out ? 0.35 : 1,
                     }}>
-                    {/* Time — always forest (unified palette) */}
-                    <div style={{ flexShrink: 0, minWidth: 52, paddingTop: 4 }}>
+                    {showCount ? (
                       <div style={{
-                        fontSize: 13, fontWeight: 500, color: '#1a2620',
-                        fontVariantNumeric: 'tabular-nums', letterSpacing: '0.02em',
+                        ...styles.calendarDayCount,
+                        color: isSelected
+                          ? (hasCover ? '#f0c8b8' : '#fffdf7')
+                          : (hasCover ? '#c8442a' : '#1a2620'),
                       }}>
-                        {c.time}
+                        {countToShow}
                       </div>
-                      {c.durationMin ? (
-                        <div style={{
-                          fontSize: 11, color: '#a59478', marginTop: 4,
-                          fontVariantNumeric: 'tabular-nums',
-                        }}>
-                          {c.durationMin}m
-                        </div>
-                      ) : null}
-                    </div>
-
+                    ) : (
+                      <div style={{ height: 13 }} />
+                    )}
                     <div style={{
-                      width: barWidth,
-                      background: barColor,
-                      borderRadius: 2,
-                      alignSelf: 'stretch',
-                      minHeight: 44,
-                      flexShrink: 0,
-                    }} />
-
-                    <div style={{ flex: 1, minWidth: 0, paddingTop: 2 }}>
-                      {needsCover && (
-                        <div style={{
-                          fontSize: 9, color: '#c8442a', fontWeight: 600,
-                          letterSpacing: '0.14em', textTransform: 'uppercase',
-                          marginBottom: 6,
-                        }}>
-                          {requesterFirstName ? `${requesterFirstName} needs cover` : 'Needs cover'}
-                        </div>
-                      )}
-                      <div style={{
-                        fontFamily: '"Playfair Display", Georgia, serif',
-                        fontSize: 17, fontWeight: 500, color: '#1a2620',
-                        letterSpacing: '-0.005em', lineHeight: 1.25,
-                      }}>
-                        {c.type}
-                      </div>
-                      <div style={{ fontSize: 12, color: '#7a8270', marginTop: 6, lineHeight: 1.4 }}>
-                        {studioLabel(c.studio)}
-                        {view !== 'mine' && c.coachId && (
-                          <> · {isMine ? 'You' : coachName(c.coachId)}</>
-                        )}
-                      </div>
-                      {needsCover && (
-                        <div style={{
-                          fontSize: 11, color: '#a59478',
-                          marginTop: 8, letterSpacing: '0.04em',
-                        }}>
-                          Tap to take it →
-                        </div>
-                      )}
+                      ...styles.calendarDayNum,
+                      fontWeight: isToday2 || isSelected ? 500 : 400,
+                      color: isSelected ? '#d4cdb8' : cell.out ? '#a59478' : '#7a8270',
+                    }}>
+                      {cell.d.getDate()}
                     </div>
                   </button>
                 );
               })}
             </div>
-          );
-        })
-      )}
+          </div>
+        )}
+      </div>
     </>
   );
 }
@@ -20063,25 +19982,12 @@ const styles = {
   // NOTE: use paddingTop/paddingBottom (not shorthand `padding`) so the
   // bleed class's responsive padding-left/right keeps working.
   // ─── HOME BACKDROP ───
-  // Bright base + subtle brown circle gradients. Reverted from the dramatic
-  // earthy ellipses (too dark) and the bright peach orbs (too vibrant).
-  // Now: nearly-white base with four subtle warm brown circles. The brown
-  // is quiet enough to feel like ambient warmth, not "earthy plant shadows".
+  // Gradient backdrop now lives on styles.main and is shared across all
+  // non-chat tabs. This wrapper just adds bottom padding for the customise
+  // button on Home.
   homePageBackdrop: {
     paddingTop: 0,
     paddingBottom: 100,
-    background:
-      // Subtle warm brown circle top-right
-      'radial-gradient(circle 480px at 88% 12%, rgba(155, 115, 80, 0.20) 0%, rgba(155, 115, 80, 0) 65%), ' +
-      // Subtle brown circle middle-left
-      'radial-gradient(circle 440px at 5% 45%, rgba(170, 135, 100, 0.18) 0%, rgba(170, 135, 100, 0) 65%), ' +
-      // Subtle deeper brown circle bottom-right
-      'radial-gradient(circle 380px at 92% 78%, rgba(140, 100, 70, 0.18) 0%, rgba(140, 100, 70, 0) 65%), ' +
-      // Subtle small bloom mid-page for layering richness
-      'radial-gradient(circle 320px at 60% 50%, rgba(165, 130, 95, 0.12) 0%, rgba(165, 130, 95, 0) 65%), ' +
-      // Bright base — more white than grey. Top is nearly pure white with
-      // a whisper of warmth, bottom settles into a soft warm cream.
-      'linear-gradient(180deg, #fefdf9 0%, #f5f1e8 100%)',
     minHeight: '100%',
   },
   homeGreeting: { padding: '24px 0 24px' },
@@ -20229,6 +20135,212 @@ const styles = {
     fontSize: 9.5, fontWeight: 700,
     color: '#c6926a',
     letterSpacing: '0.12em', textTransform: 'uppercase',
+  },
+
+  // ─── SCHEDULE TAB ROW (Mine / Everyone / Hire) ───
+  // Editorial underline tabs — minimal, magazine feel. Active tab has a
+  // forest underline; inactive tabs are taupe.
+  scheduleTabRow: {
+    display: 'flex',
+    gap: 22,
+    padding: '0 4px 8px',
+    borderBottom: '1px solid rgba(26, 38, 32, 0.08)',
+    marginBottom: 18,
+  },
+  scheduleTabBtn: {
+    padding: '6px 0',
+    background: 'transparent',
+    border: 'none',
+    borderBottom: '1.5px solid transparent',
+    fontSize: 11, fontWeight: 500,
+    color: '#a59478',
+    letterSpacing: '0.08em', textTransform: 'uppercase',
+    fontFamily: 'inherit', cursor: 'pointer',
+    marginBottom: -1, whiteSpace: 'nowrap',
+    appearance: 'none', WebkitAppearance: 'none',
+  },
+  scheduleTabBtnActive: {
+    borderBottom: '1.5px solid #1a2620',
+    color: '#1a2620',
+    fontWeight: 600,
+  },
+
+  // ─── SCHEDULE DAY HEADER + CARD ───
+  // Each day in the week is its own section: small eyebrow label + one
+  // white tile containing the day's rows. Matches the Home agenda card.
+  scheduleDayHeader: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 10, fontWeight: 700,
+    letterSpacing: '0.16em', textTransform: 'uppercase',
+    padding: '0 4px 10px',
+  },
+  scheduleDayCard: {
+    background: '#ffffff',
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+
+  // ─── SCHEDULE ROW — class or booking ───
+  // Time column (left, Playfair serif), info column (middle, title + meta),
+  // right column (chevron or coral pill). Hairline separators between rows.
+  scheduleRow: {
+    width: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 14,
+    padding: '14px 16px',
+    background: 'transparent',
+    border: 'none',
+    textAlign: 'left',
+    appearance: 'none', WebkitAppearance: 'none',
+    fontFamily: 'inherit',
+    cursor: 'pointer',
+  },
+  scheduleRowTimeCol: {
+    flexShrink: 0,
+    minWidth: 58,
+  },
+  scheduleRowTime: {
+    fontFamily: '"Playfair Display", Georgia, serif',
+    fontSize: 20, color: '#1a2620',
+    lineHeight: 1, letterSpacing: '-0.015em',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  scheduleRowDuration: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 11, color: '#a59478',
+    marginTop: 4,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  scheduleRowInfo: {
+    flex: 1, minWidth: 0,
+  },
+  scheduleRowBadge: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 9, fontWeight: 700,
+    letterSpacing: '0.14em', textTransform: 'uppercase',
+    marginBottom: 5,
+  },
+  scheduleRowTitle: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 15, fontWeight: 500,
+    color: '#1a2620', lineHeight: 1.3,
+    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+  },
+  scheduleRowMeta: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 12,
+    color: '#7a6f5f', marginTop: 3,
+    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+  },
+  scheduleRowRight: {
+    flexShrink: 0,
+    display: 'flex', alignItems: 'center',
+  },
+  // Coral pill for "Take it" — cover-needed CTA. Stands out without
+  // overwhelming the row.
+  scheduleRowCoverPill: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 10, fontWeight: 700,
+    letterSpacing: '0.1em', textTransform: 'uppercase',
+    color: '#fffdf7',
+    background: '#c8442a',
+    padding: '5px 10px',
+    borderRadius: 999,
+  },
+
+  // ─── CALENDAR ACCORDION ───
+  // Collapsed by default at the bottom of the Schedule page — a quiet way
+  // to jump to a different week. Toggle row shows current month; panel
+  // expands to reveal the full grid.
+  calendarToggle: {
+    width: '100%',
+    display: 'flex', alignItems: 'center', gap: 12,
+    padding: '14px 16px',
+    background: '#ffffff',
+    border: 'none', borderRadius: 16,
+    textAlign: 'left',
+    appearance: 'none', WebkitAppearance: 'none',
+    fontFamily: 'inherit', cursor: 'pointer',
+  },
+  calendarToggleContent: {
+    flex: 1, minWidth: 0,
+  },
+  calendarToggleTitle: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 14, fontWeight: 500,
+    color: '#1a2620',
+  },
+  calendarToggleSub: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 12, color: '#7a6f5f',
+    marginTop: 2,
+  },
+  calendarPanel: {
+    background: '#ffffff',
+    borderRadius: 16,
+    padding: '16px 14px 14px',
+    marginTop: 8,
+  },
+  calendarNavRow: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: 14, padding: '0 4px',
+  },
+  calendarNavBtn: {
+    background: 'transparent', border: 'none', padding: 4,
+    color: '#5c4a38', cursor: 'pointer',
+    appearance: 'none', WebkitAppearance: 'none',
+  },
+  calendarMonthLabel: {
+    fontFamily: '"Playfair Display", Georgia, serif',
+    fontSize: 16, fontWeight: 500, color: '#1a2620',
+    letterSpacing: '-0.005em',
+  },
+  calendarJumpToday: {
+    background: 'transparent', border: 'none',
+    padding: '0 0 10px',
+    color: '#c8442a', fontSize: 9, fontWeight: 600,
+    letterSpacing: '0.14em', textTransform: 'uppercase',
+    fontFamily: 'inherit', cursor: 'pointer',
+    display: 'block', margin: '0 auto',
+    appearance: 'none', WebkitAppearance: 'none',
+  },
+  calendarWeekdayRow: {
+    display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)',
+    gap: 4, marginBottom: 8,
+  },
+  calendarWeekday: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 9, color: '#a59478',
+    letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
+    textAlign: 'center', padding: '2px 0',
+  },
+  calendarDayGrid: {
+    display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)',
+    gap: 4,
+  },
+  calendarDayBtn: {
+    aspectRatio: '0.95 / 1',
+    display: 'flex', flexDirection: 'column',
+    alignItems: 'center', justifyContent: 'center',
+    gap: 2,
+    borderRadius: 10,
+    cursor: 'pointer',
+    padding: '4px 0',
+    appearance: 'none', WebkitAppearance: 'none',
+    fontFamily: 'inherit',
+  },
+  calendarDayCount: {
+    fontFamily: '"Playfair Display", Georgia, serif',
+    fontSize: 13, fontWeight: 500,
+    lineHeight: 1,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  calendarDayNum: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 11,
+    fontVariantNumeric: 'tabular-nums',
+    lineHeight: 1,
   },
 
   // ─── SPOTLIGHT CTA (cinematic image card) ───
@@ -21985,6 +22097,21 @@ const styles = {
     overflowX: 'hidden', // prevent 100vw strip wraps from causing horizontal scroll
     overscrollBehavior: 'contain',
     WebkitOverflowScrolling: 'touch',
+    // Bright base + subtle brown circle gradients — shared across all
+    // non-chat tabs. Lifts what used to be Home-only into the page-level
+    // chrome so Schedule, Cover, Me etc. inherit the same warm backdrop.
+    background:
+      // Subtle warm brown circle top-right
+      'radial-gradient(circle 480px at 88% 12%, rgba(155, 115, 80, 0.20) 0%, rgba(155, 115, 80, 0) 65%), ' +
+      // Subtle brown circle middle-left
+      'radial-gradient(circle 440px at 5% 45%, rgba(170, 135, 100, 0.18) 0%, rgba(170, 135, 100, 0) 65%), ' +
+      // Subtle deeper brown circle bottom-right
+      'radial-gradient(circle 380px at 92% 78%, rgba(140, 100, 70, 0.18) 0%, rgba(140, 100, 70, 0) 65%), ' +
+      // Subtle small bloom mid-page for layering richness
+      'radial-gradient(circle 320px at 60% 50%, rgba(165, 130, 95, 0.12) 0%, rgba(165, 130, 95, 0) 65%), ' +
+      // Bright base — nearly pure white top with a whisper of warmth,
+      // bottom settles into a soft warm cream.
+      'linear-gradient(180deg, #fefdf9 0%, #f5f1e8 100%)',
   },
   mainChat: {
     position: 'fixed',
