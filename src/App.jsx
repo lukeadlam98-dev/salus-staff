@@ -6070,16 +6070,16 @@ function BroadcastBanner({ broadcasts, broadcastReads, currentUser, onMarkRead }
 
   return (
     <div style={{
-      // Frosted glass + neumorphic depth — no border (shadow alone defines
-      // the edge). Same recipe as todayCard + This Week.
-      background: 'rgba(255, 255, 255, 0.55)',
+      // Softer frost — same diffused recipe as todayCard + This Week.
+      background: 'rgba(255, 255, 255, 0.42)',
       backdropFilter: 'blur(20px) saturate(160%)',
       WebkitBackdropFilter: 'blur(20px) saturate(160%)',
       border: 'none',
       borderRadius: 14, padding: '16px 18px', marginBottom: 18,
       boxShadow:
-        '-4px -4px 14px rgba(255, 255, 255, 0.65), ' +
-        '5px 5px 18px rgba(92, 74, 56, 0.10)',
+        'inset 1px 1px 1px rgba(255, 255, 255, 0.45), ' +
+        '-2px -2px 14px rgba(255, 255, 255, 0.40), ' +
+        '6px 6px 22px rgba(92, 74, 56, 0.08)',
       display: 'flex', flexDirection: 'column', gap: 10,
     }}>
       {/* "From Luke" pill — same design language as event card date pills */}
@@ -10795,15 +10795,15 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
         <div style={{
           padding: '14px 16px', marginBottom: 16,
           borderRadius: 14,
-          // Frosted glass + neumorphic depth — no border (shadow alone
-          // defines the edge). Same recipe as todayCard.
-          background: 'rgba(255, 255, 255, 0.55)',
+          // Softer frost — same recipe as todayCard. Diffused edge, atmospheric.
+          background: 'rgba(255, 255, 255, 0.42)',
           backdropFilter: 'blur(20px) saturate(160%)',
           WebkitBackdropFilter: 'blur(20px) saturate(160%)',
           border: 'none',
           boxShadow:
-            '-4px -4px 14px rgba(255, 255, 255, 0.65), ' +
-            '5px 5px 18px rgba(92, 74, 56, 0.10)',
+            'inset 1px 1px 1px rgba(255, 255, 255, 0.45), ' +
+            '-2px -2px 14px rgba(255, 255, 255, 0.40), ' +
+            '6px 6px 22px rgba(92, 74, 56, 0.08)',
         }}>
           <div style={{ ...TYPE.eyebrow, marginBottom: 10 }}>This week</div>
           <div style={{ display: 'flex', alignItems: 'stretch', gap: 0 }}>
@@ -19492,26 +19492,25 @@ const styles = {
   // NOTE: use paddingTop/paddingBottom (not shorthand `padding`) so the
   // bleed class's responsive padding-left/right keeps working.
   // ─── HOME BACKDROP ───
-  // Greige limewash base — shifted from creamy yellow (#fffdf7 → #fbf4e6) to
-  // a brighter, more neutral greige. Top is nearly white with just a whisper
-  // of warmth; bottom settles into a soft greige limewash. The brand-colored
-  // orbs pop more against this neutral ground than they did against the
-  // creamier base.
+  // All-brown-and-nude palette — sage and coral orbs removed per Luke. Four
+  // layered warm earth tones (amber peach → taupe nude → warm brown → soft
+  // amber) over a greige limewash base. Reads as warm leather / lifted clay
+  // rather than sunset.
   homePageBackdrop: {
     paddingTop: 0,
     paddingBottom: 100,
     background:
-      // BIG amber/peach orb dominating top-right — main warm note
+      // BIG amber/peach orb dominating top-right — main warm note (kept)
       'radial-gradient(circle 560px at 85% 8%, rgba(220, 165, 130, 0.55) 0%, rgba(220, 165, 130, 0) 62%), ' +
-      // BIG sage/moss orb middle-left — earthy counterbalance
-      'radial-gradient(circle 500px at 5% 42%, rgba(122, 130, 92, 0.42) 0%, rgba(122, 130, 92, 0) 62%), ' +
-      // Coral accent orb bottom-right — late afternoon glow
-      'radial-gradient(circle 440px at 92% 78%, rgba(200, 100, 70, 0.38) 0%, rgba(200, 100, 70, 0) 62%), ' +
-      // Soft second amber bloom mid-right for layering richness
+      // Soft taupe/nude orb middle-left — replaces the sage. Quiet, neutral
+      // warm grey that pairs with the brown family without going earthy-green.
+      'radial-gradient(circle 500px at 5% 42%, rgba(180, 158, 130, 0.42) 0%, rgba(180, 158, 130, 0) 62%), ' +
+      // Rich warm brown orb bottom-right — replaces the coral. Deeper, more
+      // saturated, hints at espresso/leather rather than peach.
+      'radial-gradient(circle 440px at 92% 78%, rgba(155, 115, 80, 0.42) 0%, rgba(155, 115, 80, 0) 62%), ' +
+      // Soft second amber bloom mid-right for layering richness (kept)
       'radial-gradient(circle 380px at 78% 50%, rgba(198, 146, 106, 0.30) 0%, rgba(198, 146, 106, 0) 65%), ' +
-      // Greige limewash base — top is bright (nearly white with warmth),
-      // bottom settles into soft limewash greige. Brighter than the old cream
-      // base and more "neutral plaster" than "warm cream".
+      // Greige limewash base — bright top, soft warm settle at bottom.
       'linear-gradient(180deg, #fbfaf6 0%, #ece8de 100%)',
     minHeight: '100%',
   },
@@ -19567,10 +19566,11 @@ const styles = {
   },
   todayCard: {
     flex: '0 0 auto', width: 138, minHeight: 108,
-    // Frosted neumorphic plate — no border (true neumorphism uses shadow
-    // alone to define the edge; a visible border read as a hard rectangle).
-    // The dual shadow extrudes the card; the bg tint says "frosted glass".
-    background: 'rgba(255, 255, 255, 0.55)',
+    // Softer frost — 42% (was 55%) so the edge dissolves into the page
+    // instead of stamping a sharp rectangle. Diffused shadows with bigger
+    // blur radii smear the boundary further. Inset highlight provides a
+    // subtle "lit glass edge" effect without using a hard border.
+    background: 'rgba(255, 255, 255, 0.42)',
     backdropFilter: 'blur(20px) saturate(160%)',
     WebkitBackdropFilter: 'blur(20px) saturate(160%)',
     border: 'none',
@@ -19581,12 +19581,15 @@ const styles = {
     scrollSnapAlign: 'start',
     textAlign: 'left',
     fontFamily: 'inherit',
-    // Neumorphic dual shadow:
-    //   • Top-left: bright cream highlight (light source)
-    //   • Bottom-right: warm brown shadow (depth)
+    // Three-layer soft depth:
+    //   • Inner top-left inset: barely-there glass highlight at the edge
+    //   • Outer top-left: gentle wide highlight (smaller intensity, wider blur)
+    //   • Outer bottom-right: warm soft shadow with big blur
+    // No layer has a hard edge — everything fades.
     boxShadow:
-      '-4px -4px 14px rgba(255, 255, 255, 0.65), ' +
-      '5px 5px 18px rgba(92, 74, 56, 0.10)',
+      'inset 1px 1px 1px rgba(255, 255, 255, 0.45), ' +
+      '-2px -2px 14px rgba(255, 255, 255, 0.40), ' +
+      '6px 6px 22px rgba(92, 74, 56, 0.08)',
   },
   todayCardPast: {
     opacity: 0.5,
