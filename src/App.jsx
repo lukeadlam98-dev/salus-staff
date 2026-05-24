@@ -1606,6 +1606,17 @@ export default function SalusStaff() {
         }
         .salus-btn { transition: all 0.15s ease; cursor: pointer; }
         .salus-btn:hover { transform: translateY(-1px); }
+        /* Button reset — iOS Safari adds default background/border/outline
+           that leaks through inline styles. Forces buttons to render only
+           the styles we set, no UA defaults. */
+        button.salus-btn {
+          -webkit-appearance: none;
+          appearance: none;
+          outline: none;
+          -webkit-tap-highlight-color: transparent;
+        }
+        button.salus-btn:focus { outline: none; }
+        button.salus-btn:focus-visible { outline: 2px solid #5c4a38; outline-offset: 2px; }
         .salus-card { transition: all 0.2s ease; }
         .salus-card:hover { box-shadow: 0 4px 12px rgba(92, 74, 56, 0.08); }
         .salus-tab { transition: all 0.2s ease; }
