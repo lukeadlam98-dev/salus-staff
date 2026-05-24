@@ -19583,19 +19583,22 @@ const styles = {
     paddingRight: 4,
     overflowX: 'auto', overflowY: 'hidden',
     scrollSnapType: 'x proximity',
-    WebkitOverflowScrolling: 'touch',
+    // NOTE: '-webkit-overflow-scrolling: touch' is intentionally NOT set —
+    // it breaks backdrop-filter on child elements (iOS bug). Modern iOS
+    // does momentum scrolling natively without this legacy property.
   },
   todayCard: {
     flex: '0 0 auto', width: 138, minHeight: 108,
-    // Frosty glass tile — like the spotlight pill scaled up to a card, but
-    // adapted for a LIGHT background. A subtle white linear-gradient gives
-    // the "frosty gradient" sheen, the backdrop blur lets the warm page
-    // gradient + orbs glow through the frost, and a soft white border
-    // defines the edge. Text stays black/forest on top for legibility.
-    background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.50) 0%, rgba(255, 255, 255, 0.22) 100%)',
+    // The pill on the spotlight is visible because it's a slightly-different-
+    // than-background patch with frost. The pill is light-tinted on a DARK bg.
+    // The cards live on a LIGHT bg, so we invert: subtle FOREST tint over the
+    // cream page = a slightly darker tile, like a quiet shadow. backdrop-filter
+    // softens the warm gradient + orbs behind it. Same design language, flipped
+    // for the bg luminance.
+    background: 'rgba(26, 38, 32, 0.06)',
     backdropFilter: 'blur(14px) saturate(160%)',
     WebkitBackdropFilter: 'blur(14px) saturate(160%)',
-    border: '1px solid rgba(255, 255, 255, 0.60)',
+    border: '1px solid rgba(26, 38, 32, 0.10)',
     borderRadius: 14,
     padding: '12px 14px',
     display: 'flex', flexDirection: 'column',
@@ -19603,8 +19606,8 @@ const styles = {
     scrollSnapAlign: 'start',
     textAlign: 'left',
     fontFamily: 'inherit',
-    // Warm two-layer shadow to lift the tile off the page.
-    boxShadow: '0 2px 10px rgba(92, 74, 56, 0.06), 0 10px 30px rgba(198, 146, 106, 0.12)',
+    // Soft warm shadow to lift the tile off the page.
+    boxShadow: '0 2px 10px rgba(92, 74, 56, 0.06), 0 10px 24px rgba(198, 146, 106, 0.10)',
   },
   todayCardPast: {
     opacity: 0.5,
@@ -19716,7 +19719,7 @@ const styles = {
     paddingRight: 4,
     overflowX: 'auto', overflowY: 'hidden',
     scrollSnapType: 'x proximity',
-    WebkitOverflowScrolling: 'touch',
+    // No WebkitOverflowScrolling (breaks child backdrop-filter on iOS).
   },
   eventCard: {
     position: 'relative',
