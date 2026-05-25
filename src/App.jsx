@@ -15061,7 +15061,9 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
         </div>
       )}
 
-      {/* ─── Section: AWAITING YOUR DECISION (manager only) ─── */}
+      {/* ── COMPUTE: cover I'm on + open requests grouped by date ── */}
+
+      {/* ── Section: AWAITING YOUR DECISION (manager only) ── */}
       {isManager && allPending.length > 0 && (
         <div style={{ marginBottom: 26 }}>
           <div style={styles.coverSectionHeader}>
@@ -15072,21 +15074,29 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
           {allPending.map(req => {
             const cls = data.classes.find(c => c.id === req.classId);
             const requester = data.users.find(u => u.id === req.requestedBy);
-            const urgency = getUrgency(cls.date);
-            const dateObj = cls.date ? new Date(cls.date) : null;
+            const dateObj = cls?.date ? new Date(cls.date) : null;
             const whenLabel = dateObj
-              ? `${dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} \u00b7 ${cls.time} \u00b7 ${cls.dur} min`
-              : `${DAYS[cls.day]} \u00b7 ${cls.time} \u00b7 ${cls.dur} min`;
+              ? dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
+              : DAYS[cls?.day];
             return (
               <div key={req.id} style={{
                 ...styles.coverPostCard,
                 background: '#fffaf2',
                 borderLeft: '3px solid #c8442a',
               }}>
-                <CoverPostHeader requester={requester} timestamp={req.timestamp} urgency={urgency} />
-                <div style={styles.coverPostTitle}>{cls.type}</div>
-                <div style={styles.coverPostMeta}>{whenLabel}</div>
-                <div style={styles.coverPostMeta}>{STUDIOS[cls.studio]?.label}</div>
+                <div style={styles.coverPostHeader}>
+                  <div style={styles.coverPostPoster}>
+                    {requester && <UserAvatar user={requester} size={26} fontSize={10} />}
+                    <div style={{ minWidth: 0 }}>
+                      <div style={styles.coverPostName}>{requester?.name?.split(' ')[0]}</div>
+                      <div style={styles.coverPostTime}>{fmtTime(req.timestamp)}</div>
+                    </div>
+                  </div>
+                </div>
+                <div style={styles.coverPostTitle}>{cls?.type}</div>
+                <div style={styles.coverPostMeta}>
+                  {whenLabel} \u00b7 {cls?.time}
+                </div>
                 <div style={styles.coverPostReason}>"{req.reason}"</div>
                 <div style={styles.coverPostActions}>
                   <button
@@ -15103,225 +15113,145 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
         </div>
       )}
 
-      {/* ─── Section: YOUR REQUESTS (non-manager) ─── */}
-      {!isManager && myPending.length > 0 && (
-        <div style={{ marginBottom: 26 }}>
-          <div style={styles.coverSectionHeader}>
-            <Clock size={11} color="#7a8270" strokeWidth={2.4} />
-            <span>Your requests</span>
-            <span style={styles.coverSectionCount}>{myPending.length}</span>
-          </div>
-          {myPending.map(req => {
-            const cls = data.classes.find(c => c.id === req.classId);
-            const urgency = getUrgency(cls.date);
-            const dateObj = cls.date ? new Date(cls.date) : null;
-            const whenLabel = dateObj
-              ? `${dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} \u00b7 ${cls.time} \u00b7 ${cls.dur} min`
-              : `${DAYS[cls.day]} \u00b7 ${cls.time} \u00b7 ${cls.dur} min`;
-            return (
-              <div key={req.id} style={styles.coverPostCard}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <div style={styles.coverPostPendingPill}>
-                    <Clock size={10} strokeWidth={2.4} />
-                    Awaiting manager
-                  </div>
-                  <UrgencyBadge urgency={urgency} />
-                </div>
-                <div style={styles.coverPostTitle}>{cls.type}</div>
-                <div style={styles.coverPostMeta}>{whenLabel}</div>
-                <div style={styles.coverPostMeta}>{STUDIOS[cls.studio]?.label}</div>
-                <div style={styles.coverPostReason}>"{req.reason}"</div>
-                <div style={styles.coverPostActions}>
-                  <button
-                    onClick={() => onCancel(req.id)}
-                    className="salus-btn"
-                    style={styles.coverGhostBtn}
-                  >
-                    Cancel request
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {/* ── Section: COVER I'M ON (non-manager, has claimed) ── */}
+      {(() => {
+        const myCovering = (data.coverRequests || [])
+          .filter(r => (r.status === 'claimed' || r.status === 'assigned') && r.claimedBy === currentUser.id)
+          .map(r => ({ ...r, cls: (data.classes || []).find(c => c.id === r.classId) }))
+          .filter(x => x.cls && x.cls.date >= todayIso)
+          .sort((a, b) => (a.cls.date + a.cls.time).localeCompare(b.cls.date + b.cls.time));
 
-      {/* ─── Section: ON THE BOARD (everyone) ─── */}
-      {openRequests.length > 0 && (
-        <div style={{ marginBottom: 26 }}>
-          <div style={styles.coverSectionHeader}>
-            <span>On the board</span>
-            <span style={styles.coverSectionCount}>{openRequests.length}</span>
-          </div>
-          {openRequests.map(req => {
-            const cls = data.classes.find(c => c.id === req.classId);
-            const requester = data.users.find(u => u.id === req.requestedBy);
-            const isMine = req.requestedBy === currentUser.id;
-            const urgency = getUrgency(cls.date);
-            const dateObj = cls.date ? new Date(cls.date) : null;
-            const whenLabel = dateObj
-              ? `${dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} \u00b7 ${cls.time} \u00b7 ${cls.dur} min`
-              : `${DAYS[cls.day]} \u00b7 ${cls.time} \u00b7 ${cls.dur} min`;
-            const interestedCount = req.interestedCovers?.length || 0;
-            return (
-              <div key={req.id} style={styles.coverPostCard}>
-                <CoverPostHeader requester={requester} timestamp={req.timestamp} urgency={urgency} />
-                <div style={styles.coverPostTitle}>{cls.type}</div>
-                <div style={styles.coverPostMeta}>{whenLabel}</div>
-                <div style={styles.coverPostMeta}>{STUDIOS[cls.studio]?.label}</div>
-                <div style={styles.coverPostReason}>"{req.reason}"</div>
-
-                {/* Interested coaches strip */}
-                {interestedCount > 0 && (
-                  <div style={styles.coverPostInterested}>
-                    <div style={styles.coverPostInterestedLabel}>
-                      {interestedCount} {interestedCount === 1 ? 'coach' : 'coaches'} available
+        if (myCovering.length === 0) return null;
+        return (
+          <div style={{ marginBottom: 26 }}>
+            <div style={styles.coverSectionHeader}>
+              <Check size={11} color="#7a8c5c" strokeWidth={2.4} />
+              <span>You're covering</span>
+              <span style={styles.coverSectionCount}>{myCovering.length}</span>
+            </div>
+            <div style={styles.coverDayCard}>
+              {myCovering.map((item, idx) => {
+                const cls = item.cls;
+                const requester = data.users.find(u => u.id === item.requestedBy);
+                const dateObj = cls.date ? new Date(cls.date) : null;
+                const dayLabel = dateObj
+                  ? dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
+                  : DAYS[cls.day];
+                const isToday2 = cls.date === todayIso;
+                return (
+                  <div key={item.id} style={{
+                    ...styles.coverAgendaRow,
+                    borderTop: idx > 0 ? '1px solid rgba(26, 38, 32, 0.06)' : 'none',
+                  }}>
+                    <div style={styles.coverAgendaTime}>{cls.time}</div>
+                    <div style={styles.coverAgendaInfo}>
+                      <div style={styles.coverAgendaTitle}>{cls.type}</div>
+                      <div style={styles.coverAgendaMeta}>
+                        {isToday2 ? 'Today' : dayLabel} \u00b7 for {requester?.name?.split(' ')[0]}
+                      </div>
                     </div>
-                    <div style={styles.coverPostInterestedList}>
-                      {req.interestedCovers.map(cid => {
-                        const cv = data.users.find(u => u.id === cid);
-                        if (!cv) return null;
-                        const isCoverCv = cv.coachType === 'cover';
-                        return (
-                          <div key={cid} style={styles.coverPostInterestedChip}>
-                            <UserAvatar user={cv} size={20} fontSize={9} />
-                            <span style={{ fontSize: 12, color: '#1a2620', fontWeight: 500 }}>
-                              {cv.name.split(' ')[0]}
-                            </span>
-                            <span style={{
-                              fontSize: 9, fontWeight: 700, letterSpacing: '0.1em',
-                              textTransform: 'uppercase',
-                              color: isCoverCv ? '#c6926a' : '#7a8c5c',
-                            }}>
-                              {isCoverCv ? 'Cover' : 'Perm'}
-                            </span>
-                            {isManager && (
-                              <button
-                                onClick={() => onClaim(req.id, cid)}
-                                className="salus-btn"
-                                style={styles.coverAssignChipBtn}
-                              >
-                                Assign
-                              </button>
-                            )}
-                          </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Section: COVER AVAILABLE (open requests, grouped by date) ── */}
+      {(() => {
+        // Non-manager doesn't see their own posted requests in the available
+        // list. Manager sees everything (their oversight view).
+        const visibleOpen = openRequests.filter(r =>
+          isManager || r.requestedBy !== currentUser.id
+        );
+        if (visibleOpen.length === 0) return null;
+
+        const byDate = {};
+        visibleOpen.forEach(req => {
+          const cls = data.classes.find(c => c.id === req.classId);
+          if (!cls) return;
+          if (!byDate[cls.date]) byDate[cls.date] = [];
+          byDate[cls.date].push({ req, cls });
+        });
+        const sortedDates = Object.keys(byDate).sort();
+
+        return (
+          <div style={{ marginBottom: 26 }}>
+            <div style={styles.coverSectionHeader}>
+              <span>Cover available</span>
+              <span style={styles.coverSectionCount}>{visibleOpen.length}</span>
+            </div>
+            {sortedDates.map(date => {
+              const items = byDate[date].sort((a, b) => a.cls.time.localeCompare(b.cls.time));
+              const dateObj = new Date(date);
+              const dayLabel = dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+              const isToday2 = date === todayIso;
+
+              return (
+                <div key={date} style={{ marginBottom: 14 }}>
+                  <div style={{
+                    ...styles.scheduleDayHeader,
+                    color: isToday2 ? '#c8442a' : '#a59478',
+                  }}>
+                    {dayLabel}{isToday2 ? ' \u00b7 Today' : ''}
+                  </div>
+                  <div style={styles.coverDayCard}>
+                    {items.map(({ req, cls }, idx) => {
+                      const requester = data.users.find(u => u.id === req.requestedBy);
+                      const interested = (req.interestedCovers || []).includes(currentUser.id);
+                      const isMine = req.requestedBy === currentUser.id;
+
+                      // Action selection: keep it to ONE primary button per row.
+                      let actionBtn = null;
+                      if (isMine) {
+                        // shouldn't reach here for staff (filtered), but for manager:
+                        actionBtn = null;
+                      } else if (isManager) {
+                        // Manager: posted, no direct action — open thread to manage
+                        actionBtn = null;
+                      } else {
+                        actionBtn = (
+                          <button
+                            onClick={() => isCoverCoach ? onExpressInterest(req.id) : onClaim(req.id)}
+                            className="salus-btn"
+                            style={interested ? styles.coverAgendaTakeBtnDone : styles.coverAgendaTakeBtn}
+                          >
+                            {interested ? (<><Check size={11} strokeWidth={2.4} /> On it</>) : 'Take'}
+                          </button>
                         );
-                      })}
-                    </div>
-                  </div>
-                )}
+                      }
 
-                {/* Actions */}
-                <div style={styles.coverPostActions}>
-                  {isMine ? (
-                    <button onClick={() => onCancel(req.id)} className="salus-btn" style={styles.coverGhostBtn}>
-                      Cancel request
-                    </button>
-                  ) : isManager ? (
-                    <div style={styles.coverPostHint}>
-                      Posted to the team \u2014 waiting for a coach to claim
-                    </div>
-                  ) : isCoverCoach ? (
-                    (() => {
-                      const interested = (req.interestedCovers || []).includes(currentUser.id);
                       return (
-                        <button
-                          onClick={() => onExpressInterest(req.id)}
-                          className="salus-btn"
-                          style={interested ? styles.coverSecondaryBtn : styles.coverPrimaryBtn}
-                        >
-                          {interested ? (
-                            <><Check size={14} /> You're marked available</>
-                          ) : (
-                            <>I'm available for this</>
-                          )}
-                        </button>
+                        <div key={req.id} style={{
+                          ...styles.coverAgendaRow,
+                          borderTop: idx > 0 ? '1px solid rgba(26, 38, 32, 0.06)' : 'none',
+                        }}>
+                          <div style={styles.coverAgendaTime}>{cls.time}</div>
+                          <div style={styles.coverAgendaInfo}>
+                            <div style={styles.coverAgendaTitle}>{cls.type}</div>
+                            <div style={styles.coverAgendaMeta}>
+                              {requester?.name?.split(' ')[0]} \u00b7 {STUDIOS[cls.studio]?.label}
+                            </div>
+                          </div>
+                          {actionBtn}
+                        </div>
                       );
-                    })()
-                  ) : (
-                    // Permanent coach — both options
-                    (() => {
-                      const interested = (req.interestedCovers || []).includes(currentUser.id);
-                      return (
-                        <>
-                          <button
-                            onClick={() => onClaim(req.id)}
-                            className="salus-btn"
-                            style={styles.coverPrimaryBtn}
-                          >
-                            <Check size={14} /> Take it
-                          </button>
-                          <button
-                            onClick={() => onExpressInterest(req.id)}
-                            className="salus-btn"
-                            style={styles.coverSecondaryBtn}
-                          >
-                            {interested
-                              ? <><Check size={14} /> Marked available</>
-                              : 'I might be free'}
-                          </button>
-                        </>
-                      );
-                    })()
-                  )}
+                    })}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {/* Empty state */}
       {totalActive === 0 && (
         <div style={styles.emptyState}>
           <Check size={32} color="#7a8c5c" />
           <div style={styles.emptyTitle}>All clear</div>
-          <div style={styles.emptyText}>No cover requests right now.</div>
-        </div>
-      )}
-
-      {/* ─── Section: RECENTLY COVERED ─── */}
-      {resolvedRequests.length > 0 && (
-        <div style={{ marginTop: 8 }}>
-          <div style={styles.coverSectionHeader}>
-            <Check size={11} color="#7a8c5c" strokeWidth={2.4} />
-            <span>Recently covered</span>
-          </div>
-          {resolvedRequests.slice(-5).reverse().map(req => {
-            const cls = data.classes.find(c => c.id === req.classId);
-            const claimer = data.users.find(u => u.id === req.claimedBy);
-            const requester = data.users.find(u => u.id === req.requestedBy);
-            const wasAssigned = req.status === 'assigned';
-            return (
-              <div key={req.id} style={{ ...styles.coverPostCard, opacity: 0.7 }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ ...styles.coverPostTitle, fontSize: 17, marginBottom: 4 }}>
-                      {cls.type}
-                    </div>
-                    <div style={styles.coverPostMeta}>
-                      {DAYS[cls.day]} \u00b7 {cls.time}
-                    </div>
-                    <div style={{
-                      fontFamily: 'Inter, system-ui, sans-serif',
-                      fontSize: 12, color: '#7a8c5c', marginTop: 8,
-                    }}>
-                      <strong>{claimer?.name.split(' ')[0]}</strong>
-                      {wasAssigned ? ' assigned by manager' : ' is covering'} for {requester.name.split(' ')[0]}
-                    </div>
-                  </div>
-                  <div style={{
-                    width: 32, height: 32, borderRadius: '50%',
-                    background: '#eef0e2',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    flexShrink: 0,
-                  }}>
-                    <Check size={16} color="#7a8c5c" strokeWidth={2.4} />
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+          <div style={styles.emptyText}>No cover needed right now.</div>
         </div>
       )}
     </div>
@@ -20836,6 +20766,79 @@ const styles = {
     letterSpacing: '0.04em',
     cursor: 'pointer',
     marginLeft: 4,
+    appearance: 'none', WebkitAppearance: 'none',
+  },
+
+  // ─── COVER AGENDA — compact day-grouped list (job-board minimal) ───
+  // White tile per day, rows of cover-available items inside. Each row:
+  // time (Playfair) | title + meta (sans) | Take pill on right.
+  // Mirrors the Schedule agenda pattern exactly so the design feels
+  // unified across both tabs.
+  coverDayCard: {
+    background: '#ffffff',
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  coverAgendaRow: {
+    width: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    padding: '14px 16px',
+  },
+  coverAgendaTime: {
+    fontFamily: '"Playfair Display", Georgia, serif',
+    fontSize: 20, color: '#1a2620',
+    lineHeight: 1, letterSpacing: '-0.015em',
+    fontVariantNumeric: 'tabular-nums',
+    flexShrink: 0,
+    minWidth: 56,
+  },
+  coverAgendaInfo: {
+    flex: 1, minWidth: 0,
+  },
+  coverAgendaTitle: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 15, fontWeight: 500,
+    color: '#1a2620', lineHeight: 1.3,
+    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+  },
+  coverAgendaMeta: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 12, color: '#7a6f5f',
+    marginTop: 2,
+    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+  },
+  // "Take" pill — small, dark forest, sits at right of row. The single
+  // action on each cover-available row. Tap claims (or expresses
+  // interest, for cover-only coaches).
+  coverAgendaTakeBtn: {
+    flexShrink: 0,
+    padding: '7px 14px',
+    background: '#1a2620',
+    color: '#fffdf7',
+    border: 'none',
+    borderRadius: 999,
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 11, fontWeight: 700,
+    letterSpacing: '0.06em', textTransform: 'uppercase',
+    cursor: 'pointer',
+    appearance: 'none', WebkitAppearance: 'none',
+  },
+  // "On it" state — once you've expressed interest, the button confirms
+  // your status. Sage tone so it reads as "good, you're in".
+  coverAgendaTakeBtnDone: {
+    flexShrink: 0,
+    display: 'inline-flex', alignItems: 'center', gap: 4,
+    padding: '7px 12px',
+    background: 'rgba(122, 140, 92, 0.14)',
+    color: '#5b6d3f',
+    border: 'none',
+    borderRadius: 999,
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 11, fontWeight: 700,
+    letterSpacing: '0.06em', textTransform: 'uppercase',
+    cursor: 'pointer',
     appearance: 'none', WebkitAppearance: 'none',
   },
 
