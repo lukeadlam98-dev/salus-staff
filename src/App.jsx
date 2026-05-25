@@ -139,8 +139,44 @@ const COLOR = {
   sans:     "'Inter', -apple-system, sans-serif",
 };
 
+// ═══════════════════════════════════════════════════════════════════════
+// TYPOGRAPHY SCALE — pick a token, never invent a new size
+// ═══════════════════════════════════════════════════════════════════════
+//
+// All text on Salus uses one of these tokens. Don't write ad-hoc
+// `fontSize: N` in component styles — reach for the closest TYPE.* token
+// instead. If nothing fits, add a new token here with a clear name.
+//
+//   PLAYFAIR (display)
+//     hero          32  Hero card overlay (cinematic moments)
+//     pageTitle     30  Top-of-page title (one per page)
+//     pageTitleSm   22  Secondary page title / greeting name
+//     modalTitle    22  Modal hero
+//     cardTitle     18  Card / section title (default Playfair use)
+//     itemTitle     15  List-item title
+//     sectionLabel  14 italic — section divider label
+//     emptyState    16 italic — empty-state heading
+//
+//   INTER (body)
+//     body          14  Default body text
+//     bodySub       13  Secondary body, longer descriptions
+//     meta          12  Helper text, metadata
+//     metaSmall     11  Smaller secondary
+//     capsLabel     11  Eyebrow / tab label (uppercase, tracked)
+//     eyebrow       10  Tiny eyebrow (uppercase, very tracked)
+//
+//   COLORS (always pair a TYPE with one of these)
+//     forest  #1a2620  primary text / dark headings
+//     brown   #5c4a38  secondary, warm body
+//     taupe   #a59478  tertiary, faded labels
+//     moss    #7a8270  muted body
+//
+// Rule of thumb: if a number "feels off", you probably want one notch up
+// or down — never a custom value in between.
+//
 const TYPE = {
   // Page heros — top of major sections
+  hero:         { fontFamily: COLOR.serif, fontSize: 32, fontWeight: 500, color: COLOR.forest, letterSpacing: '-0.022em', lineHeight: 1.05 },
   pageTitle:    { fontFamily: COLOR.serif, fontSize: 30, fontWeight: 400, color: COLOR.forest, letterSpacing: '-0.015em', lineHeight: 1.1 },
   pageTitleSm:  { fontFamily: COLOR.serif, fontSize: 22, fontWeight: 400, color: COLOR.forest, letterSpacing: '-0.005em', lineHeight: 1.2 },
   // Modal heros
@@ -6225,43 +6261,25 @@ function BroadcastBanner({ broadcasts, broadcastReads, currentUser, onMarkRead }
         marginTop: 4,
         paddingTop: 14,
         borderTop: '1px solid rgba(255, 255, 255, 0.32)',
-        display: 'flex', flexWrap: 'wrap', gap: 8,
+        display: 'flex', gap: 10,
       }}>
         <button
           onClick={() => window.dispatchEvent(new CustomEvent('salus:openModal', { detail: { type: 'bookOneOnOne' } }))}
           className="salus-btn"
-          style={styles.broadcastChip}
+          style={styles.broadcastBox}
           aria-label="Book a 1:1 with Luke"
         >
-          <Calendar size={13} strokeWidth={2.2} />
+          <Calendar size={16} strokeWidth={2} />
           <span>Book 1:1</span>
         </button>
         <button
           onClick={() => window.dispatchEvent(new CustomEvent('salus:openModal', { detail: { type: 'quickSend', kind: 'question' } }))}
           className="salus-btn"
-          style={styles.broadcastChip}
+          style={styles.broadcastBox}
           aria-label="Ask Luke a question"
         >
-          <MessageCircle size={13} strokeWidth={2.2} />
+          <MessageCircle size={16} strokeWidth={2} />
           <span>Ask</span>
-        </button>
-        <button
-          onClick={() => window.dispatchEvent(new CustomEvent('salus:openModal', { detail: { type: 'quickSend', kind: 'kudos' } }))}
-          className="salus-btn"
-          style={styles.broadcastChip}
-          aria-label="Send kudos for a teammate"
-        >
-          <Award size={13} strokeWidth={2.2} />
-          <span>Kudos</span>
-        </button>
-        <button
-          onClick={() => window.dispatchEvent(new CustomEvent('salus:openModal', { detail: { type: 'quickSend', kind: 'suggestion' } }))}
-          className="salus-btn"
-          style={styles.broadcastChip}
-          aria-label="Share an idea or suggestion"
-        >
-          <Lightbulb size={13} strokeWidth={2.2} />
-          <span>Idea</span>
         </button>
       </div>
     </div>
@@ -11033,15 +11051,15 @@ function HomeHero({ data, currentUser, isManager, brandPhoto, onClassClick }) {
         </button>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
-            fontSize: 12, color: '#a59478', fontWeight: 500,
-            letterSpacing: '0.02em',
+            ...TYPE.metaSmall,
+            color: '#a59478',
+            fontWeight: 500,
           }}>
             {greeting}
           </div>
           <div style={{
-            fontFamily: '"Playfair Display", Georgia, serif',
-            fontSize: 19, fontWeight: 500, color: '#1a2620',
-            letterSpacing: '-0.01em', marginTop: 2, lineHeight: 1.2,
+            ...TYPE.pageTitleSm,
+            marginTop: 2,
           }}>
             {firstName}
           </div>
@@ -11104,22 +11122,23 @@ function HomeHero({ data, currentUser, isManager, brandPhoto, onClassClick }) {
           {upNext ? (
             <>
               <div style={{
-                fontFamily: '"Playfair Display", Georgia, serif',
-                fontSize: 34, fontWeight: 500, color: '#fffdf7',
-                letterSpacing: '-0.022em', lineHeight: 1.05,
+                ...TYPE.hero,
+                color: '#fffdf7',
                 marginBottom: 10,
               }}>
                 {upNext.type}
               </div>
               <div style={{
-                fontSize: 13, color: 'rgba(255, 253, 247, 0.85)',
+                ...TYPE.bodySub,
+                color: 'rgba(255, 253, 247, 0.85)',
                 lineHeight: 1.5, marginBottom: 16,
                 maxWidth: '88%',
               }}>
                 {heroSubtitle}
               </div>
               <div style={{
-                fontSize: 11, color: 'rgba(255, 253, 247, 0.7)',
+                ...TYPE.metaSmall,
+                color: 'rgba(255, 253, 247, 0.7)',
                 letterSpacing: '0.04em',
                 display: 'flex', alignItems: 'center', gap: 8,
                 flexWrap: 'wrap',
@@ -11135,15 +11154,15 @@ function HomeHero({ data, currentUser, isManager, brandPhoto, onClassClick }) {
           ) : (
             <>
               <div style={{
-                fontFamily: '"Playfair Display", Georgia, serif',
-                fontSize: 30, fontWeight: 500, color: '#fffdf7',
-                letterSpacing: '-0.018em', lineHeight: 1.1,
+                ...TYPE.hero,
+                color: '#fffdf7',
                 marginBottom: 10,
               }}>
                 A quiet day
               </div>
               <div style={{
-                fontSize: 13, color: 'rgba(255, 253, 247, 0.85)',
+                ...TYPE.bodySub,
+                color: 'rgba(255, 253, 247, 0.85)',
                 lineHeight: 1.5,
               }}>
                 {heroSubtitle}
@@ -11208,12 +11227,14 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
   const weeklyEarningsPence = sessionRate * myWeekCount;
   const showEarnings = isCoach && myWeekCount > 0;
 
-  // Shifts/classes needing cover THIS WEEK (system-wide, glanceable stat)
-  // Counts open + pending cover requests whose class falls within the current week.
+  // Cover needed count — matches the Cover board's "Cover needed" tab
+  // exactly so the numbers align across pages. Counts OPEN cover requests
+  // that aren't mine. (Pending = not yet on the board; my own requests =
+  // not actionable by me.)
   const weekCoverNeeded = (data.coverRequests || []).filter(r => {
-    if (r.status !== 'open' && r.status !== 'pending') return false;
-    const cls = data.classes.find(c => c.id === r.classId);
-    return cls && cls.date >= weekStartIso && cls.date <= weekEndIso;
+    if (r.status !== 'open') return false;
+    if (r.requestedBy === currentUser.id) return false;
+    return true;
   }).length;
 
   // Up next — first future class today
@@ -21688,6 +21709,26 @@ const styles = {
     color: '#5c4a38',
     fontFamily: 'Inter, system-ui, sans-serif',
     fontSize: 12, fontWeight: 600,
+    letterSpacing: '0.01em',
+    cursor: 'pointer',
+    appearance: 'none', WebkitAppearance: 'none',
+    boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.5)',
+  },
+  // Two-up box version — larger, flex: 1 so each takes equal half-width.
+  // Used when only Book 1:1 and Ask are shown (the simplified layout).
+  // Bigger tap target, more prominent presence as a single action pair.
+  broadcastBox: {
+    flex: 1,
+    display: 'inline-flex',
+    alignItems: 'center', justifyContent: 'center',
+    gap: 8,
+    padding: '12px 16px',
+    background: 'rgba(255, 253, 247, 0.55)',
+    border: '1px solid rgba(92, 74, 56, 0.14)',
+    borderRadius: 14,
+    color: '#1a2620',
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 14, fontWeight: 600,
     letterSpacing: '0.01em',
     cursor: 'pointer',
     appearance: 'none', WebkitAppearance: 'none',
