@@ -14905,33 +14905,65 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
   const [activeTab, setActiveTab] = useState('needed');
 
   // ─── Per-session "Can't take this" dismissals ───
-  // Local state — when staff taps Can't, the card disappears from view.
-  // Refreshing the page brings it back. Lightweight, no backend.
+  // Local state — tap Can't and the card disappears from view. Refreshing
+  // brings it back. Lightweight, no backend.
   const [dismissed, setDismissed] = useState(new Set());
 
-  // ─── Calendar state (collapsed by default, toggled from header icon) ───
-  const [calendarExpanded, setCalendarExpanded] = useState(false);
   const today = new Date(); today.setHours(0, 0, 0, 0);
-  const [selectedDate, setSelectedDate] = useState(today);
   const toIso = (d) => d.toISOString().slice(0, 10);
   const todayIso = toIso(today);
-  const selectedIso = toIso(selectedDate);
+
+  // ─── DEMO COVERS — TEMPORARY, REMOVE TO GO LIVE ───
+  // 5 mock cover requests so Luke can see the UI populated without
+  // touching the database. Marked __demo so handlers don't try to write
+  // them back to Supabase. To remove: delete this useMemo block and the
+  // demo merges below.
+  const DEMO_DATA = useMemo(() => {
+    const addDays = (n) => {
+      const d = new Date(today); d.setDate(d.getDate() + n);
+      return toIso(d);
+    };
+    return {
+      classes: [
+        { id: 'demo-cls-1', type: 'Reformer Beginner', studio: 'hybrid', date: addDays(0), time: '12:00', dur: 45, day: 0, coachId: 'demo-user-1' },
+        { id: 'demo-cls-2', type: 'Salus Signature', studio: 'hybrid', date: addDays(1), time: '17:30', dur: 45, day: 1, coachId: 'demo-user-2' },
+        { id: 'demo-cls-3', type: 'Reformer Stretch', studio: 'reformer', date: addDays(2), time: '18:30', dur: 45, day: 2, coachId: 'demo-user-3' },
+        { id: 'demo-cls-4', type: 'Glutes & Abs', studio: 'hybrid', date: addDays(3), time: '09:30', dur: 45, day: 3, coachId: 'demo-user-4' },
+        { id: 'demo-cls-5', type: 'Salus Strength', studio: 'reformer', date: addDays(4), time: '06:30', dur: 45, day: 4, coachId: 'demo-user-5' },
+      ],
+      users: [
+        { id: 'demo-user-1', name: 'Sarah Bennett', coachType: 'permanent' },
+        { id: 'demo-user-2', name: 'Tom Walsh',    coachType: 'permanent' },
+        { id: 'demo-user-3', name: 'Mike Lawson',  coachType: 'cover' },
+        { id: 'demo-user-4', name: 'Cleo Harper',  coachType: 'permanent' },
+        { id: 'demo-user-5', name: 'Joanna Reid',  coachType: 'permanent' },
+      ],
+      covers: [
+        { id: 'demo-cov-1', classId: 'demo-cls-1', requestedBy: 'demo-user-1', status: 'open',    reason: 'Doctor appointment',   timestamp: Date.now() - 3600000,  interestedCovers: [], __demo: true },
+        { id: 'demo-cov-2', classId: 'demo-cls-2', requestedBy: 'demo-user-2', status: 'open',    reason: 'Family commitment',    timestamp: Date.now() - 7200000,  interestedCovers: [], __demo: true },
+        { id: 'demo-cov-3', classId: 'demo-cls-3', requestedBy: 'demo-user-3', status: 'pending', reason: 'Personal matter',      timestamp: Date.now() - 1800000,  interestedCovers: [], __demo: true },
+        { id: 'demo-cov-4', classId: 'demo-cls-4', requestedBy: 'demo-user-4', status: 'pending', reason: 'Hospital appointment', timestamp: Date.now() - 600000,   interestedCovers: [], __demo: true },
+        { id: 'demo-cov-5', classId: 'demo-cls-5', requestedBy: 'demo-user-5', status: 'claimed', reason: 'Travelling',           claimedBy: currentUser.id, timestamp: Date.now() - 86400000, interestedCovers: [], __demo: true },
+      ],
+    };
+  }, [currentUser.id, todayIso]);
+  // ─── END DEMO DATA — DELETE ABOVE TO REMOVE ───
+
+  // ─── Merge real + demo data for local rendering only ───
+  const allCovers = useMemo(() => [...(data?.coverRequests || []), ...DEMO_DATA.covers], [data?.coverRequests, DEMO_DATA]);
+  const allClasses = useMemo(() => [...(data?.classes || []), ...DEMO_DATA.classes], [data?.classes, DEMO_DATA]);
+  const allUsers = useMemo(() => [...(data?.users || []), ...DEMO_DATA.users], [data?.users, DEMO_DATA]);
 
   // ─── Filter requests by tab ───
-  const allCovers = data?.coverRequests || [];
-  const allClasses = data?.classes || [];
-
   // Cover needed: open requests, not mine, not dismissed
   const coverNeeded = allCovers.filter(r =>
     r.status === 'open' &&
     r.requestedBy !== currentUser.id &&
     !dismissed.has(r.id)
   );
-
   // Cover pending: all pending (awaiting manager approval)
   const coverPending = allCovers.filter(r => r.status === 'pending');
-
-  // My Cover: things I'm doing (claimed/assigned to me) + my own requests still active
+  // My Cover: things I'm doing (claimed by me) + my own active requests
   const myCover = allCovers.filter(r =>
     r.claimedBy === currentUser.id ||
     (r.requestedBy === currentUser.id && (r.status === 'pending' || r.status === 'open'))
@@ -14949,62 +14981,34 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
   else if (activeTab === 'pending') items = coverPending;
   else items = myCover;
 
-  // Sort by date + time (soonest first)
+  // Sort by date + time (soonest first), hydrate with class
   items = items.slice()
     .map(r => ({ r, cls: allClasses.find(c => c.id === r.classId) }))
     .filter(x => x.cls)
     .sort((a, b) => (a.cls.date + a.cls.time).localeCompare(b.cls.date + b.cls.time));
 
-  // ─── Calendar date metadata ───
-  const coverDateMeta = useMemo(() => {
-    const meta = {};
-    allCovers.forEach(req => {
-      if (req.status !== 'open' && req.status !== 'pending') return;
-      const cls = allClasses.find(c => c.id === req.classId);
-      if (!cls) return;
-      meta[cls.date] = (meta[cls.date] || 0) + 1;
-    });
-    return meta;
-  }, [allCovers, allClasses]);
-
-  // Calendar grid — 6 rows × 7 cols
-  const monthYear = selectedDate.getFullYear();
-  const monthIdx = selectedDate.getMonth();
-  const firstOfMonth = new Date(monthYear, monthIdx, 1);
-  const firstDow = (firstOfMonth.getDay() + 6) % 7;
-  const daysInMonth = new Date(monthYear, monthIdx + 1, 0).getDate();
-  const gridCells = [];
-  const prevMonthDays = new Date(monthYear, monthIdx, 0).getDate();
-  for (let i = firstDow - 1; i >= 0; i--) {
-    gridCells.push({ d: new Date(monthYear, monthIdx - 1, prevMonthDays - i), out: true });
-  }
-  for (let i = 1; i <= daysInMonth; i++) {
-    gridCells.push({ d: new Date(monthYear, monthIdx, i), out: false });
-  }
-  while (gridCells.length < 42) {
-    const last = gridCells[gridCells.length - 1].d;
-    const next = new Date(last); next.setDate(next.getDate() + 1);
-    gridCells.push({ d: next, out: true });
-  }
-  const goPrevMonth = () => setSelectedDate(new Date(monthYear, monthIdx - 1, 1));
-  const goNextMonth = () => setSelectedDate(new Date(monthYear, monthIdx + 1, 1));
-  const monthLabel = selectedDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
-
   // ─── Handlers ───
+  // Demo cards are no-ops on the backend — we just toggle local state so
+  // the UI feels alive without polluting Supabase.
   const handleTake = (req) => {
+    if (req.__demo) {
+      handleDismiss(req.id); // visually claim — disappears from "needed"
+      return;
+    }
     if (isCoverCoach) onExpressInterest(req.id);
     else onClaim(req.id);
   };
   const handleDismiss = (id) => {
     setDismissed(prev => new Set([...prev, id]));
   };
+  const handleCancel = (req) => {
+    if (req.__demo) { handleDismiss(req.id); return; }
+    onCancel(req.id);
+  };
 
   // ─── Card renderer ───
-  // Renders one cover request as a tactile card. Layout/actions vary by
-  // tab and ownership: needed shows Take/Can't, pending shows status,
-  // mine shows Cancel or "covering for X".
   const renderCard = ({ r: req, cls }) => {
-    const requester = data.users.find(u => u.id === req.requestedBy);
+    const requester = allUsers.find(u => u.id === req.requestedBy);
     const isMyRequest = req.requestedBy === currentUser.id;
     const isMyClaim = req.claimedBy === currentUser.id;
     const interested = (req.interestedCovers || []).includes(currentUser.id);
@@ -15021,7 +15025,7 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
     const urgencyLabel = isToday2 ? 'TODAY' : isTomorrow ? 'TOMORROW' : null;
     const urgencyColor = isToday2 ? '#c8442a' : '#c6926a';
 
-    // Status badge (top right of card)
+    // Status badge top-right
     let statusBadge = null;
     if (req.status === 'pending') {
       statusBadge = (
@@ -15043,7 +15047,7 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
       );
     }
 
-    // Description line — varies by perspective
+    // Description — varies by perspective
     let description;
     if (isMyClaim) {
       description = `Covering for ${requester?.name?.split(' ')[0] || 'a teammate'}`;
@@ -15053,10 +15057,9 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
       description = `${requester?.name?.split(' ')[0] || 'A teammate'} needs cover`;
     }
 
-    // Action buttons — vary by tab and ownership
+    // Action buttons
     let actions = null;
     if (req.status === 'open' && !isMyRequest && !isMyClaim) {
-      // Cover needed — Take it / Can't
       actions = (
         <div style={styles.coverCardActionRow}>
           <button onClick={() => handleTake(req)} className="salus-btn"
@@ -15070,10 +15073,9 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
         </div>
       );
     } else if (isMyRequest && (req.status === 'pending' || req.status === 'open')) {
-      // My own request — Cancel option
       actions = (
         <div style={styles.coverCardActionRow}>
-          <button onClick={() => onCancel(req.id)} className="salus-btn"
+          <button onClick={() => handleCancel(req)} className="salus-btn"
             style={styles.coverCardCancelBtn}>
             Cancel request
           </button>
@@ -15094,12 +15096,12 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
           {STUDIOS[cls.studio]?.label || 'Studio'} {String('·')} {cls.dur} min
         </div>
         <div style={styles.coverCardDescription}>{description}</div>
+        {actions && <div style={styles.coverCardActionDivider} />}
         {actions}
       </div>
     );
   };
 
-  // ─── Empty state copy varies by tab ───
   const emptyCopy = {
     needed: { title: 'Nothing to cover', sub: "You're all set — no cover needed right now." },
     pending: { title: 'Nothing pending', sub: 'No cover requests are waiting for approval.' },
@@ -15107,83 +15109,22 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
   }[activeTab];
 
   return (
-    <div>
-      {/* ── Page header ── */}
+    // Bleed wrapper matches Home — escapes main's 14px padding on each
+    // side and re-adds 28px so the inner content sits at 14px from
+    // screen edge with breathing room. Lets cards feel anchored the same
+    // way as on the home page.
+    <div className="salus-home-bleed" style={{
+      marginLeft: -14,
+      marginRight: -14,
+      paddingLeft: 28,
+      paddingRight: 28,
+    }}>
       <PageHeader
         eyebrow="The studio"
         title="Cover board"
-        action={
-          <button
-            onClick={() => setCalendarExpanded(v => !v)}
-            className="salus-btn"
-            style={styles.calendarHeaderBtn}
-            aria-label={calendarExpanded ? 'Hide calendar' : 'Open calendar'}
-            aria-expanded={calendarExpanded}
-          >
-            <Calendar size={16} color="#1a2620" strokeWidth={1.8} />
-          </button>
-        }
       />
 
-      {/* ── Calendar accordion ── */}
-      {calendarExpanded && (
-        <div style={{ ...styles.calendarPanel, marginTop: 0, marginBottom: 22 }}>
-          <div style={styles.calendarNavRow}>
-            <button onClick={goPrevMonth} className="salus-btn" style={styles.calendarNavBtn}>
-              <ChevronLeft size={18} />
-            </button>
-            <div style={styles.calendarMonthLabel}>{monthLabel}</div>
-            <button onClick={goNextMonth} className="salus-btn" style={styles.calendarNavBtn}>
-              <ChevronRight size={18} />
-            </button>
-          </div>
-          {(monthYear !== today.getFullYear() || monthIdx !== today.getMonth()) && (
-            <button onClick={() => setSelectedDate(today)} className="salus-btn"
-              style={styles.calendarJumpToday}>
-              {'←'} Jump to today
-            </button>
-          )}
-          <div style={styles.calendarWeekdayRow}>
-            {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
-              <div key={i} style={styles.calendarWeekday}>{d}</div>
-            ))}
-          </div>
-          <div style={styles.calendarDayGrid}>
-            {gridCells.map((cell, idx) => {
-              const iso = toIso(cell.d);
-              const isToday2 = iso === todayIso;
-              const isSelected = iso === selectedIso;
-              const coverCount = coverDateMeta[iso] || 0;
-              return (
-                <button key={idx} onClick={() => setSelectedDate(new Date(cell.d))}
-                  className="salus-btn"
-                  style={{
-                    ...styles.calendarDayBtn,
-                    background: isSelected ? '#1a2620' : '#f5f1e8',
-                    border: isToday2 && !isSelected ? '1.5px solid #1a2620' : '1px solid transparent',
-                    opacity: cell.out ? 0.35 : 1,
-                  }}>
-                  {coverCount > 0 ? (
-                    <div style={{
-                      ...styles.calendarDayCount,
-                      color: isSelected ? '#f0c8b8' : '#c8442a',
-                    }}>{coverCount}</div>
-                  ) : (
-                    <div style={{ height: 13 }} />
-                  )}
-                  <div style={{
-                    ...styles.calendarDayNum,
-                    fontWeight: isToday2 || isSelected ? 500 : 400,
-                    color: isSelected ? '#d4cdb8' : cell.out ? '#a59478' : '#7a8270',
-                  }}>{cell.d.getDate()}</div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* ── Tab navigation — pill style with count ── */}
+      {/* ── Tab navigation ── */}
       <div style={styles.coverTabRow}>
         {[
           ['needed', 'Cover needed'],
@@ -20748,11 +20689,19 @@ const styles = {
   // with breathing room between cards. Mirrors the reference design pattern.
   coverCardTile: {
     background: '#ffffff',
-    borderRadius: 18,
-    padding: '16px 18px 18px',
-    marginBottom: 10,
-    // Soft warm shadow gives the tactile float without harsh edges
-    boxShadow: '0 1px 2px rgba(92, 74, 56, 0.04), 0 4px 14px rgba(92, 74, 56, 0.06)',
+    borderRadius: 20,
+    padding: '20px 22px 20px',
+    marginBottom: 14,
+    // Stronger warm shadow — gives the card more lift, closer to the
+    // task-app reference Luke shared (cards feel like physical objects).
+    boxShadow: '0 1px 3px rgba(92, 74, 56, 0.06), 0 8px 24px rgba(92, 74, 56, 0.09)',
+  },
+  // Hairline between description and action row — adds the reference's
+  // sense of a footer separation before the action area.
+  coverCardActionDivider: {
+    height: 1,
+    background: 'rgba(26, 38, 32, 0.06)',
+    margin: '16px 0 0',
   },
   // Top row: studio chip on left, urgency/state badge on right
   coverCardChipRow: {
@@ -20957,7 +20906,8 @@ const styles = {
     fontWeight: 400,
     lineHeight: 1.4,
   },
-  // Action row — two-button layout at bottom of card
+  // Action row — two-button layout at bottom of card. Sits below the
+  // hairline divider which provides the visual gap, so no marginTop needed.
   coverCardActionRow: {
     display: 'flex',
     gap: 8,
