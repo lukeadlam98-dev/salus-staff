@@ -15129,52 +15129,55 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
               <span>You're covering</span>
               <span style={styles.coverSectionCount}>{myCovering.length}</span>
             </div>
-            <div style={styles.coverDayCard}>
-              {myCovering.map((item, idx) => {
-                const cls = item.cls;
-                const requester = data.users.find(u => u.id === item.requestedBy);
-                const dateObj = cls.date ? new Date(cls.date) : null;
-                const dayLabel = dateObj
-                  ? dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
-                  : DAYS[cls.day];
-                const isToday2 = cls.date === todayIso;
-                return (
-                  <div key={item.id} style={{
-                    ...styles.coverAgendaRow,
-                    borderTop: idx > 0 ? '1px solid rgba(26, 38, 32, 0.06)' : 'none',
-                  }}>
-                    <div style={styles.coverAgendaTime}>{cls.time}</div>
-                    <div style={styles.coverAgendaInfo}>
-                      <div style={styles.coverAgendaTitle}>{cls.type}</div>
-                      <div style={styles.coverAgendaMeta}>
-                        {isToday2 ? 'Today' : dayLabel} \u00b7 for {requester?.name?.split(' ')[0]}
-                      </div>
-                    </div>
+            {myCovering.map(item => {
+              const cls = item.cls;
+              const requester = data.users.find(u => u.id === item.requestedBy);
+              const dateObj = cls.date ? new Date(cls.date) : null;
+              const dayLabel = dateObj
+                ? dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
+                : DAYS[cls.day];
+              const isToday2 = cls.date === todayIso;
+              const isTomorrow = (() => {
+                if (!dateObj) return false;
+                const tmw = new Date(today); tmw.setDate(tmw.getDate() + 1);
+                return toIso(tmw) === cls.date;
+              })();
+              const studioColor = cls.studio === 'reformer' ? '#c6926a' : cls.studio === 'hybrid' ? '#7a8c5c' : '#5c4a38';
+              const studioBg = cls.studio === 'reformer' ? 'rgba(198, 146, 106, 0.14)' : cls.studio === 'hybrid' ? 'rgba(122, 140, 92, 0.14)' : 'rgba(92, 74, 56, 0.10)';
+
+              return (
+                <div key={item.id} style={styles.coverCardTile}>
+                  <div style={styles.coverCardChipRow}>
+                    <span style={{ ...styles.coverCardChip, color: studioColor, background: studioBg }}>
+                      {STUDIOS[cls.studio]?.label || 'Studio'}
+                    </span>
+                    <span style={styles.coverCardCoveringBadge}>
+                      <Check size={10} strokeWidth={2.4} /> Covering
+                    </span>
                   </div>
-                );
-              })}
-            </div>
+                  <div style={styles.coverCardTitle}>{cls.type}</div>
+                  <div style={styles.coverCardWhen}>
+                    {isToday2 ? 'Today' : isTomorrow ? 'Tomorrow' : dayLabel} \u00b7 {cls.time} \u00b7 for {requester?.name?.split(' ')[0]}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         );
       })()}
 
-      {/* ── Section: COVER AVAILABLE (open requests, grouped by date) ── */}
+      {/* ── Section: COVER AVAILABLE (open requests, discrete card tiles) ── */}
       {(() => {
-        // Non-manager doesn't see their own posted requests in the available
-        // list. Manager sees everything (their oversight view).
         const visibleOpen = openRequests.filter(r =>
           isManager || r.requestedBy !== currentUser.id
         );
         if (visibleOpen.length === 0) return null;
 
-        const byDate = {};
-        visibleOpen.forEach(req => {
-          const cls = data.classes.find(c => c.id === req.classId);
-          if (!cls) return;
-          if (!byDate[cls.date]) byDate[cls.date] = [];
-          byDate[cls.date].push({ req, cls });
-        });
-        const sortedDates = Object.keys(byDate).sort();
+        // Sort by date+time ascending — most urgent first
+        const sortedOpen = visibleOpen
+          .map(req => ({ req, cls: data.classes.find(c => c.id === req.classId) }))
+          .filter(x => x.cls)
+          .sort((a, b) => (a.cls.date + a.cls.time).localeCompare(b.cls.date + b.cls.time));
 
         return (
           <div style={{ marginBottom: 26 }}>
@@ -15182,63 +15185,55 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
               <span>Cover available</span>
               <span style={styles.coverSectionCount}>{visibleOpen.length}</span>
             </div>
-            {sortedDates.map(date => {
-              const items = byDate[date].sort((a, b) => a.cls.time.localeCompare(b.cls.time));
-              const dateObj = new Date(date);
-              const dayLabel = dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-              const isToday2 = date === todayIso;
+            {sortedOpen.map(({ req, cls }) => {
+              const requester = data.users.find(u => u.id === req.requestedBy);
+              const interested = (req.interestedCovers || []).includes(currentUser.id);
+              const isMine = req.requestedBy === currentUser.id;
+              const dateObj = cls.date ? new Date(cls.date) : null;
+              const dayLabel = dateObj
+                ? dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
+                : DAYS[cls.day];
+              const isToday2 = cls.date === todayIso;
+              const isTomorrow = (() => {
+                if (!dateObj) return false;
+                const tmw = new Date(today); tmw.setDate(tmw.getDate() + 1);
+                return toIso(tmw) === cls.date;
+              })();
+              const studioColor = cls.studio === 'reformer' ? '#c6926a' : cls.studio === 'hybrid' ? '#7a8c5c' : '#5c4a38';
+              const studioBg = cls.studio === 'reformer' ? 'rgba(198, 146, 106, 0.14)' : cls.studio === 'hybrid' ? 'rgba(122, 140, 92, 0.14)' : 'rgba(92, 74, 56, 0.10)';
 
               return (
-                <div key={date} style={{ marginBottom: 14 }}>
-                  <div style={{
-                    ...styles.scheduleDayHeader,
-                    color: isToday2 ? '#c8442a' : '#a59478',
-                  }}>
-                    {dayLabel}{isToday2 ? ' \u00b7 Today' : ''}
+                <div key={req.id} style={styles.coverCardTile}>
+                  <div style={styles.coverCardChipRow}>
+                    <span style={{ ...styles.coverCardChip, color: studioColor, background: studioBg }}>
+                      {STUDIOS[cls.studio]?.label || 'Studio'}
+                    </span>
+                    {isToday2 && <span style={styles.coverCardUrgencyToday}>Today</span>}
+                    {isTomorrow && <span style={styles.coverCardUrgencyTomorrow}>Tomorrow</span>}
                   </div>
-                  <div style={styles.coverDayCard}>
-                    {items.map(({ req, cls }, idx) => {
-                      const requester = data.users.find(u => u.id === req.requestedBy);
-                      const interested = (req.interestedCovers || []).includes(currentUser.id);
-                      const isMine = req.requestedBy === currentUser.id;
-
-                      // Action selection: keep it to ONE primary button per row.
-                      let actionBtn = null;
-                      if (isMine) {
-                        // shouldn't reach here for staff (filtered), but for manager:
-                        actionBtn = null;
-                      } else if (isManager) {
-                        // Manager: posted, no direct action — open thread to manage
-                        actionBtn = null;
-                      } else {
-                        actionBtn = (
-                          <button
-                            onClick={() => isCoverCoach ? onExpressInterest(req.id) : onClaim(req.id)}
-                            className="salus-btn"
-                            style={interested ? styles.coverAgendaTakeBtnDone : styles.coverAgendaTakeBtn}
-                          >
-                            {interested ? (<><Check size={11} strokeWidth={2.4} /> On it</>) : 'Take'}
-                          </button>
-                        );
-                      }
-
-                      return (
-                        <div key={req.id} style={{
-                          ...styles.coverAgendaRow,
-                          borderTop: idx > 0 ? '1px solid rgba(26, 38, 32, 0.06)' : 'none',
-                        }}>
-                          <div style={styles.coverAgendaTime}>{cls.time}</div>
-                          <div style={styles.coverAgendaInfo}>
-                            <div style={styles.coverAgendaTitle}>{cls.type}</div>
-                            <div style={styles.coverAgendaMeta}>
-                              {requester?.name?.split(' ')[0]} \u00b7 {STUDIOS[cls.studio]?.label}
-                            </div>
-                          </div>
-                          {actionBtn}
-                        </div>
-                      );
-                    })}
+                  <div style={styles.coverCardTitle}>{cls.type}</div>
+                  <div style={styles.coverCardWhen}>
+                    {!isToday2 && !isTomorrow && <>{dayLabel} \u00b7 </>}
+                    {cls.time} \u00b7 for {requester?.name?.split(' ')[0]}
                   </div>
+                  {!isMine && !isManager && (
+                    <button
+                      onClick={() => isCoverCoach ? onExpressInterest(req.id) : onClaim(req.id)}
+                      className="salus-btn"
+                      style={interested ? styles.coverCardTakeBtnDone : styles.coverCardTakeBtn}
+                    >
+                      {interested ? (<><Check size={12} strokeWidth={2.4} /> On it</>) : 'Take'}
+                    </button>
+                  )}
+                  {isManager && !isMine && (
+                    <button
+                      onClick={() => onManage(req.id)}
+                      className="salus-btn"
+                      style={styles.coverCardManageBtn}
+                    >
+                      Manage
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -20769,75 +20764,116 @@ const styles = {
     appearance: 'none', WebkitAppearance: 'none',
   },
 
-  // ─── COVER AGENDA — compact day-grouped list (job-board minimal) ───
-  // White tile per day, rows of cover-available items inside. Each row:
-  // time (Playfair) | title + meta (sans) | Take pill on right.
-  // Mirrors the Schedule agenda pattern exactly so the design feels
-  // unified across both tabs.
-  coverDayCard: {
+  // ─── COVER CARD TILES — discrete tactile cards, NOT row-in-tile ───
+  // Each cover request renders as its own floating card with soft shadow,
+  // generous padding, coloured studio chip on top, big title in the
+  // middle, meta line below, Take button at the bottom. Stacks vertically
+  // with breathing room between cards. Mirrors the reference design pattern.
+  coverCardTile: {
     background: '#ffffff',
-    borderRadius: 16,
-    overflow: 'hidden',
+    borderRadius: 18,
+    padding: '16px 18px 18px',
+    marginBottom: 10,
+    // Soft warm shadow gives the tactile float without harsh edges
+    boxShadow: '0 1px 2px rgba(92, 74, 56, 0.04), 0 4px 14px rgba(92, 74, 56, 0.06)',
   },
-  coverAgendaRow: {
-    width: '100%',
-    display: 'flex',
-    alignItems: 'center',
-    gap: 12,
-    padding: '14px 16px',
+  // Top row: studio chip on left, urgency/state badge on right
+  coverCardChipRow: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 10,
   },
-  coverAgendaTime: {
+  // Studio name chip — colored by studio (amber for reformer, sage for hybrid)
+  coverCardChip: {
+    display: 'inline-block',
+    padding: '4px 10px',
+    borderRadius: 999,
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 10, fontWeight: 700,
+    letterSpacing: '0.1em', textTransform: 'uppercase',
+  },
+  // "Today" urgency badge — coral, signals act now
+  coverCardUrgencyToday: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 11, fontWeight: 700,
+    color: '#c8442a',
+    letterSpacing: '0.06em', textTransform: 'uppercase',
+  },
+  // "Tomorrow" — amber, signals soon
+  coverCardUrgencyTomorrow: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 11, fontWeight: 700,
+    color: '#c6926a',
+    letterSpacing: '0.06em', textTransform: 'uppercase',
+  },
+  // "Covering" — sage pill for "You're covering" cards
+  coverCardCoveringBadge: {
+    display: 'inline-flex', alignItems: 'center', gap: 4,
+    padding: '4px 10px',
+    background: 'rgba(122, 140, 92, 0.14)',
+    color: '#5b6d3f',
+    borderRadius: 999,
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 10, fontWeight: 700,
+    letterSpacing: '0.08em', textTransform: 'uppercase',
+  },
+  coverCardTitle: {
     fontFamily: '"Playfair Display", Georgia, serif',
-    fontSize: 20, color: '#1a2620',
-    lineHeight: 1, letterSpacing: '-0.015em',
-    fontVariantNumeric: 'tabular-nums',
-    flexShrink: 0,
-    minWidth: 56,
+    fontSize: 20, fontWeight: 500,
+    color: '#1a2620', lineHeight: 1.15,
+    letterSpacing: '-0.015em',
+    marginBottom: 6,
   },
-  coverAgendaInfo: {
-    flex: 1, minWidth: 0,
-  },
-  coverAgendaTitle: {
+  coverCardWhen: {
     fontFamily: 'Inter, system-ui, sans-serif',
-    fontSize: 15, fontWeight: 500,
-    color: '#1a2620', lineHeight: 1.3,
-    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+    fontSize: 13, color: '#7a6f5f',
+    lineHeight: 1.4,
   },
-  coverAgendaMeta: {
-    fontFamily: 'Inter, system-ui, sans-serif',
-    fontSize: 12, color: '#7a6f5f',
-    marginTop: 2,
-    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-  },
-  // "Take" pill — small, dark forest, sits at right of row. The single
-  // action on each cover-available row. Tap claims (or expresses
-  // interest, for cover-only coaches).
-  coverAgendaTakeBtn: {
-    flexShrink: 0,
-    padding: '7px 14px',
+  // Take button — full-width dark forest pill, sits below the meta line
+  coverCardTakeBtn: {
+    display: 'block',
+    width: '100%',
+    marginTop: 14,
+    padding: '12px 18px',
+    borderRadius: 999,
     background: '#1a2620',
     color: '#fffdf7',
     border: 'none',
-    borderRadius: 999,
     fontFamily: 'Inter, system-ui, sans-serif',
-    fontSize: 11, fontWeight: 700,
-    letterSpacing: '0.06em', textTransform: 'uppercase',
+    fontSize: 13, fontWeight: 700,
+    letterSpacing: '0.08em', textTransform: 'uppercase',
     cursor: 'pointer',
     appearance: 'none', WebkitAppearance: 'none',
   },
-  // "On it" state — once you've expressed interest, the button confirms
-  // your status. Sage tone so it reads as "good, you're in".
-  coverAgendaTakeBtnDone: {
-    flexShrink: 0,
-    display: 'inline-flex', alignItems: 'center', gap: 4,
-    padding: '7px 12px',
+  // Take button after expressing interest — sage confirmation state
+  coverCardTakeBtnDone: {
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+    width: '100%',
+    marginTop: 14,
+    padding: '12px 18px',
+    borderRadius: 999,
     background: 'rgba(122, 140, 92, 0.14)',
     color: '#5b6d3f',
     border: 'none',
-    borderRadius: 999,
     fontFamily: 'Inter, system-ui, sans-serif',
-    fontSize: 11, fontWeight: 700,
-    letterSpacing: '0.06em', textTransform: 'uppercase',
+    fontSize: 13, fontWeight: 700,
+    letterSpacing: '0.08em', textTransform: 'uppercase',
+    cursor: 'pointer',
+    appearance: 'none', WebkitAppearance: 'none',
+  },
+  // Manager "Manage" button — outline pill style, less assertive than Take
+  coverCardManageBtn: {
+    display: 'block',
+    width: '100%',
+    marginTop: 14,
+    padding: '12px 18px',
+    borderRadius: 999,
+    background: 'transparent',
+    border: '1px solid rgba(92, 74, 56, 0.18)',
+    color: '#5c4a38',
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 13, fontWeight: 600,
+    letterSpacing: '0.04em', textTransform: 'uppercase',
     cursor: 'pointer',
     appearance: 'none', WebkitAppearance: 'none',
   },
