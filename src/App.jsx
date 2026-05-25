@@ -99,6 +99,7 @@ const EMPTY_DATA = {
   expenses: [],
   flows: [],
   externalIncome: [],
+  wellbeingCheckins: [],
 };
 
 const CLASS_TYPES = {
@@ -466,7 +467,7 @@ export default function SalusStaff() {
     if (!session) return;
     if (!silent) setLoading(true);
     try {
-      const [profilesRes, classesRes, coverReqRes, coverCmRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes, emailIntRes, stockRes, storeCardsRes, broadcastsRes, broadcastReadsRes, incidentsRes, onboardingStepsRes, expensesRes, flowsRes, extIncomeRes] = await Promise.all([
+      const [profilesRes, classesRes, coverReqRes, coverCmRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes, emailIntRes, stockRes, storeCardsRes, broadcastsRes, broadcastReadsRes, incidentsRes, onboardingStepsRes, expensesRes, flowsRes, extIncomeRes, wellbeingRes] = await Promise.all([
         supabase.from('profiles').select('*'),
         supabase.from('classes').select('*'),
         supabase.from('cover_requests').select('*'),
@@ -499,6 +500,9 @@ export default function SalusStaff() {
         // External income — coach earnings from other studios. Wrapped
         // so pre-migration loads don't break the whole reload.
         supabase.from('external_income').select('*').eq('user_id', session.user?.id).order('earned_on', { ascending: false }).then(r => r, () => ({ data: [], error: null })),
+        // Wellbeing check-ins — last 90 days for the personal trend +
+        // manager aggregate. Graceful fallback pre-migration.
+        supabase.from('wellbeing_checkins').select('*').gte('checked_in_on', new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)).order('checked_in_on', { ascending: false }).then(r => r, () => ({ data: [], error: null })),
       ]);
 
       const errors = [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes]
@@ -553,6 +557,17 @@ export default function SalusStaff() {
           notes: r.notes,
           createdAt: r.created_at,
         })),
+        // Wellbeing check-ins — recent 90 days. Camel-case for consistent
+        // in-app shape. Used for personal trend line + manager aggregate.
+        wellbeingCheckins: (wellbeingRes?.data || []).map(r => ({
+          id: r.id,
+          userId: r.user_id,
+          checkedInOn: r.checked_in_on,
+          mood: r.mood,
+          note: r.note,
+          createdAt: r.created_at,
+          updatedAt: r.updated_at,
+        })),
       });
     } catch (e) {
       console.error('Failed to load data:', e);
@@ -598,6 +613,7 @@ export default function SalusStaff() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tours' }, silentReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'email_integrations' }, silentReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'external_income' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wellbeing_checkins' }, silentReload)
       .subscribe();
     return () => { supabase.removeChannel(channel); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -928,6 +944,38 @@ export default function SalusStaff() {
   const deleteExternalIncome = async (id) => {
     const { error } = await supabase.from('external_income').delete().eq('id', id);
     if (error) console.error('deleteExternalIncome', error);
+    else await reloadData(true);
+    return { error };
+  };
+
+  // ───────────────────────────────────────────────────────────────────
+  // WELLBEING CHECK-IN — soft daily "how are you?" log
+  // Upsert pattern: one row per (user, date). Subsequent taps overwrite.
+  // Private to coach via RLS; manager-aggregate read in a separate
+  // policy. Tone: editorial, no streaks, no judgement.
+  // ───────────────────────────────────────────────────────────────────
+  const logWellbeingCheckin = async ({ mood, note }) => {
+    if (!session?.user?.id) return { error: new Error('Not signed in') };
+    const today = new Date().toISOString().slice(0, 10);
+    const { error } = await supabase.from('wellbeing_checkins').upsert({
+      user_id: session.user.id,
+      checked_in_on: today,
+      mood,
+      note: note?.trim() || null,
+    }, { onConflict: 'user_id,checked_in_on' });
+    if (error) console.error('logWellbeingCheckin', error);
+    else await reloadData(true);
+    return { error };
+  };
+
+  const clearWellbeingCheckin = async () => {
+    if (!session?.user?.id) return { error: new Error('Not signed in') };
+    const today = new Date().toISOString().slice(0, 10);
+    const { error } = await supabase.from('wellbeing_checkins')
+      .delete()
+      .eq('user_id', session.user.id)
+      .eq('checked_in_on', today);
+    if (error) console.error('clearWellbeingCheckin', error);
     else await reloadData(true);
     return { error };
   };
@@ -1862,6 +1910,8 @@ export default function SalusStaff() {
             onCreateFeedback={() => setModal({ type: 'createFeedback' })}
             onOpenFeedback={(id) => setModal({ type: 'feedbackDetail', id })}
             onMarkBroadcastRead={markBroadcastRead}
+            onLogWellbeing={logWellbeingCheckin}
+            onClearWellbeing={clearWellbeingCheckin}
           />
         )}
 
@@ -9031,19 +9081,10 @@ function StaffInvoicesModal({ data, currentUser, onAddExternal, onUpdateExternal
     });
     // ── Totals ──
     rows.push([]);
-    rows.push(['', '', '', '', 'Salus House income',    (salusPence / 100).toFixed(2)]);
-    rows.push(['', '', '', '', 'Other studios income',  (externalPence / 100).toFixed(2)]);
-    rows.push(['', '', '', '', 'Total income',          (totalPence / 100).toFixed(2)]);
-    rows.push(['', '', '', '', 'Total expenses',        '-' + (spentPence / 100).toFixed(2)]);
-    rows.push(['', '', '', '', 'Profit (period)',       ((totalPence - spentPence) / 100).toFixed(2)]);
-    if (tyProfitPence > 0) {
-      rows.push([]);
-      rows.push(['', '', '', '', 'Tax estimate (annualised, 2026/27)', '']);
-      rows.push(['', '', '', '', 'Income tax',          (annualTax.incomeTaxPence / 100).toFixed(2)]);
-      rows.push(['', '', '', '', 'Class 4 NI',          (annualTax.class4NicPence / 100).toFixed(2)]);
-      rows.push(['', '', '', '', 'Estimated annual tax',(annualTax.totalPence / 100).toFixed(2)]);
-      rows.push(['', '', '', '', 'Set aside per month', (Math.round(annualTax.totalPence / 12) / 100).toFixed(2)]);
-    }
+    rows.push(['', '', '', '', 'Income (Salus House)',  (salusPence / 100).toFixed(2)]);
+    rows.push(['', '', '', '', 'Other studio',          (externalPence / 100).toFixed(2)]);
+    rows.push(['', '', '', '', 'Expenses',              '-' + (spentPence / 100).toFixed(2)]);
+    rows.push(['', '', '', '', 'Net',                   ((totalPence - spentPence) / 100).toFixed(2)]);
     const csv = rows.map(r => r.map(cell => {
       const s = String(cell ?? '');
       return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
@@ -9114,10 +9155,10 @@ function StaffInvoicesModal({ data, currentUser, onAddExternal, onUpdateExternal
             })}
           </div>
 
-          {/* Hero stats — three numbers a self-employed coach actually
-              needs at a glance: earned, spent, set aside for tax.
-              Set-aside is automatic, based on UK 2026/27 thresholds
-              applied to your annualised tax-year-to-date profit. */}
+          {/* Hero — three buckets, that's it.
+              Income = Salus House classes (auto from your schedule).
+              Other studio = what you've earned elsewhere (you log it).
+              Expense = what's gone out (you log it). */}
           <div style={{
             padding: '20px 22px', marginBottom: 18,
             background: '#1a2620',
@@ -9139,7 +9180,7 @@ function StaffInvoicesModal({ data, currentUser, onAddExternal, onUpdateExternal
                   textTransform: 'uppercase', color: 'rgba(255, 253, 247, 0.5)',
                   marginBottom: 4,
                 }}>
-                  Earned
+                  Income
                 </div>
                 <div style={{
                   fontFamily: '"Playfair Display", Georgia, serif',
@@ -9147,7 +9188,7 @@ function StaffInvoicesModal({ data, currentUser, onAddExternal, onUpdateExternal
                   letterSpacing: '-0.015em',
                   fontVariantNumeric: 'tabular-nums',
                 }}>
-                  {fmt(totalPence)}
+                  {fmt(salusPence)}
                 </div>
               </div>
               <div style={{ width: 1, background: 'rgba(255, 253, 247, 0.14)' }} />
@@ -9157,7 +9198,25 @@ function StaffInvoicesModal({ data, currentUser, onAddExternal, onUpdateExternal
                   textTransform: 'uppercase', color: 'rgba(255, 253, 247, 0.5)',
                   marginBottom: 4,
                 }}>
-                  Spent
+                  Other studio
+                </div>
+                <div style={{
+                  fontFamily: '"Playfair Display", Georgia, serif',
+                  fontSize: 26, fontWeight: 400, lineHeight: 1.05,
+                  letterSpacing: '-0.015em',
+                  fontVariantNumeric: 'tabular-nums',
+                }}>
+                  {fmt(externalPence)}
+                </div>
+              </div>
+              <div style={{ width: 1, background: 'rgba(255, 253, 247, 0.14)' }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontSize: 9, fontWeight: 600, letterSpacing: 1.5,
+                  textTransform: 'uppercase', color: 'rgba(255, 253, 247, 0.5)',
+                  marginBottom: 4,
+                }}>
+                  Expense
                 </div>
                 <div style={{
                   fontFamily: '"Playfair Display", Georgia, serif',
@@ -9166,60 +9225,6 @@ function StaffInvoicesModal({ data, currentUser, onAddExternal, onUpdateExternal
                   fontVariantNumeric: 'tabular-nums',
                 }}>
                   {fmt(spentPence)}
-                </div>
-              </div>
-              <div style={{ width: 1, background: 'rgba(255, 253, 247, 0.14)' }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{
-                  fontSize: 9, fontWeight: 600, letterSpacing: 1.5,
-                  textTransform: 'uppercase', color: 'rgba(255, 253, 247, 0.5)',
-                  marginBottom: 4,
-                }}>
-                  Set aside
-                </div>
-                <div style={{
-                  fontFamily: '"Playfair Display", Georgia, serif',
-                  fontSize: 26, fontWeight: 400, lineHeight: 1.05,
-                  letterSpacing: '-0.015em',
-                  fontVariantNumeric: 'tabular-nums',
-                  color: '#c6926a',
-                }}>
-                  {fmt(setAsidePence)}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Income breakdown — Salus + External, kept secondary */}
-          <div style={{
-            padding: '14px 18px', marginBottom: 18,
-            background: '#fffdf7', border: '1px solid #efe7d2',
-            borderRadius: 14,
-          }}>
-            <div style={{ fontSize: 10, fontWeight: 600, color: '#a59478', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 10 }}>
-              Earnings breakdown
-            </div>
-            <div style={{ display: 'flex', gap: 24 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 10, fontWeight: 600, color: '#a59478', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 3 }}>
-                  Salus House
-                </div>
-                <div style={{ fontFamily: '"Playfair Display", Georgia, serif', fontSize: 18, color: '#1a2620', fontVariantNumeric: 'tabular-nums' }}>
-                  {fmt(salusPence)}
-                </div>
-                <div style={{ fontSize: 11, color: '#a59478', marginTop: 2 }}>
-                  {myClasses.length} {myClasses.length === 1 ? 'class' : 'classes'}
-                </div>
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 10, fontWeight: 600, color: '#a59478', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 3 }}>
-                  Other studios
-                </div>
-                <div style={{ fontFamily: '"Playfair Display", Georgia, serif', fontSize: 18, color: '#1a2620', fontVariantNumeric: 'tabular-nums' }}>
-                  {fmt(externalPence)}
-                </div>
-                <div style={{ fontSize: 11, color: '#a59478', marginTop: 2 }}>
-                  {myExternal.length} {myExternal.length === 1 ? 'entry' : 'entries'}
                 </div>
               </div>
             </div>
@@ -9483,11 +9488,11 @@ function StaffInvoicesModal({ data, currentUser, onAddExternal, onUpdateExternal
             </div>
           )}
 
-          {/* ─── EXPENSES — pulled from data.expenses for the period ─── */}
+          {/* ─── EXPENSES — simple total + jump to capture flow ─── */}
           <div style={{ marginTop: 18, marginBottom: 10 }}>
             <SectionLabel>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                <span>Spending</span>
+                <span>Expenses</span>
                 <span style={{ fontSize: 11, color: '#a59478', fontStyle: 'normal', fontFamily: "'Inter', sans-serif", fontVariantNumeric: 'tabular-nums' }}>
                   {fmt(spentPence)}
                 </span>
@@ -9502,33 +9507,16 @@ function StaffInvoicesModal({ data, currentUser, onAddExternal, onUpdateExternal
               borderRadius: 12, color: '#7a8270', fontSize: 13, fontStyle: 'italic',
               fontFamily: '"Playfair Display", Georgia, serif',
             }}>
-              Snap receipts as you go. Studio hire, equipment, training, mileage — all deductible from your tax bill.
+              Snap receipts as you go — anything you spent to do your job.
             </div>
           ) : (
             <div style={{
               padding: '14px 16px', marginBottom: 12,
               background: '#fffdf7', border: '1px solid #efe7d2',
               borderRadius: 12,
+              fontSize: 13, color: '#5c4a38',
             }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {expenseCatList.slice(0, 6).map(([cat, pence]) => (
-                  <div key={cat} style={{
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    fontSize: 13,
-                  }}>
-                    <span style={{ color: '#5c4a38' }}>{EXPENSE_CATEGORIES[cat]?.label || cat}</span>
-                    <span style={{ color: '#1a2620', fontVariantNumeric: 'tabular-nums' }}>{fmt(pence)}</span>
-                  </div>
-                ))}
-                {expenseCatList.length > 6 && (
-                  <div style={{
-                    fontSize: 12, color: '#a59478', fontStyle: 'italic', marginTop: 4,
-                    fontFamily: '"Playfair Display", Georgia, serif',
-                  }}>
-                    +{expenseCatList.length - 6} more categories
-                  </div>
-                )}
-              </div>
+              {myExpenses.length} {myExpenses.length === 1 ? 'receipt' : 'receipts'} logged this period
             </div>
           )}
 
@@ -9548,82 +9536,8 @@ function StaffInvoicesModal({ data, currentUser, onAddExternal, onUpdateExternal
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
               }}
             >
-              <Plus size={15} strokeWidth={2} /> Snap a receipt
+              <Plus size={15} strokeWidth={2} /> Add expense
             </button>
-          )}
-
-          {/* ─── TAX ESTIMATE — 2026/27 UK rules, simple guide ───
-              This is the most useful "set aside" number for a coach.
-              We annualise the tax-year-to-date profit, run it through
-              the 2026/27 income tax bands + Class 4 NI, and show a
-              monthly "bank this much" figure. Includes the full
-              explanation so the user trusts the number. */}
-          {tyProfitPence > 0 && (
-            <div style={{
-              padding: '18px 20px', marginTop: 18, marginBottom: 14,
-              background: 'linear-gradient(180deg, #fbf5e8 0%, #f5edd4 100%)',
-              border: '1px solid #ebe3cf',
-              borderRadius: 14,
-            }}>
-              <div style={{
-                fontSize: 10, fontWeight: 600, color: '#5c4a38',
-                letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 10,
-              }}>
-                Tax estimate · 2026/27
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 7, fontSize: 13 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#7a6f5f' }}>Profit (tax year-to-date)</span>
-                  <span style={{ color: '#1a2620', fontVariantNumeric: 'tabular-nums' }}>{fmt(tyProfitPence)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#7a6f5f' }}>Annualised profit</span>
-                  <span style={{ color: '#1a2620', fontVariantNumeric: 'tabular-nums' }}>{fmt(annualisedProfit)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#7a6f5f' }}>Income tax (est.)</span>
-                  <span style={{ color: '#1a2620', fontVariantNumeric: 'tabular-nums' }}>{fmt(annualTax.incomeTaxPence)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#7a6f5f' }}>Class 4 NI (est.)</span>
-                  <span style={{ color: '#1a2620', fontVariantNumeric: 'tabular-nums' }}>{fmt(annualTax.class4NicPence)}</span>
-                </div>
-                <div style={{
-                  display: 'flex', justifyContent: 'space-between',
-                  paddingTop: 8, borderTop: '1px solid #d8cba8', marginTop: 4,
-                  fontWeight: 600,
-                }}>
-                  <span style={{ color: '#1a2620' }}>Estimated annual tax</span>
-                  <span style={{
-                    color: '#c6926a', fontVariantNumeric: 'tabular-nums',
-                    fontFamily: '"Playfair Display", Georgia, serif', fontSize: 16,
-                  }}>
-                    {fmt(annualTax.totalPence)}
-                  </span>
-                </div>
-                <div style={{
-                  display: 'flex', justifyContent: 'space-between',
-                  marginTop: 2,
-                }}>
-                  <span style={{ color: '#7a6f5f', fontSize: 12, fontStyle: 'italic' }}>
-                    ≈ Set aside per month
-                  </span>
-                  <span style={{
-                    color: '#c6926a', fontVariantNumeric: 'tabular-nums', fontWeight: 600,
-                  }}>
-                    {fmt(Math.round(annualTax.totalPence / 12))}
-                  </span>
-                </div>
-              </div>
-              <div style={{
-                marginTop: 14, paddingTop: 12, borderTop: '1px solid #d8cba8',
-                fontSize: 11, color: '#7a6f5f', lineHeight: 1.5, fontStyle: 'italic',
-              }}>
-                This is a guide, not advice. Assumes self-employment is your only income source.
-                Bands: personal allowance £12,570, basic 20% to £50,270, higher 40%.
-                Class 4 NI: 6% on profit £12,570–£50,270, 2% above.
-              </div>
-            </div>
           )}
 
           {myClasses.length > 0 && (
@@ -9634,7 +9548,7 @@ function StaffInvoicesModal({ data, currentUser, onAddExternal, onUpdateExternal
             }}>
               <strong>Note:</strong> Salus House rate is per the manager's setting (£{(rate / 100).toFixed(2)} per session).
               Final amounts may differ — check with the studio for adjustments, holiday pay, or special rates.
-              External income is what you enter yourself.
+              Other-studio income is what you enter yourself.
             </div>
           )}
         </ModalBody>
@@ -12259,7 +12173,7 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
   );
 }
 
-function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestCover, onHireStudio, onClaim, onExpressInterest, onViewAllCover, onViewChat, onCreateTask, onOpenTask, onOpenAllTasks, onOpenTour, onCreateMaintenance, onOpenMaintenance, onCreateFeedback, onOpenFeedback, onMarkBroadcastRead }) {
+function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestCover, onHireStudio, onClaim, onExpressInterest, onViewAllCover, onViewChat, onCreateTask, onOpenTask, onOpenAllTasks, onOpenTour, onCreateMaintenance, onOpenMaintenance, onCreateFeedback, onOpenFeedback, onMarkBroadcastRead, onLogWellbeing, onClearWellbeing }) {
   const now = new Date();
   const hour = now.getHours();
   const greeting = hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening';
@@ -12366,6 +12280,17 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
         currentUser={currentUser}
         isManager={isManager}
         onClassClick={onClassClick}
+      />
+
+      {/* Wellbeing check-in — soft daily "how are you?" prompt.
+          Sits between My Day and Spotlight so it lands warm and early
+          in the scroll without dominating. Hides itself once logged
+          (well, collapses to a small summary line). */}
+      <WellbeingCheckin
+        data={data}
+        currentUser={currentUser}
+        onLog={onLogWellbeing}
+        onClear={onClearWellbeing}
       />
 
       {/* ─── Spotlight CTA — cinematic image card promoting one thing ─── */}
@@ -12548,6 +12473,285 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
           onReload={onReload}
           onClose={() => setShowCustomize(false)}
         />
+      )}
+    </div>
+  );
+}
+
+// ─── Wellbeing check-in ──────────────────────────────────────────────────
+// Daily "how are you today?" tile. Salus = wellbeing in Latin, so this
+// is core to the brand voice. Editorial, soft, private. No streaks,
+// no badges, no nudging — just a quiet acknowledgement of how you're
+// doing today, which the coach can choose to follow up on with a note.
+//
+// 5-point scale: lit_up → good → steady → worn → heavy
+// One per coach per day. Subsequent taps overwrite.
+// Once logged, the tile collapses into a compact summary the user can
+// expand to update or add a note.
+function WellbeingCheckin({ data, currentUser, onLog, onClear }) {
+  const today = new Date().toISOString().slice(0, 10);
+  // Find today's check-in if any
+  const todays = (data.wellbeingCheckins || []).find(
+    c => c.userId === currentUser.id && c.checkedInOn === today
+  );
+
+  const [expanded, setExpanded] = useState(false);
+  const [noteText, setNoteText] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  // Editorial mood vocabulary — no emojis, no medical words. Order matters:
+  // lit_up at one end, heavy at the other, with steady as the gentle middle.
+  const moods = [
+    { key: 'lit_up',  label: 'Lit up',  color: '#7a8c5c' },
+    { key: 'good',    label: 'Good',    color: '#9aae7e' },
+    { key: 'steady',  label: 'Steady',  color: '#a59478' },
+    { key: 'worn',    label: 'Worn',    color: '#c6926a' },
+    { key: 'heavy',   label: 'Heavy',   color: '#5c4a38' },
+  ];
+
+  const submitMood = async (moodKey) => {
+    setSaving(true);
+    await onLog?.({ mood: moodKey, note: todays?.note });
+    setSaving(false);
+  };
+
+  const submitNote = async () => {
+    if (!todays) return;
+    setSaving(true);
+    await onLog?.({ mood: todays.mood, note: noteText });
+    setSaving(false);
+    setExpanded(false);
+  };
+
+  // ── Pre-checkin state — the prompt + 5 chips ──
+  if (!todays) {
+    return (
+      <div style={{
+        background: '#fffdf7',
+        border: '1px solid #efe7d2',
+        borderRadius: 18,
+        padding: '18px 20px 16px',
+        marginBottom: 18,
+        boxShadow: '0 4px 14px rgba(92, 74, 56, 0.05)',
+      }}>
+        <div style={{
+          fontFamily: '"Playfair Display", Georgia, serif',
+          fontSize: 18, color: '#1a2620',
+          letterSpacing: '-0.01em', lineHeight: 1.25,
+          marginBottom: 4,
+        }}>
+          How are you today?
+        </div>
+        <div style={{
+          fontSize: 12, color: '#a59478', fontStyle: 'italic',
+          fontFamily: '"Playfair Display", Georgia, serif',
+          marginBottom: 14,
+        }}>
+          Private to you. No streaks, no scores.
+        </div>
+        <div style={{
+          display: 'flex', gap: 6,
+          overflowX: 'auto', WebkitOverflowScrolling: 'touch',
+          scrollbarWidth: 'none', msOverflowStyle: 'none',
+          marginLeft: -2, marginRight: -2, paddingLeft: 2, paddingRight: 2, paddingBottom: 2,
+        }}>
+          {moods.map(m => (
+            <button
+              key={m.key}
+              onClick={() => submitMood(m.key)}
+              disabled={saving}
+              className="salus-btn"
+              style={{
+                flex: '1 1 0', minWidth: 70,
+                padding: '11px 8px',
+                background: 'transparent',
+                border: '1px solid rgba(92, 74, 56, 0.18)',
+                borderRadius: 999,
+                fontSize: 12, fontWeight: 500, color: '#1a2620',
+                fontFamily: 'inherit', cursor: saving ? 'wait' : 'pointer',
+                whiteSpace: 'nowrap',
+                transition: 'background 0.15s, border-color 0.15s',
+              }}
+              onMouseDown={(e) => {
+                e.currentTarget.style.background = m.color;
+                e.currentTarget.style.color = '#fffdf7';
+                e.currentTarget.style.borderColor = m.color;
+              }}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Post-checkin state — compact summary + optional expand to add a note ──
+  const moodMeta = moods.find(m => m.key === todays.mood) || moods[2];
+  const checkedAt = todays.updatedAt || todays.createdAt;
+  const timeLabel = checkedAt
+    ? new Date(checkedAt).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit' })
+    : '';
+
+  return (
+    <div style={{
+      background: '#fffdf7',
+      border: '1px solid #efe7d2',
+      borderRadius: 18,
+      padding: '14px 18px',
+      marginBottom: 18,
+      boxShadow: '0 4px 14px rgba(92, 74, 56, 0.05)',
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: 12,
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+          }}>
+            <div style={{
+              width: 8, height: 8, borderRadius: '50%',
+              background: moodMeta.color,
+              flexShrink: 0,
+            }} />
+            <div style={{
+              fontFamily: '"Playfair Display", Georgia, serif',
+              fontSize: 15, color: '#1a2620',
+            }}>
+              Today: <span style={{ fontStyle: 'italic' }}>{moodMeta.label.toLowerCase()}</span>
+            </div>
+          </div>
+          {todays.note && !expanded && (
+            <div style={{
+              fontSize: 12, color: '#7a6f5f', marginTop: 6, marginLeft: 18,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              fontStyle: 'italic',
+              fontFamily: '"Playfair Display", Georgia, serif',
+            }}>
+              "{todays.note}"
+            </div>
+          )}
+        </div>
+        <button
+          onClick={() => {
+            setNoteText(todays.note || '');
+            setExpanded(v => !v);
+          }}
+          className="salus-btn"
+          style={{
+            background: 'transparent', border: 'none',
+            color: '#a59478', fontSize: 11,
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            cursor: 'pointer', padding: '6px 4px',
+            fontFamily: 'inherit', fontWeight: 600,
+          }}
+        >
+          {expanded ? 'Close' : 'Update'}
+        </button>
+      </div>
+
+      {expanded && (
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid #efe7d2' }}>
+          {/* Re-pick mood */}
+          <div style={{
+            fontSize: 10, fontWeight: 600, color: '#a59478',
+            letterSpacing: '0.12em', textTransform: 'uppercase',
+            marginBottom: 8,
+          }}>
+            How you're feeling
+          </div>
+          <div style={{
+            display: 'flex', gap: 6, marginBottom: 14,
+            overflowX: 'auto', WebkitOverflowScrolling: 'touch',
+            scrollbarWidth: 'none', msOverflowStyle: 'none',
+          }}>
+            {moods.map(m => {
+              const active = todays.mood === m.key;
+              return (
+                <button
+                  key={m.key}
+                  onClick={() => submitMood(m.key)}
+                  disabled={saving}
+                  className="salus-btn"
+                  style={{
+                    flex: '1 1 0', minWidth: 70,
+                    padding: '9px 8px',
+                    background: active ? m.color : 'transparent',
+                    border: `1px solid ${active ? m.color : 'rgba(92, 74, 56, 0.18)'}`,
+                    borderRadius: 999,
+                    fontSize: 12, fontWeight: 500,
+                    color: active ? '#fffdf7' : '#1a2620',
+                    fontFamily: 'inherit', cursor: saving ? 'wait' : 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {m.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Optional note */}
+          <div style={{
+            fontSize: 10, fontWeight: 600, color: '#a59478',
+            letterSpacing: '0.12em', textTransform: 'uppercase',
+            marginBottom: 6,
+          }}>
+            A line about it (optional)
+          </div>
+          <textarea
+            value={noteText}
+            onChange={(e) => setNoteText(e.target.value)}
+            placeholder="e.g. back's tight today, need a quiet one"
+            rows={2}
+            maxLength={500}
+            style={{
+              width: '100%',
+              padding: '10px 12px',
+              background: '#faf6ec',
+              border: '1px solid #ebe3cf',
+              borderRadius: 10,
+              fontSize: 13, color: '#1a2620',
+              fontFamily: 'inherit', boxSizing: 'border-box',
+              outline: 'none', resize: 'vertical',
+              fontStyle: 'italic',
+            }}
+          />
+          <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+            <button
+              onClick={async () => {
+                await onClear?.();
+                setExpanded(false);
+              }}
+              className="salus-btn"
+              style={{
+                flex: 1, padding: '10px 16px',
+                background: 'transparent', border: '1px solid rgba(92, 74, 56, 0.22)',
+                borderRadius: 999, fontSize: 12, fontWeight: 500, color: '#7a6f5f',
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}
+            >
+              Clear today
+            </button>
+            <button
+              onClick={submitNote}
+              disabled={saving}
+              className="salus-btn"
+              style={{
+                flex: 1, padding: '10px 16px',
+                background: '#1a2620', color: '#fffdf7',
+                border: 'none', borderRadius: 999,
+                fontSize: 12, fontWeight: 500,
+                cursor: saving ? 'wait' : 'pointer',
+                opacity: saving ? 0.5 : 1,
+                fontFamily: 'inherit',
+              }}
+            >
+              {saving ? 'Saving…' : 'Save note'}
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -16842,65 +17046,34 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
           );
         })()}
 
-        {/* ── MONEY HERO TILE ── earned / spent / set aside, this month ──
-            The single-glance financial summary a self-employed coach
-            actually needs: "what came in, what went out, what to keep
-            back for tax". Tappable to open the full Money dashboard.
-
-            Set-aside is computed from tax-year-to-date profit to give a
-            realistic forward-looking number, not just a slice of one
-            month. We surface the *monthly* portion so it scales with
-            actual earnings throughout the year. */}
+        {/* ── MONEY HERO TILE ── income / other studio / expense, this month ──
+            Three numbers, three buckets. That's it.
+            Income = Salus House classes (automated).
+            Other studio = what you've earned elsewhere (you log it).
+            Expense = what's gone out (you log it). */}
         {(() => {
           const now = new Date();
           const monthStartIso = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
           const monthEndIso = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
-          // UK tax year 6 April → 5 April for the set-aside projection
-          const aprilSixth = new Date(now.getFullYear(), 3, 6);
-          const tyStart = now < aprilSixth ? new Date(now.getFullYear() - 1, 3, 6) : aprilSixth;
-          const tyStartIso = tyStart.toISOString().slice(0, 10);
-          const todayIso = now.toISOString().slice(0, 10);
           const rate = currentUser.sessionRatePence || 3000;
 
-          // ── This month earned (Salus + external) ──
+          // Salus income (auto from classes)
           const monthClasses = (data.classes || []).filter(c =>
             c.coachId === currentUser.id && c.date >= monthStartIso && c.date <= monthEndIso
           );
+          const incomePence = rate * monthClasses.length;
+
+          // Other studio income (manual)
           const monthExternal = (data.externalIncome || []).filter(e =>
             e.earnedOn >= monthStartIso && e.earnedOn <= monthEndIso
           );
-          const monthEarnedPence = (rate * monthClasses.length)
-            + monthExternal.reduce((acc, e) => acc + (e.amountPence || 0), 0);
+          const otherPence = monthExternal.reduce((acc, e) => acc + (e.amountPence || 0), 0);
 
-          // ── This month spent ──
+          // Expenses
           const monthExpenses = (data.expenses || []).filter(x =>
             (x.spentOn || '') >= monthStartIso && (x.spentOn || '') <= monthEndIso
           );
-          const monthSpentPence = monthExpenses.reduce((acc, x) => acc + (x.amountPence || 0), 0);
-
-          // ── Tax-year-to-date profit → tax estimate → monthly portion ──
-          const tyClasses = (data.classes || []).filter(c =>
-            c.coachId === currentUser.id && c.date >= tyStartIso && c.date <= todayIso
-          );
-          const tyExternal = (data.externalIncome || []).filter(e =>
-            e.earnedOn >= tyStartIso && e.earnedOn <= todayIso
-          );
-          const tyExpenses = (data.expenses || []).filter(x =>
-            (x.spentOn || '') >= tyStartIso && (x.spentOn || '') <= todayIso
-          );
-          const tyIncomePence = (rate * tyClasses.length)
-            + tyExternal.reduce((acc, e) => acc + (e.amountPence || 0), 0);
-          const tySpentPence = tyExpenses.reduce((acc, x) => acc + (x.amountPence || 0), 0);
-          const tyProfitPence = Math.max(0, tyIncomePence - tySpentPence);
-
-          // Annualise profit to estimate full-year tax (more realistic
-          // than just multiplying YTD by tax rate)
-          const monthsElapsed = Math.max(1, Math.ceil(
-            ((now - tyStart) / (1000 * 60 * 60 * 24 * 30.44))
-          ));
-          const annualisedProfit = (tyProfitPence / monthsElapsed) * 12;
-          const annualTax = calcUkTaxEstimate(annualisedProfit);
-          const monthlySetAsidePence = Math.round(annualTax.totalPence / 12);
+          const expensePence = monthExpenses.reduce((acc, x) => acc + (x.amountPence || 0), 0);
 
           const fmt0 = (p) => `£${(p / 100).toLocaleString('en-GB', { maximumFractionDigits: 0 })}`;
           const monthLabel = now.toLocaleDateString('en-GB', { month: 'long' }).toUpperCase();
@@ -16932,7 +17105,7 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
                 </div>
                 <ChevronRight size={18} color="rgba(255, 253, 247, 0.5)" />
               </div>
-              {/* Three-stat row */}
+              {/* Three-bucket row */}
               <div style={{ display: 'flex', gap: 14 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{
@@ -16940,7 +17113,7 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
                     textTransform: 'uppercase', color: 'rgba(255, 253, 247, 0.5)',
                     marginBottom: 4,
                   }}>
-                    Earned
+                    Income
                   </div>
                   <div style={{
                     fontFamily: '"Playfair Display", Georgia, serif',
@@ -16948,7 +17121,7 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
                     letterSpacing: '-0.015em',
                     fontVariantNumeric: 'tabular-nums',
                   }}>
-                    {fmt0(monthEarnedPence)}
+                    {fmt0(incomePence)}
                   </div>
                 </div>
                 <div style={{ width: 1, background: 'rgba(255, 253, 247, 0.14)' }} />
@@ -16958,7 +17131,7 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
                     textTransform: 'uppercase', color: 'rgba(255, 253, 247, 0.5)',
                     marginBottom: 4,
                   }}>
-                    Spent
+                    Other studio
                   </div>
                   <div style={{
                     fontFamily: '"Playfair Display", Georgia, serif',
@@ -16966,7 +17139,7 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
                     letterSpacing: '-0.015em',
                     fontVariantNumeric: 'tabular-nums',
                   }}>
-                    {fmt0(monthSpentPence)}
+                    {fmt0(otherPence)}
                   </div>
                 </div>
                 <div style={{ width: 1, background: 'rgba(255, 253, 247, 0.14)' }} />
@@ -16976,16 +17149,15 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
                     textTransform: 'uppercase', color: 'rgba(255, 253, 247, 0.5)',
                     marginBottom: 4,
                   }}>
-                    Set aside
+                    Expense
                   </div>
                   <div style={{
                     fontFamily: '"Playfair Display", Georgia, serif',
                     fontSize: 24, fontWeight: 400, lineHeight: 1.05,
                     letterSpacing: '-0.015em',
                     fontVariantNumeric: 'tabular-nums',
-                    color: '#c6926a',
                   }}>
-                    {fmt0(monthlySetAsidePence)}
+                    {fmt0(expensePence)}
                   </div>
                 </div>
               </div>
