@@ -2301,6 +2301,7 @@ export default function SalusStaff() {
           onAddExternal={addExternalIncome}
           onUpdateExternal={updateExternalIncome}
           onDeleteExternal={deleteExternalIncome}
+          onJumpToExpenses={() => setModal({ type: 'expenses' })}
           onClose={() => setModal(null)}
         />
       )}
@@ -7822,21 +7823,27 @@ function OnboardingScreen({ currentUser, onComplete }) {
 // ════════════════════════════════════════════════════════════════════════
 
 const EXPENSE_CATEGORIES = {
-  stock_supplies:    { label: 'Stock & supplies' },
-  equipment_repairs: { label: 'Equipment & repairs' },
-  software:          { label: 'Software subscriptions' },
-  marketing:         { label: 'Marketing' },
-  professional_fees: { label: 'Professional fees' },
-  training_cpd:      { label: 'Training & CPD' },
-  travel:            { label: 'Travel & mileage' },
-  phone_internet:    { label: 'Phone & internet' },
-  insurance:         { label: 'Insurance' },
-  rent_rates:        { label: 'Rent & rates' },
-  utilities:         { label: 'Utilities' },
-  bank_fees:         { label: 'Bank fees' },
-  food_drink:        { label: 'Food & drink' },
-  cleaning:          { label: 'Cleaning' },
-  other:             { label: 'Other' },
+  // ─── Fitness-coach specific (most common day-to-day) ───
+  studio_hire:       { label: 'Studio / room hire',     hint: 'Hire fees you pay to teach' },
+  equipment_repairs: { label: 'Equipment & supplies',   hint: 'Mats, weights, bands, music gear' },
+  travel:            { label: 'Travel & mileage',       hint: '55p/mile in own car for 2026/27' },
+  training_cpd:      { label: 'Training & CPD',         hint: 'Courses, workshops — NOT initial qualification' },
+  insurance:         { label: 'Insurance',              hint: 'Public liability, equipment, indemnity' },
+  memberships:       { label: 'Professional memberships', hint: 'REPS, CIMSPA, governing bodies' },
+  music_sub:         { label: 'Music subscriptions',    hint: 'Spotify, Apple Music for class music' },
+  branded_uniform:   { label: 'Branded uniform',        hint: 'Branded with logo — not regular sportswear' },
+  // ─── General self-employed ───
+  marketing:         { label: 'Marketing',              hint: 'Website, online ads, business cards' },
+  professional_fees: { label: 'Professional fees',      hint: 'Accountant, bookkeeper' },
+  phone_internet:    { label: 'Phone & internet',       hint: 'Business proportion only' },
+  software:          { label: 'Software subscriptions', hint: 'Bookings, scheduling, accounting apps' },
+  bank_fees:         { label: 'Bank fees',              hint: 'Business account charges' },
+  stock_supplies:    { label: 'Stock & supplies',       hint: 'Other consumables' },
+  rent_rates:        { label: 'Rent & rates',           hint: 'Dedicated business premises' },
+  utilities:         { label: 'Utilities',              hint: 'Business premises only' },
+  food_drink:        { label: 'Food & drink',           hint: 'Strictly business meals only' },
+  cleaning:          { label: 'Cleaning',               hint: 'Business premises cleaning' },
+  other:             { label: 'Other',                  hint: 'Add a note for HMRC clarity' },
 };
 
 const PAYMENT_METHODS = {
@@ -7845,6 +7852,86 @@ const PAYMENT_METHODS = {
   bank_transfer:  'Bank transfer',
   other:          'Other',
 };
+
+// ─── UK TAX RULES — 2026/27 tax year ───────────────────────────────────
+// Sourced from HMRC + GOV.UK as of May 2026. Centralised here so we
+// only update one place when thresholds change. Re-check at every
+// new tax year (rates announced at Autumn Budget).
+//
+// IMPORTANT: the Approved Mileage Allowance Payment (AMAP) for cars/vans
+// was lifted from 45p → 55p per mile on 21 May 2026, backdated to
+// 6 April 2026. First increase since 2011.
+const UK_TAX_2026_27 = {
+  personalAllowance:   1257000, // £12,570
+  basicRateUpper:      5027000, // £50,270
+  higherRateUpper:    12514000, // £125,140
+  basicRate:           0.20,
+  higherRate:          0.40,
+  additionalRate:      0.45,
+  // Class 4 National Insurance for self-employed
+  class4LowerThreshold: 1257000, // £12,570
+  class4UpperThreshold: 5027000, // £50,270
+  class4MainRate:       0.06,    // 6% on profits within main band
+  class4UpperRate:      0.02,    // 2% above upper threshold
+  // Trading allowance — earn up to this from self-employment with no return
+  tradingAllowance:    100000,  // £1,000
+};
+
+// Approved Mileage Allowance Payment — pence per mile, cars/vans
+const MILEAGE_RATE_FIRST_10K_PENCE = 55; // 6 April 2026 onwards
+const MILEAGE_RATE_AFTER_10K_PENCE = 25;
+
+// Calculate estimated UK self-employed tax + Class 4 NI for a given profit.
+// Returns pence figures. Assumes coach has no other income source
+// (no employment etc.) — this is a *guide*, not advice.
+//
+// profitPence: total income minus allowable expenses, in pence.
+// Returns: { incomeTaxPence, class4NicPence, totalPence, effectiveRate }
+function calcUkTaxEstimate(profitPence) {
+  const T = UK_TAX_2026_27;
+  if (!profitPence || profitPence <= 0) {
+    return { incomeTaxPence: 0, class4NicPence: 0, totalPence: 0, effectiveRate: 0 };
+  }
+
+  // ── Income tax (progressive bands) ──
+  let incomeTax = 0;
+  const taxablePersonal = Math.max(0, profitPence - T.personalAllowance);
+  if (taxablePersonal > 0) {
+    const basicBandSize  = T.basicRateUpper - T.personalAllowance;
+    const higherBandSize = T.higherRateUpper - T.basicRateUpper;
+
+    const inBasic    = Math.min(taxablePersonal, basicBandSize);
+    incomeTax += inBasic * T.basicRate;
+
+    if (taxablePersonal > basicBandSize) {
+      const inHigher = Math.min(taxablePersonal - basicBandSize, higherBandSize);
+      incomeTax += inHigher * T.higherRate;
+    }
+    if (taxablePersonal > basicBandSize + higherBandSize) {
+      const inAdditional = taxablePersonal - basicBandSize - higherBandSize;
+      incomeTax += inAdditional * T.additionalRate;
+    }
+  }
+
+  // ── Class 4 NI (self-employed) ──
+  let class4 = 0;
+  if (profitPence > T.class4LowerThreshold) {
+    const inMain = Math.min(profitPence, T.class4UpperThreshold) - T.class4LowerThreshold;
+    class4 += inMain * T.class4MainRate;
+    if (profitPence > T.class4UpperThreshold) {
+      class4 += (profitPence - T.class4UpperThreshold) * T.class4UpperRate;
+    }
+  }
+
+  const totalPence = Math.round(incomeTax + class4);
+  const effectiveRate = profitPence > 0 ? totalPence / profitPence : 0;
+  return {
+    incomeTaxPence: Math.round(incomeTax),
+    class4NicPence: Math.round(class4),
+    totalPence,
+    effectiveRate,
+  };
+}
 
 const formatGbp = (pence) => {
   if (pence == null) return '—';
@@ -8761,7 +8848,7 @@ function AdminSectionModal({ section, data, currentUser, isManager, emailIntegra
   );
 }
 
-function StaffInvoicesModal({ data, currentUser, onAddExternal, onUpdateExternal, onDeleteExternal, onClose }) {
+function StaffInvoicesModal({ data, currentUser, onAddExternal, onUpdateExternal, onDeleteExternal, onJumpToExpenses, onClose }) {
   const [period, setPeriod] = useState('this_month');
   // External-income add form state — appears as an inline sheet when
   // the coach taps "Add other income".
@@ -8812,6 +8899,63 @@ function StaffInvoicesModal({ data, currentUser, onAddExternal, onUpdateExternal
 
   const totalPence = salusPence + externalPence;
 
+  // ── Expenses logged in the same period ──
+  const myExpenses = (data.expenses || [])
+    .filter(e => (e.spentOn || '') >= range.start && (e.spentOn || '') <= range.end)
+    .sort((a, b) => (b.spentOn || '').localeCompare(a.spentOn || ''));
+  const spentPence = myExpenses.reduce((acc, e) => acc + (e.amountPence || 0), 0);
+
+  // Group expenses by category for the breakdown
+  const expensesByCat = {};
+  myExpenses.forEach(e => {
+    const k = e.category || 'other';
+    expensesByCat[k] = (expensesByCat[k] || 0) + (e.amountPence || 0);
+  });
+  const expenseCatList = Object.entries(expensesByCat)
+    .sort((a, b) => b[1] - a[1]);
+
+  // ── Tax-year-to-date profit (used for the tax projection, no matter what period the user is viewing) ──
+  // This keeps "set aside" meaningful even when the user is viewing
+  // "This month" — the figure they need to bank is annualised.
+  const tyStartTax = (() => {
+    const aprilSixth = new Date(now.getFullYear(), 3, 6);
+    return now < aprilSixth ? new Date(now.getFullYear() - 1, 3, 6) : aprilSixth;
+  })();
+  const tyStartIsoTax = toIso(tyStartTax);
+  const todayIsoTax = toIso(now);
+
+  const tyClasses = (data.classes || []).filter(c =>
+    c.coachId === currentUser.id && c.date >= tyStartIsoTax && c.date <= todayIsoTax
+  );
+  const tyExternal = (data.externalIncome || []).filter(e =>
+    e.earnedOn >= tyStartIsoTax && e.earnedOn <= todayIsoTax
+  );
+  const tyExpenses = (data.expenses || []).filter(x =>
+    (x.spentOn || '') >= tyStartIsoTax && (x.spentOn || '') <= todayIsoTax
+  );
+  const tyIncomePence = (rate * tyClasses.length)
+    + tyExternal.reduce((acc, e) => acc + (e.amountPence || 0), 0);
+  const tySpentPence = tyExpenses.reduce((acc, x) => acc + (x.amountPence || 0), 0);
+  const tyProfitPence = Math.max(0, tyIncomePence - tySpentPence);
+
+  // Annualise tax-year-to-date profit to estimate full-year tax
+  const monthsElapsed = Math.max(1, Math.ceil(
+    ((now - tyStartTax) / (1000 * 60 * 60 * 24 * 30.44))
+  ));
+  const annualisedProfit = (tyProfitPence / monthsElapsed) * 12;
+  const annualTax = calcUkTaxEstimate(annualisedProfit);
+
+  // For the "Set aside" figure shown in the hero we use the period view
+  const periodProfit = Math.max(0, totalPence - spentPence);
+  const setAsidePence = (() => {
+    if (period === 'this_month' || period === 'last_month') {
+      // Show monthly portion of the projected annual tax
+      return Math.round(annualTax.totalPence / 12);
+    }
+    // Tax year / all time — use actual tax estimate on the period's profit
+    return calcUkTaxEstimate(periodProfit).totalPence;
+  })();
+
   // Group Salus classes by week for the list
   const byWeek = {};
   myClasses.forEach(c => {
@@ -8847,35 +8991,59 @@ function StaffInvoicesModal({ data, currentUser, onAddExternal, onUpdateExternal
   };
 
   const exportCsv = () => {
-    const rows = [['Date', 'Time', 'Source', 'Detail', 'Class count', 'Amount (£)']];
-    // Salus classes
+    const rows = [['Type', 'Date', 'Source / Category', 'Detail', 'Count', 'Amount (£)']];
+    // ── Income: Salus classes ──
     myClasses.forEach(c => {
       const studioLabel = c.studio === 'reformer' ? 'Reformer studio'
         : c.studio === 'hybrid' ? 'Hybrid studio'
         : (c.studio || '');
       rows.push([
+        'Income',
         c.date,
-        c.time || '',
         'Salus House',
-        `${c.type}${studioLabel ? ` — ${studioLabel}` : ''}`,
+        `${c.type}${studioLabel ? ` — ${studioLabel}` : ''}${c.time ? ` @ ${c.time}` : ''}`,
         '1',
         (rate / 100).toFixed(2),
       ]);
     });
-    // External income rows
+    // ── Income: external ──
     myExternal.forEach(e => {
       rows.push([
+        'Income',
         e.earnedOn,
-        '',
         e.studioName,
         e.notes || '',
         e.classCount ?? '',
         ((e.amountPence || 0) / 100).toFixed(2),
       ]);
     });
-    rows.push(['', '', '', '', 'Salus total',    (salusPence / 100).toFixed(2)]);
-    rows.push(['', '', '', '', 'External total', (externalPence / 100).toFixed(2)]);
-    rows.push(['', '', '', '', 'Combined total', (totalPence / 100).toFixed(2)]);
+    // ── Expenses ──
+    myExpenses.forEach(x => {
+      const catLabel = EXPENSE_CATEGORIES[x.category]?.label || x.category || 'Other';
+      rows.push([
+        'Expense',
+        x.spentOn || '',
+        catLabel,
+        x.description || x.merchant || '',
+        '',
+        '-' + ((x.amountPence || 0) / 100).toFixed(2),
+      ]);
+    });
+    // ── Totals ──
+    rows.push([]);
+    rows.push(['', '', '', '', 'Salus House income',    (salusPence / 100).toFixed(2)]);
+    rows.push(['', '', '', '', 'Other studios income',  (externalPence / 100).toFixed(2)]);
+    rows.push(['', '', '', '', 'Total income',          (totalPence / 100).toFixed(2)]);
+    rows.push(['', '', '', '', 'Total expenses',        '-' + (spentPence / 100).toFixed(2)]);
+    rows.push(['', '', '', '', 'Profit (period)',       ((totalPence - spentPence) / 100).toFixed(2)]);
+    if (tyProfitPence > 0) {
+      rows.push([]);
+      rows.push(['', '', '', '', 'Tax estimate (annualised, 2026/27)', '']);
+      rows.push(['', '', '', '', 'Income tax',          (annualTax.incomeTaxPence / 100).toFixed(2)]);
+      rows.push(['', '', '', '', 'Class 4 NI',          (annualTax.class4NicPence / 100).toFixed(2)]);
+      rows.push(['', '', '', '', 'Estimated annual tax',(annualTax.totalPence / 100).toFixed(2)]);
+      rows.push(['', '', '', '', 'Set aside per month', (Math.round(annualTax.totalPence / 12) / 100).toFixed(2)]);
+    }
     const csv = rows.map(r => r.map(cell => {
       const s = String(cell ?? '');
       return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
@@ -8886,14 +9054,14 @@ function StaffInvoicesModal({ data, currentUser, onAddExternal, onUpdateExternal
     a.href = url;
     const todayIso = new Date().toISOString().slice(0, 10);
     const name = (currentUser.name || 'earnings').toLowerCase().replace(/[^a-z0-9]/g, '-');
-    a.download = `${name}-earnings-${period}-${todayIso}.csv`;
+    a.download = `${name}-money-${period}-${todayIso}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
 
-  const nothingInPeriod = myClasses.length === 0 && myExternal.length === 0;
+  const nothingInPeriod = myClasses.length === 0 && myExternal.length === 0 && myExpenses.length === 0;
 
   return createPortal(
     <>
@@ -8908,8 +9076,8 @@ function StaffInvoicesModal({ data, currentUser, onAddExternal, onUpdateExternal
       }}>
         <ModalHeader
           eyebrow="Personal"
-          title="Earnings"
-          subtitle="Classes you've taught here, plus what you've earned elsewhere."
+          title="Money"
+          subtitle="Earned, spent, set aside. All in one place."
           onClose={onClose}
         />
         <ModalBody>
@@ -8946,46 +9114,108 @@ function StaffInvoicesModal({ data, currentUser, onAddExternal, onUpdateExternal
             })}
           </div>
 
-          {/* Hero stats — combined earnings, with Salus + External split underneath */}
+          {/* Hero stats — three numbers a self-employed coach actually
+              needs at a glance: earned, spent, set aside for tax.
+              Set-aside is automatic, based on UK 2026/27 thresholds
+              applied to your annualised tax-year-to-date profit. */}
           <div style={{
-            padding: '20px 22px', marginBottom: 22,
+            padding: '20px 22px', marginBottom: 18,
+            background: '#1a2620',
+            borderRadius: 16,
+            color: '#fffdf7',
+            boxShadow: '0 10px 28px rgba(26, 38, 32, 0.18)',
+          }}>
+            <div style={{
+              fontSize: 10, fontWeight: 600, letterSpacing: 2.5,
+              textTransform: 'uppercase', color: 'rgba(255, 253, 247, 0.55)',
+              marginBottom: 14,
+            }}>
+              {range.label}
+            </div>
+            <div style={{ display: 'flex', gap: 14 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontSize: 9, fontWeight: 600, letterSpacing: 1.5,
+                  textTransform: 'uppercase', color: 'rgba(255, 253, 247, 0.5)',
+                  marginBottom: 4,
+                }}>
+                  Earned
+                </div>
+                <div style={{
+                  fontFamily: '"Playfair Display", Georgia, serif',
+                  fontSize: 26, fontWeight: 400, lineHeight: 1.05,
+                  letterSpacing: '-0.015em',
+                  fontVariantNumeric: 'tabular-nums',
+                }}>
+                  {fmt(totalPence)}
+                </div>
+              </div>
+              <div style={{ width: 1, background: 'rgba(255, 253, 247, 0.14)' }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontSize: 9, fontWeight: 600, letterSpacing: 1.5,
+                  textTransform: 'uppercase', color: 'rgba(255, 253, 247, 0.5)',
+                  marginBottom: 4,
+                }}>
+                  Spent
+                </div>
+                <div style={{
+                  fontFamily: '"Playfair Display", Georgia, serif',
+                  fontSize: 26, fontWeight: 400, lineHeight: 1.05,
+                  letterSpacing: '-0.015em',
+                  fontVariantNumeric: 'tabular-nums',
+                }}>
+                  {fmt(spentPence)}
+                </div>
+              </div>
+              <div style={{ width: 1, background: 'rgba(255, 253, 247, 0.14)' }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontSize: 9, fontWeight: 600, letterSpacing: 1.5,
+                  textTransform: 'uppercase', color: 'rgba(255, 253, 247, 0.5)',
+                  marginBottom: 4,
+                }}>
+                  Set aside
+                </div>
+                <div style={{
+                  fontFamily: '"Playfair Display", Georgia, serif',
+                  fontSize: 26, fontWeight: 400, lineHeight: 1.05,
+                  letterSpacing: '-0.015em',
+                  fontVariantNumeric: 'tabular-nums',
+                  color: '#c6926a',
+                }}>
+                  {fmt(setAsidePence)}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Income breakdown — Salus + External, kept secondary */}
+          <div style={{
+            padding: '14px 18px', marginBottom: 18,
             background: '#fffdf7', border: '1px solid #efe7d2',
             borderRadius: 14,
           }}>
-            <div style={{ fontSize: 10, fontWeight: 500, color: '#a59478', letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 8 }}>
-              {range.label}
+            <div style={{ fontSize: 10, fontWeight: 600, color: '#a59478', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 10 }}>
+              Earnings breakdown
             </div>
-            <div style={{
-              fontFamily: '"Playfair Display", Georgia, serif',
-              fontSize: 36, fontWeight: 400, color: '#1a2620',
-              letterSpacing: '-0.015em', lineHeight: 1.05,
-            }}>
-              {fmt(totalPence)}
-            </div>
-            <div style={{ fontSize: 13, color: '#7a8270', marginTop: 8, fontStyle: 'italic', fontFamily: '"Playfair Display", Georgia, serif' }}>
-              Combined earnings, all sources
-            </div>
-            {/* Split */}
-            <div style={{
-              display: 'flex', gap: 24, marginTop: 16,
-              paddingTop: 14, borderTop: '1px solid #efe7d2',
-            }}>
+            <div style={{ display: 'flex', gap: 24 }}>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 10, fontWeight: 600, color: '#a59478', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 4 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: '#a59478', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 3 }}>
                   Salus House
                 </div>
-                <div style={{ fontFamily: '"Playfair Display", Georgia, serif', fontSize: 20, color: '#1a2620', fontVariantNumeric: 'tabular-nums' }}>
+                <div style={{ fontFamily: '"Playfair Display", Georgia, serif', fontSize: 18, color: '#1a2620', fontVariantNumeric: 'tabular-nums' }}>
                   {fmt(salusPence)}
                 </div>
                 <div style={{ fontSize: 11, color: '#a59478', marginTop: 2 }}>
-                  {myClasses.length} {myClasses.length === 1 ? 'class' : 'classes'} · {fmt(rate)}/session
+                  {myClasses.length} {myClasses.length === 1 ? 'class' : 'classes'}
                 </div>
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 10, fontWeight: 600, color: '#a59478', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 4 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: '#a59478', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 3 }}>
                   Other studios
                 </div>
-                <div style={{ fontFamily: '"Playfair Display", Georgia, serif', fontSize: 20, color: '#1a2620', fontVariantNumeric: 'tabular-nums' }}>
+                <div style={{ fontFamily: '"Playfair Display", Georgia, serif', fontSize: 18, color: '#1a2620', fontVariantNumeric: 'tabular-nums' }}>
                   {fmt(externalPence)}
                 </div>
                 <div style={{ fontSize: 11, color: '#a59478', marginTop: 2 }}>
@@ -9249,6 +9479,149 @@ function StaffInvoicesModal({ data, currentUser, onAddExternal, onUpdateExternal
                 >
                   {saving ? 'Saving…' : 'Save'}
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* ─── EXPENSES — pulled from data.expenses for the period ─── */}
+          <div style={{ marginTop: 18, marginBottom: 10 }}>
+            <SectionLabel>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <span>Spending</span>
+                <span style={{ fontSize: 11, color: '#a59478', fontStyle: 'normal', fontFamily: "'Inter', sans-serif", fontVariantNumeric: 'tabular-nums' }}>
+                  {fmt(spentPence)}
+                </span>
+              </div>
+            </SectionLabel>
+          </div>
+
+          {myExpenses.length === 0 ? (
+            <div style={{
+              padding: '14px 16px', marginBottom: 12,
+              background: '#faf6ec', border: '1px dashed #e5dcc4',
+              borderRadius: 12, color: '#7a8270', fontSize: 13, fontStyle: 'italic',
+              fontFamily: '"Playfair Display", Georgia, serif',
+            }}>
+              Snap receipts as you go. Studio hire, equipment, training, mileage — all deductible from your tax bill.
+            </div>
+          ) : (
+            <div style={{
+              padding: '14px 16px', marginBottom: 12,
+              background: '#fffdf7', border: '1px solid #efe7d2',
+              borderRadius: 12,
+            }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {expenseCatList.slice(0, 6).map(([cat, pence]) => (
+                  <div key={cat} style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    fontSize: 13,
+                  }}>
+                    <span style={{ color: '#5c4a38' }}>{EXPENSE_CATEGORIES[cat]?.label || cat}</span>
+                    <span style={{ color: '#1a2620', fontVariantNumeric: 'tabular-nums' }}>{fmt(pence)}</span>
+                  </div>
+                ))}
+                {expenseCatList.length > 6 && (
+                  <div style={{
+                    fontSize: 12, color: '#a59478', fontStyle: 'italic', marginTop: 4,
+                    fontFamily: '"Playfair Display", Georgia, serif',
+                  }}>
+                    +{expenseCatList.length - 6} more categories
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Quick jump to the receipt capture flow */}
+          {onJumpToExpenses && (
+            <button
+              onClick={onJumpToExpenses}
+              className="salus-btn"
+              style={{
+                width: '100%', marginBottom: 14,
+                padding: '12px 18px',
+                background: 'transparent',
+                border: '1px solid rgba(92, 74, 56, 0.22)',
+                borderRadius: 999,
+                fontSize: 13, fontWeight: 500, color: '#1a2620',
+                fontFamily: 'inherit', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              }}
+            >
+              <Plus size={15} strokeWidth={2} /> Snap a receipt
+            </button>
+          )}
+
+          {/* ─── TAX ESTIMATE — 2026/27 UK rules, simple guide ───
+              This is the most useful "set aside" number for a coach.
+              We annualise the tax-year-to-date profit, run it through
+              the 2026/27 income tax bands + Class 4 NI, and show a
+              monthly "bank this much" figure. Includes the full
+              explanation so the user trusts the number. */}
+          {tyProfitPence > 0 && (
+            <div style={{
+              padding: '18px 20px', marginTop: 18, marginBottom: 14,
+              background: 'linear-gradient(180deg, #fbf5e8 0%, #f5edd4 100%)',
+              border: '1px solid #ebe3cf',
+              borderRadius: 14,
+            }}>
+              <div style={{
+                fontSize: 10, fontWeight: 600, color: '#5c4a38',
+                letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 10,
+              }}>
+                Tax estimate · 2026/27
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7, fontSize: 13 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#7a6f5f' }}>Profit (tax year-to-date)</span>
+                  <span style={{ color: '#1a2620', fontVariantNumeric: 'tabular-nums' }}>{fmt(tyProfitPence)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#7a6f5f' }}>Annualised profit</span>
+                  <span style={{ color: '#1a2620', fontVariantNumeric: 'tabular-nums' }}>{fmt(annualisedProfit)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#7a6f5f' }}>Income tax (est.)</span>
+                  <span style={{ color: '#1a2620', fontVariantNumeric: 'tabular-nums' }}>{fmt(annualTax.incomeTaxPence)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#7a6f5f' }}>Class 4 NI (est.)</span>
+                  <span style={{ color: '#1a2620', fontVariantNumeric: 'tabular-nums' }}>{fmt(annualTax.class4NicPence)}</span>
+                </div>
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between',
+                  paddingTop: 8, borderTop: '1px solid #d8cba8', marginTop: 4,
+                  fontWeight: 600,
+                }}>
+                  <span style={{ color: '#1a2620' }}>Estimated annual tax</span>
+                  <span style={{
+                    color: '#c6926a', fontVariantNumeric: 'tabular-nums',
+                    fontFamily: '"Playfair Display", Georgia, serif', fontSize: 16,
+                  }}>
+                    {fmt(annualTax.totalPence)}
+                  </span>
+                </div>
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between',
+                  marginTop: 2,
+                }}>
+                  <span style={{ color: '#7a6f5f', fontSize: 12, fontStyle: 'italic' }}>
+                    ≈ Set aside per month
+                  </span>
+                  <span style={{
+                    color: '#c6926a', fontVariantNumeric: 'tabular-nums', fontWeight: 600,
+                  }}>
+                    {fmt(Math.round(annualTax.totalPence / 12))}
+                  </span>
+                </div>
+              </div>
+              <div style={{
+                marginTop: 14, paddingTop: 12, borderTop: '1px solid #d8cba8',
+                fontSize: 11, color: '#7a6f5f', lineHeight: 1.5, fontStyle: 'italic',
+              }}>
+                This is a guide, not advice. Assumes self-employment is your only income source.
+                Bands: personal allowance £12,570, basic 20% to £50,270, higher 40%.
+                Class 4 NI: 6% on profit £12,570–£50,270, 2% above.
               </div>
             </div>
           )}
@@ -16469,29 +16842,69 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
           );
         })()}
 
-        {/* ── HERO TILE: Earnings glance — tax-year-to-date ── */}
-        {/* Sits prominently before the work-admin group so a coach can
-            see at a glance "how am I doing this tax year" without
-            tapping in. Combined Salus + external income; tappable to
-            open the full Earnings dashboard. */}
+        {/* ── MONEY HERO TILE ── earned / spent / set aside, this month ──
+            The single-glance financial summary a self-employed coach
+            actually needs: "what came in, what went out, what to keep
+            back for tax". Tappable to open the full Money dashboard.
+
+            Set-aside is computed from tax-year-to-date profit to give a
+            realistic forward-looking number, not just a slice of one
+            month. We surface the *monthly* portion so it scales with
+            actual earnings throughout the year. */}
         {(() => {
           const now = new Date();
-          // UK tax year 6 April → 5 April
+          const monthStartIso = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+          const monthEndIso = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+          // UK tax year 6 April → 5 April for the set-aside projection
           const aprilSixth = new Date(now.getFullYear(), 3, 6);
           const tyStart = now < aprilSixth ? new Date(now.getFullYear() - 1, 3, 6) : aprilSixth;
           const tyStartIso = tyStart.toISOString().slice(0, 10);
           const todayIso = now.toISOString().slice(0, 10);
           const rate = currentUser.sessionRatePence || 3000;
-          const tySalusClasses = (data.classes || []).filter(c =>
+
+          // ── This month earned (Salus + external) ──
+          const monthClasses = (data.classes || []).filter(c =>
+            c.coachId === currentUser.id && c.date >= monthStartIso && c.date <= monthEndIso
+          );
+          const monthExternal = (data.externalIncome || []).filter(e =>
+            e.earnedOn >= monthStartIso && e.earnedOn <= monthEndIso
+          );
+          const monthEarnedPence = (rate * monthClasses.length)
+            + monthExternal.reduce((acc, e) => acc + (e.amountPence || 0), 0);
+
+          // ── This month spent ──
+          const monthExpenses = (data.expenses || []).filter(x =>
+            (x.spentOn || '') >= monthStartIso && (x.spentOn || '') <= monthEndIso
+          );
+          const monthSpentPence = monthExpenses.reduce((acc, x) => acc + (x.amountPence || 0), 0);
+
+          // ── Tax-year-to-date profit → tax estimate → monthly portion ──
+          const tyClasses = (data.classes || []).filter(c =>
             c.coachId === currentUser.id && c.date >= tyStartIso && c.date <= todayIso
           );
-          const tySalusPence = rate * tySalusClasses.length;
           const tyExternal = (data.externalIncome || []).filter(e =>
             e.earnedOn >= tyStartIso && e.earnedOn <= todayIso
           );
-          const tyExternalPence = tyExternal.reduce((acc, e) => acc + (e.amountPence || 0), 0);
-          const tyTotal = (tySalusPence + tyExternalPence) / 100;
-          const tyLabel = `Tax year ${tyStart.getFullYear()}/${String(tyStart.getFullYear() + 1).slice(-2)}`;
+          const tyExpenses = (data.expenses || []).filter(x =>
+            (x.spentOn || '') >= tyStartIso && (x.spentOn || '') <= todayIso
+          );
+          const tyIncomePence = (rate * tyClasses.length)
+            + tyExternal.reduce((acc, e) => acc + (e.amountPence || 0), 0);
+          const tySpentPence = tyExpenses.reduce((acc, x) => acc + (x.amountPence || 0), 0);
+          const tyProfitPence = Math.max(0, tyIncomePence - tySpentPence);
+
+          // Annualise profit to estimate full-year tax (more realistic
+          // than just multiplying YTD by tax rate)
+          const monthsElapsed = Math.max(1, Math.ceil(
+            ((now - tyStart) / (1000 * 60 * 60 * 24 * 30.44))
+          ));
+          const annualisedProfit = (tyProfitPence / monthsElapsed) * 12;
+          const annualTax = calcUkTaxEstimate(annualisedProfit);
+          const monthlySetAsidePence = Math.round(annualTax.totalPence / 12);
+
+          const fmt0 = (p) => `£${(p / 100).toLocaleString('en-GB', { maximumFractionDigits: 0 })}`;
+          const monthLabel = now.toLocaleDateString('en-GB', { month: 'long' }).toUpperCase();
+
           return (
             <button
               onClick={onShowStaffInvoices}
@@ -16502,43 +16915,80 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
                 color: '#fffdf7',
                 border: 'none',
                 borderRadius: 18,
-                padding: '20px 22px',
+                padding: '18px 20px 16px',
                 marginBottom: 14,
                 textAlign: 'left',
                 cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'flex-end',
-                justifyContent: 'space-between',
-                gap: 14,
                 boxShadow: '0 10px 28px rgba(26, 38, 32, 0.18)',
               }}
             >
-              <div style={{ flex: 1, minWidth: 0 }}>
+              {/* Eyebrow row */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
                 <div style={{
                   fontSize: 10, fontWeight: 600, letterSpacing: 2,
                   textTransform: 'uppercase', color: 'rgba(255, 253, 247, 0.55)',
-                  marginBottom: 8,
                 }}>
-                  Earnings · {tyLabel}
+                  Money · {monthLabel}
                 </div>
-                <div style={{
-                  fontFamily: '"Playfair Display", Georgia, serif',
-                  fontSize: 32, fontWeight: 400, lineHeight: 1.05,
-                  letterSpacing: '-0.015em',
-                  fontVariantNumeric: 'tabular-nums',
-                }}>
-                  £{tyTotal.toLocaleString('en-GB', { maximumFractionDigits: 0 })}
+                <ChevronRight size={18} color="rgba(255, 253, 247, 0.5)" />
+              </div>
+              {/* Three-stat row */}
+              <div style={{ display: 'flex', gap: 14 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: 9, fontWeight: 600, letterSpacing: 1.5,
+                    textTransform: 'uppercase', color: 'rgba(255, 253, 247, 0.5)',
+                    marginBottom: 4,
+                  }}>
+                    Earned
+                  </div>
+                  <div style={{
+                    fontFamily: '"Playfair Display", Georgia, serif',
+                    fontSize: 24, fontWeight: 400, lineHeight: 1.05,
+                    letterSpacing: '-0.015em',
+                    fontVariantNumeric: 'tabular-nums',
+                  }}>
+                    {fmt0(monthEarnedPence)}
+                  </div>
                 </div>
-                <div style={{
-                  fontSize: 12, color: 'rgba(255, 253, 247, 0.6)',
-                  marginTop: 6, fontStyle: 'italic',
-                  fontFamily: '"Playfair Display", Georgia, serif',
-                }}>
-                  {tySalusClasses.length} {tySalusClasses.length === 1 ? 'class here' : 'classes here'}
-                  {tyExternal.length > 0 && ` + ${tyExternal.length} ${tyExternal.length === 1 ? 'entry' : 'entries'} elsewhere`}
+                <div style={{ width: 1, background: 'rgba(255, 253, 247, 0.14)' }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: 9, fontWeight: 600, letterSpacing: 1.5,
+                    textTransform: 'uppercase', color: 'rgba(255, 253, 247, 0.5)',
+                    marginBottom: 4,
+                  }}>
+                    Spent
+                  </div>
+                  <div style={{
+                    fontFamily: '"Playfair Display", Georgia, serif',
+                    fontSize: 24, fontWeight: 400, lineHeight: 1.05,
+                    letterSpacing: '-0.015em',
+                    fontVariantNumeric: 'tabular-nums',
+                  }}>
+                    {fmt0(monthSpentPence)}
+                  </div>
+                </div>
+                <div style={{ width: 1, background: 'rgba(255, 253, 247, 0.14)' }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: 9, fontWeight: 600, letterSpacing: 1.5,
+                    textTransform: 'uppercase', color: 'rgba(255, 253, 247, 0.5)',
+                    marginBottom: 4,
+                  }}>
+                    Set aside
+                  </div>
+                  <div style={{
+                    fontFamily: '"Playfair Display", Georgia, serif',
+                    fontSize: 24, fontWeight: 400, lineHeight: 1.05,
+                    letterSpacing: '-0.015em',
+                    fontVariantNumeric: 'tabular-nums',
+                    color: '#c6926a',
+                  }}>
+                    {fmt0(monthlySetAsidePence)}
+                  </div>
                 </div>
               </div>
-              <ChevronRight size={20} color="rgba(255, 253, 247, 0.5)" />
             </button>
           );
         })()}
