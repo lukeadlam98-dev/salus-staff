@@ -13183,7 +13183,7 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
       const [eh, em] = b.endTime.split(':').map(Number);
       return (eh * 60 + em) - (sh * 60 + sm);
     })(),
-    title: b.title || (b.bookingType === 'private_session' ? 'Private session' : 'Studio hire'),
+    title: b.title || (b.bookingType === 'private_session' ? 'Private session' : 'Studio event'),
     studio: b.studio, hirerName: b.hirerName, bookingType: b.bookingType, raw: b,
   });
 
@@ -13219,12 +13219,108 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
 
   return (
     <>
-      {/* ── Page header — matches Home's editorial title pattern ── */}
+      {/* ── Page header — matches Home's editorial title pattern.
+          Non-compact so it has breathing room at the top, similar to Home. ── */}
       <PageHeader
         eyebrow={isThisWeek ? 'This week' : `Week of ${weekOfLabel}`}
         title="Schedule"
-        compact
+        action={
+          <button
+            onClick={() => setCalendarExpanded(v => !v)}
+            className="salus-btn"
+            style={styles.calendarHeaderBtn}
+            aria-label={calendarExpanded ? 'Hide calendar' : 'Open calendar'}
+            aria-expanded={calendarExpanded}
+          >
+            <Calendar size={16} color="#1a2620" strokeWidth={1.8} />
+          </button>
+        }
       />
+
+      {/* ── Calendar accordion — inline under the header.
+          Toggled via the calendar icon in the page header. Lets staff
+          jump weeks/months without leaving the page. ── */}
+      {calendarExpanded && (
+        <div style={{ ...styles.calendarPanel, marginTop: 0, marginBottom: 22 }}>
+          {/* Month nav */}
+          <div style={styles.calendarNavRow}>
+            <button onClick={goPrevMonth} className="salus-btn" style={styles.calendarNavBtn}>
+              <ChevronLeft size={18} />
+            </button>
+            <div style={styles.calendarMonthLabel}>{monthLabel}</div>
+            <button onClick={goNextMonth} className="salus-btn" style={styles.calendarNavBtn}>
+              <ChevronRight size={18} />
+            </button>
+          </div>
+
+          {(monthYear !== today.getFullYear() || monthIdx !== today.getMonth()) && (
+            <button
+              onClick={() => setSelectedDate(today)}
+              className="salus-btn"
+              style={styles.calendarJumpToday}
+            >
+              {'\u2190'} Jump to today
+            </button>
+          )}
+
+          {/* Weekday header */}
+          <div style={styles.calendarWeekdayRow}>
+            {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
+              <div key={i} style={styles.calendarWeekday}>{d}</div>
+            ))}
+          </div>
+
+          {/* Day cells */}
+          <div style={styles.calendarDayGrid}>
+            {gridCells.map((cell, idx) => {
+              const iso = toIso(cell.d);
+              const isToday2 = iso === todayIso;
+              const isSelected = iso === selectedIso;
+              const m = dateMeta[iso] || { mine: 0, others: 0, cover: 0 };
+              const myCount = m.mine;
+              const hasCover = m.cover > 0;
+              const showCount = view === 'mine' ? myCount > 0 : (m.mine + m.others) > 0;
+              const countToShow = view === 'mine' ? myCount : (m.mine + m.others);
+
+              return (
+                <button
+                  key={idx}
+                  onClick={() => {
+                    setSelectedDate(new Date(cell.d));
+                    setCalendarExpanded(false);
+                  }}
+                  className="salus-btn"
+                  style={{
+                    ...styles.calendarDayBtn,
+                    background: isSelected ? '#1a2620' : '#f5f1e8',
+                    border: isToday2 && !isSelected ? '1.5px solid #1a2620' : '1px solid transparent',
+                    opacity: cell.out ? 0.35 : 1,
+                  }}>
+                  {showCount ? (
+                    <div style={{
+                      ...styles.calendarDayCount,
+                      color: isSelected
+                        ? (hasCover ? '#f0c8b8' : '#fffdf7')
+                        : (hasCover ? '#c8442a' : '#1a2620'),
+                    }}>
+                      {countToShow}
+                    </div>
+                  ) : (
+                    <div style={{ height: 13 }} />
+                  )}
+                  <div style={{
+                    ...styles.calendarDayNum,
+                    fontWeight: isToday2 || isSelected ? 500 : 400,
+                    color: isSelected ? '#d4cdb8' : cell.out ? '#a59478' : '#7a8270',
+                  }}>
+                    {cell.d.getDate()}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ── Week summary tiles — Mine / Cover ── */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 22 }}>
@@ -13250,7 +13346,7 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
 
       {/* ── View tabs — Mine / Everyone / Hire (editorial underline) ── */}
       <div style={styles.scheduleTabRow}>
-        {[['mine', 'Mine'], ['everyone', 'Everyone'], ['hire', 'Hire']].map(([key, label]) => {
+        {[['mine', 'Mine'], ['everyone', 'Everyone'], ['hire', 'Events']].map(([key, label]) => {
           const isActive = view === key;
           return (
             <button key={key}
@@ -13268,8 +13364,8 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
 
       {/* ── Day list — one white tile per day, hairline-separated rows ── */}
       {visibleItems.length === 0 ? (
-        <EmptyState sub={view === 'mine' ? 'A quiet week \u2014 enjoy.' : view === 'hire' ? 'No studio hires this week.' : 'Nothing on the studio schedule.'}>
-          {view === 'mine' ? 'No classes this week.' : view === 'hire' ? 'No hires booked.' : 'Empty week.'}
+        <EmptyState sub={view === 'mine' ? 'A quiet week \u2014 enjoy.' : view === 'hire' ? 'No events this week.' : 'Nothing on the studio schedule.'}>
+          {view === 'mine' ? 'No classes this week.' : view === 'hire' ? 'No events booked.' : 'Empty week.'}
         </EmptyState>
       ) : (
         weekDates.map(d => {
@@ -13316,7 +13412,7 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
                         </div>
                         <div style={styles.scheduleRowInfo}>
                           <div style={{ ...styles.scheduleRowBadge, color: '#c6926a' }}>
-                            {item.bookingType === 'private_session' ? 'Private' : 'Hire'}
+                            {item.bookingType === 'private_session' ? 'Private' : 'Event'}
                           </div>
                           <div style={styles.scheduleRowTitle}>{item.title}</div>
                           <div style={styles.scheduleRowMeta}>
@@ -13389,113 +13485,6 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
           );
         })
       )}
-
-      {/* ── Calendar accordion — collapsed by default. Tap to navigate to
-          another week. Keeps the day list as the primary content. ── */}
-      <div style={{ marginTop: 8 }}>
-        <button
-          onClick={() => setCalendarExpanded(v => !v)}
-          className="salus-btn"
-          style={styles.calendarToggle}
-          aria-expanded={calendarExpanded}
-        >
-          <div style={styles.calendarToggleContent}>
-            <div style={styles.calendarToggleTitle}>Jump to another week</div>
-            <div style={styles.calendarToggleSub}>{monthLabel}</div>
-          </div>
-          <ChevronDown
-            size={18}
-            color="#a59478"
-            style={{
-              flexShrink: 0,
-              transform: calendarExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
-              transition: 'transform 200ms ease',
-            }}
-          />
-        </button>
-
-        {calendarExpanded && (
-          <div style={styles.calendarPanel}>
-            {/* Month nav */}
-            <div style={styles.calendarNavRow}>
-              <button onClick={goPrevMonth} className="salus-btn" style={styles.calendarNavBtn}>
-                <ChevronLeft size={18} />
-              </button>
-              <div style={styles.calendarMonthLabel}>{monthLabel}</div>
-              <button onClick={goNextMonth} className="salus-btn" style={styles.calendarNavBtn}>
-                <ChevronRight size={18} />
-              </button>
-            </div>
-
-            {(monthYear !== today.getFullYear() || monthIdx !== today.getMonth()) && (
-              <button
-                onClick={() => setSelectedDate(today)}
-                className="salus-btn"
-                style={styles.calendarJumpToday}
-              >
-                {'\u2190'} Jump to today
-              </button>
-            )}
-
-            {/* Weekday header */}
-            <div style={styles.calendarWeekdayRow}>
-              {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
-                <div key={i} style={styles.calendarWeekday}>{d}</div>
-              ))}
-            </div>
-
-            {/* Day cells */}
-            <div style={styles.calendarDayGrid}>
-              {gridCells.map((cell, idx) => {
-                const iso = toIso(cell.d);
-                const isToday2 = iso === todayIso;
-                const isSelected = iso === selectedIso;
-                const m = dateMeta[iso] || { mine: 0, others: 0, cover: 0 };
-                const myCount = m.mine;
-                const hasCover = m.cover > 0;
-                const showCount = view === 'mine' ? myCount > 0 : (m.mine + m.others) > 0;
-                const countToShow = view === 'mine' ? myCount : (m.mine + m.others);
-
-                return (
-                  <button
-                    key={idx}
-                    onClick={() => {
-                      setSelectedDate(new Date(cell.d));
-                      setCalendarExpanded(false);
-                    }}
-                    className="salus-btn"
-                    style={{
-                      ...styles.calendarDayBtn,
-                      background: isSelected ? '#1a2620' : '#f5f1e8',
-                      border: isToday2 && !isSelected ? '1.5px solid #1a2620' : '1px solid transparent',
-                      opacity: cell.out ? 0.35 : 1,
-                    }}>
-                    {showCount ? (
-                      <div style={{
-                        ...styles.calendarDayCount,
-                        color: isSelected
-                          ? (hasCover ? '#f0c8b8' : '#fffdf7')
-                          : (hasCover ? '#c8442a' : '#1a2620'),
-                      }}>
-                        {countToShow}
-                      </div>
-                    ) : (
-                      <div style={{ height: 13 }} />
-                    )}
-                    <div style={{
-                      ...styles.calendarDayNum,
-                      fontWeight: isToday2 || isSelected ? 500 : 400,
-                      color: isSelected ? '#d4cdb8' : cell.out ? '#a59478' : '#7a8270',
-                    }}>
-                      {cell.d.getDate()}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
     </>
   );
 }
@@ -13529,11 +13518,10 @@ function ScheduleView({
 
   return (
     <>
-      {/* Editorial page header — compact since this is a frequently-used tab */}
+      {/* Editorial page header — non-compact, matches Home's breathing room. */}
       <PageHeader
         eyebrow="The week"
         title="Schedule"
-        compact
       />
 
       {canSeeBoth && (
@@ -13566,7 +13554,7 @@ function ScheduleView({
               ...(view === 'hire' ? { ...styles.viewToggleBtnActive, color: '#c6926a', borderBottomColor: '#c6926a' } : {}),
             }}
           >
-            Hire
+            Events
           </button>
         </div>
       )}
@@ -13720,7 +13708,7 @@ function HireSchedule({ data, currentUser, isManager, isMobile, onBookingClick }
         date: b.date,
         time: b.startTime,
         endTime: b.endTime,
-        type: b.title || (BOOKING_TYPES[b.bookingType]?.label || 'Studio hire'),
+        type: b.title || (BOOKING_TYPES[b.bookingType]?.label || 'Studio event'),
         studio: b.studio,
         coachId: b.createdBy,
         guestName: b.hirerName,
@@ -13748,7 +13736,7 @@ function HireSchedule({ data, currentUser, isManager, isMobile, onBookingClick }
         timeLeft={item.time}
         timeBottom={item.endTime ? `to ${item.endTime}` : (item.dur ? `${item.dur} min` : null)}
         title={item.type}
-        subtitle={item.guestName || meta.label || 'Studio hire'}
+        subtitle={item.guestName || meta.label || 'Studio event'}
         person={host}
         needsCover={false}
         isMine={item.coachId === currentUser.id}
@@ -13827,7 +13815,7 @@ function HireSchedule({ data, currentUser, isManager, isMobile, onBookingClick }
           getDate={(c) => c.date}
           getTime={(c) => c.time}
           isCover={() => false}
-          totalLabel={scope === 'external' ? 'external hires' : 'internal hires'}
+          totalLabel={scope === 'external' ? 'external events' : 'internal events'}
           filter={'all'}
           setFilter={() => {}}
           isManager={isManager}
@@ -13845,7 +13833,7 @@ function HireSchedule({ data, currentUser, isManager, isMobile, onBookingClick }
           getDate={(c) => c.date}
           getTime={(c) => c.time}
           isCover={() => false}
-          totalLabel={scope === 'external' ? 'external hires' : 'internal hires'}
+          totalLabel={scope === 'external' ? 'external events' : 'internal events'}
           filter={'all'}
           setFilter={() => {}}
           isManager={isManager}
@@ -14933,19 +14921,145 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
 
   const totalActive = (isManager ? allPending.length : myPending.length) + openRequests.length;
 
+  // ── Calendar state (collapsed by default, toggled from the header icon)
+  const [calendarExpanded, setCalendarExpanded] = useState(false);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const [selectedDate, setSelectedDate] = useState(today);
+  const toIso = (d) => d.toISOString().slice(0, 10);
+  const todayIso = toIso(today);
+  const selectedIso = toIso(selectedDate);
+
+  // Date metadata — count of OPEN cover requests per date.
+  // Pending ones are excluded from the calendar markers since they're
+  // waiting on manager approval and not yet on the board.
+  const coverDateMeta = useMemo(() => {
+    const meta = {};
+    (data.coverRequests || []).forEach(req => {
+      if (req.status !== 'open') return;
+      const cls = (data.classes || []).find(c => c.id === req.classId);
+      if (!cls) return;
+      meta[cls.date] = (meta[cls.date] || 0) + 1;
+    });
+    return meta;
+  }, [data.coverRequests, data.classes]);
+
+  // Calendar grid — 6 rows × 7 cols
+  const monthYear = selectedDate.getFullYear();
+  const monthIdx = selectedDate.getMonth();
+  const firstOfMonth = new Date(monthYear, monthIdx, 1);
+  const firstDow = (firstOfMonth.getDay() + 6) % 7;
+  const daysInMonth = new Date(monthYear, monthIdx + 1, 0).getDate();
+  const gridCells = [];
+  const prevMonthDays = new Date(monthYear, monthIdx, 0).getDate();
+  for (let i = firstDow - 1; i >= 0; i--) {
+    gridCells.push({ d: new Date(monthYear, monthIdx - 1, prevMonthDays - i), out: true });
+  }
+  for (let i = 1; i <= daysInMonth; i++) {
+    gridCells.push({ d: new Date(monthYear, monthIdx, i), out: false });
+  }
+  while (gridCells.length < 42) {
+    const last = gridCells[gridCells.length - 1].d;
+    const next = new Date(last); next.setDate(next.getDate() + 1);
+    gridCells.push({ d: next, out: true });
+  }
+  const goPrevMonth = () => setSelectedDate(new Date(monthYear, monthIdx - 1, 1));
+  const goNextMonth = () => setSelectedDate(new Date(monthYear, monthIdx + 1, 1));
+  const monthLabel = selectedDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+
   return (
     <div>
-      <div style={styles.sectionHeader}>
-        <div>
-          <h2 style={styles.h2}>Cover Board</h2>
-          <p style={styles.subtitle}>
-            {isManager
-              ? `${allPending.length} awaiting your decision · ${openRequests.length} on the board`
-              : `${myPending.length} of yours pending · ${openRequests.length} on the board`
-            }
-          </p>
+      {/* ── Page header — matches Schedule/Home pattern ── */}
+      <PageHeader
+        eyebrow="The studio"
+        title="Cover board"
+        subtitle={
+          isManager
+            ? `${allPending.length} awaiting your decision \u00b7 ${openRequests.length} on the board`
+            : `${myPending.length} of yours pending \u00b7 ${openRequests.length} on the board`
+        }
+        action={
+          <button
+            onClick={() => setCalendarExpanded(v => !v)}
+            className="salus-btn"
+            style={styles.calendarHeaderBtn}
+            aria-label={calendarExpanded ? 'Hide calendar' : 'Open calendar'}
+            aria-expanded={calendarExpanded}
+          >
+            <Calendar size={16} color="#1a2620" strokeWidth={1.8} />
+          </button>
+        }
+      />
+
+      {/* ── Calendar accordion — markers show dates with open cover ── */}
+      {calendarExpanded && (
+        <div style={{ ...styles.calendarPanel, marginTop: 0, marginBottom: 22 }}>
+          <div style={styles.calendarNavRow}>
+            <button onClick={goPrevMonth} className="salus-btn" style={styles.calendarNavBtn}>
+              <ChevronLeft size={18} />
+            </button>
+            <div style={styles.calendarMonthLabel}>{monthLabel}</div>
+            <button onClick={goNextMonth} className="salus-btn" style={styles.calendarNavBtn}>
+              <ChevronRight size={18} />
+            </button>
+          </div>
+
+          {(monthYear !== today.getFullYear() || monthIdx !== today.getMonth()) && (
+            <button
+              onClick={() => setSelectedDate(today)}
+              className="salus-btn"
+              style={styles.calendarJumpToday}
+            >
+              {'\u2190'} Jump to today
+            </button>
+          )}
+
+          <div style={styles.calendarWeekdayRow}>
+            {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
+              <div key={i} style={styles.calendarWeekday}>{d}</div>
+            ))}
+          </div>
+
+          <div style={styles.calendarDayGrid}>
+            {gridCells.map((cell, idx) => {
+              const iso = toIso(cell.d);
+              const isToday2 = iso === todayIso;
+              const isSelected = iso === selectedIso;
+              const coverCount = coverDateMeta[iso] || 0;
+
+              return (
+                <button
+                  key={idx}
+                  onClick={() => setSelectedDate(new Date(cell.d))}
+                  className="salus-btn"
+                  style={{
+                    ...styles.calendarDayBtn,
+                    background: isSelected ? '#1a2620' : '#f5f1e8',
+                    border: isToday2 && !isSelected ? '1.5px solid #1a2620' : '1px solid transparent',
+                    opacity: cell.out ? 0.35 : 1,
+                  }}>
+                  {coverCount > 0 ? (
+                    <div style={{
+                      ...styles.calendarDayCount,
+                      color: isSelected ? '#f0c8b8' : '#c8442a',
+                    }}>
+                      {coverCount}
+                    </div>
+                  ) : (
+                    <div style={{ height: 13 }} />
+                  )}
+                  <div style={{
+                    ...styles.calendarDayNum,
+                    fontWeight: isToday2 || isSelected ? 500 : 400,
+                    color: isSelected ? '#d4cdb8' : cell.out ? '#a59478' : '#7a8270',
+                  }}>
+                    {cell.d.getDate()}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Manager: pending approvals */}
       {isManager && allPending.length > 0 && (
@@ -16309,166 +16423,473 @@ function ClassDetailModal({ classObj, data, currentUser, isManager, onClose, onR
   const [swapTarget, setSwapTarget] = useState('');
 
   const coach = data.users.find(u => u.id === classObj.coachId);
-  const typeCfg = CLASS_TYPES[classObj.type];
+  const typeCfg = CLASS_TYPES[classObj.type] || {};
   const isMine = classObj.coachId === currentUser.id;
   const needsCover = classObj.status === 'needsCover';
 
-  // Swappable: my classes that aren't this one
   const myOtherClasses = data.classes.filter(c =>
     c.coachId === currentUser.id && c.id !== classObj.id && c.status !== 'needsCover'
   );
 
+  // ── Editorial header data ──
+  const dayName = DAYS[classObj.day] || '';
+  const dateObj = classObj.date ? new Date(classObj.date) : null;
+  const dateLabel = dateObj
+    ? dateObj.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
+    : dayName;
+  const endTimeStr = endTime(classObj.time, classObj.dur);
+  const statusLabel = needsCover
+    ? 'Needs cover'
+    : classObj.status === 'covered'
+      ? 'Covered'
+      : 'Assigned';
+
+  const gcalHref = googleCalendarUrl({
+    title: `${classObj.type} \u2014 Salus House`,
+    dateIso: classObj.date,
+    startTime: classObj.time,
+    endTime: endTimeStr,
+    description: `Teaching at ${STUDIOS[classObj.studio]?.name || classObj.studio}.`,
+    location: 'Salus House, Sidcup',
+  });
+
+  // ── Action list rows ──
+  // A "row" is { icon, label, sub?, onClick, kind?: 'primary'|'destructive' }
+  // We construct the action list based on role + status.
+  const actions = [];
+
+  if (needsCover) {
+    // Cover-needed always has "take it" as the leading action — handled by Cover board
+    // For now, "Open on Cover board" links to cover (the actual claim flow lives there).
+  }
+  if (isManager) {
+    actions.push({
+      icon: Settings, label: 'Edit class',
+      sub: 'Change type, time or studio',
+      onClick: () => { onEdit(); },
+    });
+  }
+  if (isMine && !needsCover) {
+    actions.push({
+      icon: AlertCircle, label: 'Request cover',
+      sub: isManager ? 'Post to the cover board' : 'Send to your manager',
+      onClick: () => setMode('requestCover'),
+      kind: 'primary',
+    });
+    actions.push({
+      icon: ArrowLeftRight, label: 'Transfer to coach',
+      sub: 'Hand this class to someone else',
+      onClick: () => { onTransfer(); },
+    });
+    if (myOtherClasses.length > 0) {
+      actions.push({
+        icon: ArrowLeftRight, label: 'Propose swap',
+        sub: 'Swap with another of your classes',
+        onClick: () => setMode('swap'),
+      });
+    }
+  }
+  if (!isManager && !isMine && !needsCover && data.classes.filter(c => c.coachId === currentUser.id).length > 0) {
+    actions.push({
+      icon: ArrowLeftRight, label: 'Propose swap',
+      sub: 'Offer one of yours for this class',
+      onClick: () => setMode('swap'),
+    });
+  }
+  if (isManager) {
+    actions.push({
+      icon: Trash2, label: 'Delete class',
+      sub: 'Remove from the schedule',
+      onClick: () => { onDelete(); },
+      kind: 'destructive',
+    });
+  }
+
   return (
     <Modal onClose={onClose}>
-      <div style={{ borderTop: `4px solid ${typeCfg.color}`, padding: 24 }}>
-        <div style={styles.modalDayBadge}>{DAYS[classObj.day]} · {classObj.time}–{endTime(classObj.time, classObj.dur)}</div>
-        <h2 style={{ ...styles.h2, marginTop: 8 }}>{classObj.type}</h2>
-
-        <div style={styles.detailRow}>
-          <span style={styles.detailLabel}>Coach</span>
-          <div style={styles.detailValue}>
-            <UserAvatar user={coach} size={20} fontSize={9} />
-            <span>{coach.name}</span>
-            {isMine && <span style={styles.youBadge}>You</span>}
+      {mode === 'view' && (
+        <div style={{ padding: '4px 2px 8px' }}>
+          {/* ── Editorial header ── */}
+          <div style={{ marginBottom: 22 }}>
+            <div style={{
+              fontFamily: 'Inter, system-ui, sans-serif',
+              fontSize: 10, fontWeight: 700,
+              letterSpacing: '0.14em', textTransform: 'uppercase',
+              color: '#a59478', marginBottom: 8,
+            }}>
+              {dateLabel}
+            </div>
+            <h2 style={{
+              fontFamily: '"Playfair Display", Georgia, serif',
+              fontSize: 28, fontWeight: 500,
+              color: '#1a2620', lineHeight: 1.1,
+              letterSpacing: '-0.015em',
+              margin: '0 0 8px',
+            }}>
+              {classObj.type}
+            </h2>
+            <div style={{
+              fontFamily: 'Inter, system-ui, sans-serif',
+              fontSize: 14, color: '#7a6f5f',
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <span style={{
+                fontFamily: '"Playfair Display", Georgia, serif',
+                fontSize: 16, color: '#1a2620',
+                fontVariantNumeric: 'tabular-nums',
+              }}>{classObj.time}</span>
+              <span>&middot;</span>
+              <span>{classObj.dur} min</span>
+              <span>&middot;</span>
+              <span>{STUDIOS[classObj.studio]?.label || '\u2014'}</span>
+            </div>
           </div>
-        </div>
 
-        <div style={styles.detailRow}>
-          <span style={styles.detailLabel}>Duration</span>
-          <span>{classObj.dur} minutes</span>
-        </div>
+          {/* ── Status banner ── */}
+          {needsCover && (
+            <div style={{
+              padding: '12px 14px',
+              borderRadius: 12,
+              background: 'rgba(200, 68, 42, 0.08)',
+              border: '1px solid rgba(200, 68, 42, 0.18)',
+              marginBottom: 16,
+              display: 'flex', alignItems: 'center', gap: 10,
+            }}>
+              <AlertCircle size={16} color="#c8442a" strokeWidth={2} />
+              <div style={{
+                fontFamily: 'Inter, system-ui, sans-serif',
+                fontSize: 13, fontWeight: 500, color: '#1a2620',
+              }}>
+                This class needs cover
+              </div>
+            </div>
+          )}
 
-        <div style={styles.detailRow}>
-          <span style={styles.detailLabel}>Studio</span>
-          <span>{STUDIOS[classObj.studio]?.label || '—'}</span>
-        </div>
-
-        <div style={styles.detailRow}>
-          <span style={styles.detailLabel}>Status</span>
-          <span style={{ color: needsCover ? '#c8442a' : '#5c4a38', fontWeight: 500 }}>
-            {needsCover ? 'Needs cover' : classObj.status === 'covered' ? 'Covered' : 'Assigned'}
-          </span>
-        </div>
-
-        {mode === 'view' && (
-          <div style={{ marginTop: 16 }}>
-            <a
-              href={googleCalendarUrl({
-                title: `${classObj.type} — Salus House`,
-                dateIso: classObj.date,
-                startTime: classObj.time,
-                endTime: (() => {
-                  const [h, m] = classObj.time.split(':').map(Number);
-                  const total = h * 60 + m + (classObj.dur || 45);
-                  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
-                })(),
-                description: `Teaching at ${STUDIOS[classObj.studio]?.name || classObj.studio}.`,
-                location: 'Salus House, Sidcup',
-              })}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={styles.gcalLink}
-            >
-              Add to Google Calendar
-            </a>
-          </div>
-        )}
-
-        {mode === 'view' && (
-          <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {isManager && (
-              <>
-                <button onClick={onEdit} className="salus-btn" style={styles.btnPrimary}>
-                  Edit class
-                </button>
-                <button onClick={onDelete} className="salus-btn" style={styles.btnDanger}>
-                  Delete
-                </button>
-              </>
-            )}
-            {isMine && !needsCover && (
-              <>
-                <button onClick={() => setMode('requestCover')} className="salus-btn" style={isManager ? styles.btnSecondary : styles.btnPrimary}>
-                  <AlertCircle size={14} /> Request cover
-                </button>
-                <button onClick={onTransfer} className="salus-btn" style={styles.btnSecondary}>
-                  <ArrowLeftRight size={14} /> Transfer to coach
-                </button>
-                {!isManager && myOtherClasses.length > 0 && (
-                  <button onClick={() => setMode('swap')} className="salus-btn" style={styles.btnSecondary}>
-                    <ArrowLeftRight size={14} /> Propose swap
-                  </button>
+          {/* ── Info tile — coach + status ── */}
+          <div style={{
+            background: '#ffffff',
+            borderRadius: 16,
+            overflow: 'hidden',
+            marginBottom: 16,
+          }}>
+            <div style={{
+              padding: '14px 16px',
+              display: 'flex', alignItems: 'center', gap: 12,
+              borderBottom: '1px solid rgba(26, 38, 32, 0.06)',
+            }}>
+              <div style={{
+                fontFamily: 'Inter, system-ui, sans-serif',
+                fontSize: 10, fontWeight: 700,
+                letterSpacing: '0.12em', textTransform: 'uppercase',
+                color: '#a59478', minWidth: 64,
+              }}>
+                Coach
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+                {coach && <UserAvatar user={coach} size={22} fontSize={9} />}
+                <span style={{
+                  fontFamily: 'Inter, system-ui, sans-serif',
+                  fontSize: 14, color: '#1a2620', fontWeight: 500,
+                }}>{coach?.name || 'Unassigned'}</span>
+                {isMine && (
+                  <span style={{
+                    fontFamily: 'Inter, system-ui, sans-serif',
+                    fontSize: 10, fontWeight: 700,
+                    letterSpacing: '0.12em', textTransform: 'uppercase',
+                    color: '#7a8c5c', marginLeft: 4,
+                  }}>You</span>
                 )}
-              </>
-            )}
-            {!isManager && !isMine && !needsCover && data.classes.filter(c => c.coachId === currentUser.id).length > 0 && (
-              <button onClick={() => setMode('swap')} className="salus-btn" style={styles.btnSecondary}>
-                <ArrowLeftRight size={14} /> Propose swap
-              </button>
-            )}
-            <button onClick={onClose} className="salus-btn" style={styles.btnGhost}>Close</button>
-          </div>
-        )}
-
-        {mode === 'requestCover' && (
-          <div style={{ marginTop: 24 }}>
-            <label style={styles.label}>Reason for needing cover</label>
-            <textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="e.g. Medical appointment, family commitment…"
-              className="salus-input"
-              style={styles.textarea}
-              rows={3}
-            />
-            <p style={styles.hint}>
-              {isManager
-                ? 'This will be posted to the cover board straight away — coaches can claim or express interest.'
-                : "This will be sent to the manager, who'll either assign someone to cover or post it to the team."}
-            </p>
-            <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-              <button onClick={() => onRequestCover(reason)} className="salus-btn" style={styles.btnPrimary}>
-                {isManager ? 'Post to board' : 'Send to manager'}
-              </button>
-              <button onClick={() => setMode('view')} className="salus-btn" style={styles.btnGhost}>Back</button>
+              </div>
+            </div>
+            <div style={{
+              padding: '14px 16px',
+              display: 'flex', alignItems: 'center', gap: 12,
+            }}>
+              <div style={{
+                fontFamily: 'Inter, system-ui, sans-serif',
+                fontSize: 10, fontWeight: 700,
+                letterSpacing: '0.12em', textTransform: 'uppercase',
+                color: '#a59478', minWidth: 64,
+              }}>
+                Status
+              </div>
+              <span style={{
+                fontFamily: 'Inter, system-ui, sans-serif',
+                fontSize: 14, fontWeight: 500,
+                color: needsCover ? '#c8442a' : '#1a2620',
+              }}>
+                {statusLabel}
+              </span>
             </div>
           </div>
-        )}
 
-        {mode === 'swap' && (
-          <div style={{ marginTop: 24 }}>
-            <label style={styles.label}>Swap this for one of your classes</label>
-            <select
-              value={swapTarget}
-              onChange={(e) => setSwapTarget(e.target.value)}
-              className="salus-input"
-              style={styles.select}
+          {/* ── Add to Google Calendar — glass pill chip ── */}
+          <a
+            href={gcalHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 7,
+              padding: '9px 14px',
+              background: '#ffffff',
+              border: '1px solid rgba(92, 74, 56, 0.12)',
+              borderRadius: 999,
+              color: '#5c4a38',
+              fontFamily: 'Inter, system-ui, sans-serif',
+              fontSize: 12, fontWeight: 600,
+              textDecoration: 'none', letterSpacing: '0.01em',
+              marginBottom: 20,
+              boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.5)',
+            }}
+          >
+            <Calendar size={13} strokeWidth={2.2} />
+            <span>Add to Calendar</span>
+          </a>
+
+          {/* ── Action list ── */}
+          {actions.length > 0 && (
+            <div style={{
+              background: '#ffffff',
+              borderRadius: 16,
+              overflow: 'hidden',
+            }}>
+              {actions.map((a, idx) => {
+                const Icon = a.icon;
+                const isDestructive = a.kind === 'destructive';
+                const isPrimary = a.kind === 'primary';
+                return (
+                  <button
+                    key={`${a.label}-${idx}`}
+                    onClick={a.onClick}
+                    className="salus-btn"
+                    style={{
+                      width: '100%',
+                      display: 'flex', alignItems: 'center', gap: 14,
+                      padding: '14px 16px',
+                      background: 'transparent',
+                      border: 'none',
+                      textAlign: 'left',
+                      borderTop: idx > 0 ? '1px solid rgba(26, 38, 32, 0.06)' : 'none',
+                      cursor: 'pointer',
+                      appearance: 'none', WebkitAppearance: 'none',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    <div style={{
+                      width: 36, height: 36, borderRadius: '50%',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: isDestructive
+                        ? 'rgba(200, 68, 42, 0.10)'
+                        : isPrimary
+                          ? 'rgba(92, 74, 56, 0.10)'
+                          : 'rgba(122, 140, 92, 0.10)',
+                      flexShrink: 0,
+                    }}>
+                      <Icon
+                        size={16}
+                        strokeWidth={2}
+                        color={isDestructive ? '#c8442a' : isPrimary ? '#5c4a38' : '#7a8c5c'}
+                      />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        fontFamily: 'Inter, system-ui, sans-serif',
+                        fontSize: 14, fontWeight: 500,
+                        color: isDestructive ? '#c8442a' : '#1a2620',
+                      }}>{a.label}</div>
+                      {a.sub && (
+                        <div style={{
+                          fontFamily: 'Inter, system-ui, sans-serif',
+                          fontSize: 12, color: '#7a6f5f',
+                          marginTop: 2,
+                        }}>{a.sub}</div>
+                      )}
+                    </div>
+                    <ChevronRight size={14} color="#c4b8a0" />
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {mode === 'requestCover' && (
+        <div style={{ padding: '4px 2px 8px' }}>
+          <div style={{
+            fontFamily: 'Inter, system-ui, sans-serif',
+            fontSize: 10, fontWeight: 700,
+            letterSpacing: '0.14em', textTransform: 'uppercase',
+            color: '#a59478', marginBottom: 8,
+          }}>
+            {dateLabel} &middot; {classObj.time}
+          </div>
+          <h2 style={{
+            fontFamily: '"Playfair Display", Georgia, serif',
+            fontSize: 24, fontWeight: 500,
+            color: '#1a2620', lineHeight: 1.15,
+            letterSpacing: '-0.015em',
+            margin: '0 0 18px',
+          }}>
+            Request cover for {classObj.type}
+          </h2>
+
+          <label style={{
+            display: 'block',
+            fontFamily: 'Inter, system-ui, sans-serif',
+            fontSize: 11, fontWeight: 600,
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            color: '#7a6f5f', marginBottom: 6,
+          }}>
+            Reason
+          </label>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="e.g. Medical appointment, family commitment\u2026"
+            rows={4}
+            style={{
+              width: '100%', padding: '12px 14px',
+              border: '1px solid rgba(92, 74, 56, 0.15)',
+              borderRadius: 10, background: '#fffdf7',
+              fontFamily: 'Inter, system-ui, sans-serif',
+              fontSize: 14, color: '#1a2620', lineHeight: 1.5,
+              resize: 'vertical', minHeight: 90,
+              boxSizing: 'border-box', marginBottom: 12,
+            }}
+          />
+          <div style={{
+            fontFamily: 'Inter, system-ui, sans-serif',
+            fontSize: 12, color: '#7a6f5f', lineHeight: 1.5,
+            marginBottom: 20,
+          }}>
+            {isManager
+              ? 'This goes to the cover board straight away \u2014 coaches can claim or express interest.'
+              : "This goes to your manager, who'll either assign someone to cover or post it to the team."}
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              onClick={() => onRequestCover(reason)}
+              className="salus-btn"
+              style={{
+                flex: 1, padding: '13px 20px', borderRadius: 999,
+                background: '#1a2620', color: '#fffdf7',
+                fontSize: 14, fontWeight: 600, letterSpacing: '0.02em',
+                border: 'none', cursor: 'pointer',
+              }}
             >
-              <option value="">Choose a class…</option>
-              {(isMine
-                ? data.classes.filter(c => c.coachId !== currentUser.id && c.status !== 'needsCover')
-                : myOtherClasses
-              ).map(c => (
-                <option key={c.id} value={c.id}>
-                  {DAYS[c.day]} {c.time} · {c.type} · {data.users.find(u => u.id === c.coachId)?.name.split(' ')[0]}
-                </option>
-              ))}
-            </select>
-            <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-              <button
-                onClick={() => swapTarget && onProposeSwap(swapTarget)}
-                disabled={!swapTarget}
-                className="salus-btn"
-                style={{ ...styles.btnPrimary, opacity: swapTarget ? 1 : 0.5 }}
-              >
-                Send swap request
-              </button>
-              <button onClick={() => setMode('view')} className="salus-btn" style={styles.btnGhost}>Back</button>
-            </div>
-            <p style={styles.hint}>The other coach will be notified and can accept or decline.</p>
+              {isManager ? 'Post to board' : 'Send to manager'}
+            </button>
+            <button
+              onClick={() => setMode('view')}
+              className="salus-btn"
+              style={{
+                padding: '13px 20px', borderRadius: 999,
+                background: 'transparent',
+                border: '1px solid rgba(92, 74, 56, 0.15)',
+                color: '#5c4a38',
+                fontSize: 14, fontWeight: 500, letterSpacing: '0.02em',
+                cursor: 'pointer',
+              }}
+            >
+              Back
+            </button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {mode === 'swap' && (
+        <div style={{ padding: '4px 2px 8px' }}>
+          <div style={{
+            fontFamily: 'Inter, system-ui, sans-serif',
+            fontSize: 10, fontWeight: 700,
+            letterSpacing: '0.14em', textTransform: 'uppercase',
+            color: '#a59478', marginBottom: 8,
+          }}>
+            {dateLabel} &middot; {classObj.time}
+          </div>
+          <h2 style={{
+            fontFamily: '"Playfair Display", Georgia, serif',
+            fontSize: 24, fontWeight: 500,
+            color: '#1a2620', lineHeight: 1.15,
+            letterSpacing: '-0.015em',
+            margin: '0 0 18px',
+          }}>
+            Propose a swap
+          </h2>
+
+          <label style={{
+            display: 'block',
+            fontFamily: 'Inter, system-ui, sans-serif',
+            fontSize: 11, fontWeight: 600,
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            color: '#7a6f5f', marginBottom: 6,
+          }}>
+            Swap this for one of yours
+          </label>
+          <select
+            value={swapTarget}
+            onChange={(e) => setSwapTarget(e.target.value)}
+            style={{
+              width: '100%', padding: '12px 14px',
+              border: '1px solid rgba(92, 74, 56, 0.15)',
+              borderRadius: 10, background: '#fffdf7',
+              fontFamily: 'Inter, system-ui, sans-serif',
+              fontSize: 14, color: '#1a2620',
+              boxSizing: 'border-box', marginBottom: 12,
+              appearance: 'none', WebkitAppearance: 'none',
+            }}
+          >
+            <option value="">Choose a class\u2026</option>
+            {(isMine
+              ? data.classes.filter(c => c.coachId !== currentUser.id && c.status !== 'needsCover')
+              : myOtherClasses
+            ).map(c => (
+              <option key={c.id} value={c.id}>
+                {DAYS[c.day]} {c.time} \u00b7 {c.type} \u00b7 {data.users.find(u => u.id === c.coachId)?.name.split(' ')[0]}
+              </option>
+            ))}
+          </select>
+          <div style={{
+            fontFamily: 'Inter, system-ui, sans-serif',
+            fontSize: 12, color: '#7a6f5f', lineHeight: 1.5,
+            marginBottom: 20,
+          }}>
+            The other coach will be notified and can accept or decline.
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              onClick={() => swapTarget && onProposeSwap(swapTarget)}
+              disabled={!swapTarget}
+              className="salus-btn"
+              style={{
+                flex: 1, padding: '13px 20px', borderRadius: 999,
+                background: swapTarget ? '#1a2620' : '#c4b8a0',
+                color: '#fffdf7',
+                fontSize: 14, fontWeight: 600, letterSpacing: '0.02em',
+                border: 'none',
+                cursor: swapTarget ? 'pointer' : 'not-allowed',
+              }}
+            >
+              Send swap request
+            </button>
+            <button
+              onClick={() => setMode('view')}
+              className="salus-btn"
+              style={{
+                padding: '13px 20px', borderRadius: 999,
+                background: 'transparent',
+                border: '1px solid rgba(92, 74, 56, 0.15)',
+                color: '#5c4a38',
+                fontSize: 14, fontWeight: 500, letterSpacing: '0.02em',
+                cursor: 'pointer',
+              }}
+            >
+              Back
+            </button>
+          </div>
+        </div>
+      )}
     </Modal>
   );
 }
@@ -20250,9 +20671,19 @@ const styles = {
   },
 
   // ─── CALENDAR ACCORDION ───
-  // Collapsed by default at the bottom of the Schedule page — a quiet way
-  // to jump to a different week. Toggle row shows current month; panel
-  // expands to reveal the full grid.
+  // Calendar icon button sits in the page header (top-right action area).
+  // Tap to expand the inline calendar panel below the header. Small,
+  // circular, white tile.
+  calendarHeaderBtn: {
+    width: 40, height: 40,
+    borderRadius: '50%',
+    background: '#ffffff',
+    border: 'none',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    cursor: 'pointer',
+    appearance: 'none', WebkitAppearance: 'none',
+    flexShrink: 0,
+  },
   calendarToggle: {
     width: '100%',
     display: 'flex', alignItems: 'center', gap: 12,
