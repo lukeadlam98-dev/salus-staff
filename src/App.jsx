@@ -74,6 +74,7 @@ const EMPTY_DATA = {
   users: [],
   classes: [],
   coverRequests: [],
+  coverMessages: [],
   swapRequests: [],
   messages: [],
   shifts: [],
@@ -428,10 +429,13 @@ export default function SalusStaff() {
     if (!session) return;
     if (!silent) setLoading(true);
     try {
-      const [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes, emailIntRes, stockRes, storeCardsRes, broadcastsRes, broadcastReadsRes, incidentsRes, onboardingStepsRes, expensesRes, flowsRes] = await Promise.all([
+      const [profilesRes, classesRes, coverReqRes, coverCmRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes, emailIntRes, stockRes, storeCardsRes, broadcastsRes, broadcastReadsRes, incidentsRes, onboardingStepsRes, expensesRes, flowsRes] = await Promise.all([
         supabase.from('profiles').select('*'),
         supabase.from('classes').select('*'),
         supabase.from('cover_requests').select('*'),
+        // cover_messages — discussion thread comments on each cover request.
+        // Wrapped so a missing table (pre-migration) doesn't break the entire load.
+        supabase.from('cover_messages').select('*').order('created_at', { ascending: true }).then(r => r, () => ({ data: [], error: null })),
         supabase.from('swap_requests').select('*'),
         supabase.from('messages').select('*').order('created_at', { ascending: true }),
         supabase.from('foh_shifts').select('*'),
@@ -469,6 +473,10 @@ export default function SalusStaff() {
         users: (profilesRes.data || []).map(r => profileFromDb(r, r.id === session.user?.id ? myEmail : '')),
         classes: (classesRes.data || []).map(classFromDb),
         coverRequests: (coverReqRes.data || []).map(coverReqFromDb),
+        // Cover discussion thread comments — graceful empty fallback if
+        // the cover_messages table hasn't been created yet. Avoids
+        // crashing the whole reload pre-migration.
+        coverMessages: (coverCmRes?.data || []),
         swapRequests: (swapReqRes.data || []).map(swapReqFromDb),
         messages: (messagesRes.data || []).map(messageFromDb),
         shifts: (shiftsRes.data || []).map(shiftFromDb),
@@ -750,7 +758,7 @@ export default function SalusStaff() {
     await reloadData(true);
   };
 
-  const requestCover = async (classId, reason) => {
+  const requestCover = async (classId, reason, mentionedCoaches = []) => {
     // Managers' own requests skip the pending stage and go straight to the board.
     const initialStatus = isManager ? 'open' : 'pending';
     const { error: er1 } = await supabase.from('cover_requests').insert({
@@ -758,6 +766,10 @@ export default function SalusStaff() {
       requested_by: currentUserId,
       reason: reason || '',
       status: initialStatus,
+      // Tag specific coaches the requester wants to nudge directly.
+      // These users see an "Asked you specifically" badge on their Cover
+      // board. Empty array = broadcast to everyone qualified.
+      mentioned_coaches: mentionedCoaches,
     });
     if (er1) { console.error('requestCover', er1); return; }
     const cls = data.classes.find(c => c.id === classId);
@@ -783,6 +795,43 @@ export default function SalusStaff() {
     if (er1) { console.error('claimCover-req', er1); return; }
     const { error: er2 } = await supabase.from('classes').update({ coach_id: coachId, status: 'covered' }).eq('id', req.classId);
     if (er2) { console.error('claimCover-class', er2); return; }
+    await reloadData(true);
+  };
+
+  // Release a cover I previously claimed. Reverses claimCover —
+  // status goes back to 'open', the cover is up for grabs again, and
+  // the class's coach_id reverts to the original coach so the schedule
+  // shows them as the assigned-but-still-needs-cover person.
+  //
+  // Optionally accepts `mentionedCoaches` — if I want to nudge specific
+  // people (e.g. "I think Tom could do this"), pass their IDs and the
+  // mention propagates so the receiving coach sees "Asked you specifically".
+  const releaseCover = async (requestId, mentionedCoaches = []) => {
+    const req = data.coverRequests.find(r => r.id === requestId);
+    if (!req) return;
+    const cls = data.classes.find(c => c.id === req.classId);
+    const originalCoach = cls?.originalCoachId || req.requestedBy;
+    const updates = {
+      status: 'open',
+      claimed_by: null,
+    };
+    // If the user is nudging specific coaches on the way out, replace the
+    // mention list. Empty array means "back to the board for everyone".
+    if (mentionedCoaches.length > 0) {
+      updates.mentioned_coaches = mentionedCoaches;
+    } else {
+      // Clear any previous mentions — fresh open posting
+      updates.mentioned_coaches = [];
+    }
+    const { error: er1 } = await supabase.from('cover_requests').update(updates).eq('id', requestId);
+    if (er1) { console.error('releaseCover-req', er1); return; }
+    // Revert the class's coach to the original so the schedule reflects
+    // that they're back in the "needs cover" state.
+    const { error: er2 } = await supabase.from('classes').update({
+      coach_id: originalCoach,
+      status: 'needsCover',
+    }).eq('id', req.classId);
+    if (er2) { console.error('releaseCover-class', er2); return; }
     await reloadData(true);
   };
 
@@ -1751,6 +1800,8 @@ export default function SalusStaff() {
             onCancel={cancelCoverRequest}
             onManage={(requestId) => setModal({ type: 'manageCover', requestId })}
             onExpressInterest={expressInterest}
+            onPassOn={(requestId) => setModal({ type: 'passOnCover', requestId })}
+            onOpenThread={(requestId) => setModal({ type: 'coverThread', coverRequestId: requestId })}
           />
         )}
         {tab === 'chat' && (
@@ -1810,7 +1861,7 @@ export default function SalusStaff() {
           currentUser={currentUser}
           isManager={isManager}
           onClose={() => setModal(null)}
-          onRequestCover={(reason) => { requestCover(modal.classId, reason); setModal(null); }}
+          onRequestCover={(reason, mentioned) => { requestCover(modal.classId, reason, mentioned); setModal(null); }}
           onProposeSwap={(toClassId) => { proposeSwap(modal.classId, toClassId); setModal(null); }}
           onTransfer={() => setModal({ type: 'transferClass', classId: modal.classId })}
           onEdit={() => setModal({ type: 'editClass', classId: modal.classId })}
@@ -1837,6 +1888,15 @@ export default function SalusStaff() {
           onAssign={(coachId) => { assignCoverDirectly(modal.requestId, coachId); setModal(null); }}
           onPost={() => { postCoverToBoard(modal.requestId); setModal(null); }}
           onDecline={() => { declineCoverRequest(modal.requestId); setModal(null); }}
+        />
+      )}
+      {modal?.type === 'passOnCover' && (
+        <PassOnCoverModal
+          request={data.coverRequests.find(r => r.id === modal.requestId)}
+          data={data}
+          currentUser={currentUser}
+          onClose={() => setModal(null)}
+          onPassOn={(mentioned) => { releaseCover(modal.requestId, mentioned); setModal(null); }}
         />
       )}
       {modal?.type === 'confirmDelete' && (
@@ -14898,7 +14958,7 @@ function StatusBar({ data, currentUser, isManager, onJumpTo }) {
   );
 }
 
-function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCancel, onManage, onExpressInterest }) {
+function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCancel, onManage, onExpressInterest, onPassOn }) {
   // ─── Tab state ───
   // Three tabs: Cover needed (open, can claim) / Cover pending (awaiting
   // manager approval) / My Cover (things I've claimed or asked for myself)
@@ -14940,7 +15000,7 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
       ],
       covers: [
         { id: 'demo-cov-1', classId: 'demo-cls-1', requestedBy: 'demo-user-1', status: 'open',    reason: 'Doctor appointment',   timestamp: Date.now() - 3600000,  interestedCovers: [], __demo: true },
-        { id: 'demo-cov-2', classId: 'demo-cls-2', requestedBy: 'demo-user-2', status: 'open',    reason: 'Family commitment',    timestamp: Date.now() - 7200000,  interestedCovers: [], __demo: true },
+        { id: 'demo-cov-2', classId: 'demo-cls-2', requestedBy: 'demo-user-2', status: 'open',    reason: 'Family commitment',    timestamp: Date.now() - 7200000,  interestedCovers: [], mentionedCoaches: [currentUser.id], __demo: true },
         { id: 'demo-cov-3', classId: 'demo-cls-3', requestedBy: 'demo-user-3', status: 'pending', reason: 'Personal matter',      timestamp: Date.now() - 1800000,  interestedCovers: [], __demo: true },
         { id: 'demo-cov-4', classId: 'demo-cls-4', requestedBy: 'demo-user-4', status: 'pending', reason: 'Hospital appointment', timestamp: Date.now() - 600000,   interestedCovers: [], __demo: true },
         { id: 'demo-cov-5', classId: 'demo-cls-5', requestedBy: 'demo-user-5', status: 'claimed', reason: 'Travelling',           claimedBy: currentUser.id, timestamp: Date.now() - 86400000, interestedCovers: [], __demo: true },
@@ -14981,11 +15041,17 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
   else if (activeTab === 'pending') items = coverPending;
   else items = myCover;
 
-  // Sort by date + time (soonest first), hydrate with class
+  // Sort by date + time (soonest first), hydrate with class, but float
+  // cards where I was @mentioned to the top so they're impossible to miss
   items = items.slice()
     .map(r => ({ r, cls: allClasses.find(c => c.id === r.classId) }))
     .filter(x => x.cls)
-    .sort((a, b) => (a.cls.date + a.cls.time).localeCompare(b.cls.date + b.cls.time));
+    .sort((a, b) => {
+      const aAsked = (a.r.mentionedCoaches || []).includes(currentUser.id);
+      const bAsked = (b.r.mentionedCoaches || []).includes(currentUser.id);
+      if (aAsked !== bAsked) return aAsked ? -1 : 1;
+      return (a.cls.date + a.cls.time).localeCompare(b.cls.date + b.cls.time);
+    });
 
   // ─── Handlers ───
   // Demo cards are no-ops on the backend — we just toggle local state so
@@ -15012,6 +15078,11 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
     const isMyRequest = req.requestedBy === currentUser.id;
     const isMyClaim = req.claimedBy === currentUser.id;
     const interested = (req.interestedCovers || []).includes(currentUser.id);
+    // @mention: was I tagged when this was posted?
+    const askedMe = (req.mentionedCoaches || []).includes(currentUser.id);
+    // Discussion thread comment count — pulled from the merged data set
+    // so demos and real records both work.
+    const commentCount = (data?.coverMessages || []).filter(m => m.cover_request_id === req.id).length;
     const dateObj = cls.date ? new Date(cls.date) : null;
     const dayLabel = dateObj
       ? dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase()
@@ -15025,9 +15096,15 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
     const urgencyLabel = isToday2 ? 'TODAY' : isTomorrow ? 'TOMORROW' : null;
     const urgencyColor = isToday2 ? '#c8442a' : '#c6926a';
 
-    // Status badge top-right
+    // Status badge top-right — priority: askedMe > pending > covering > urgency
     let statusBadge = null;
-    if (req.status === 'pending') {
+    if (askedMe && !isMyClaim) {
+      statusBadge = (
+        <span style={styles.coverCardStatusAsked}>
+          <AtSign size={10} strokeWidth={2.4} /> Asked you
+        </span>
+      );
+    } else if (req.status === 'pending') {
       statusBadge = (
         <span style={styles.coverCardStatusPending}>
           <Clock size={10} strokeWidth={2.4} /> Awaiting approval
@@ -15081,10 +15158,37 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
           </button>
         </div>
       );
+    } else if (isMyClaim && !req.__demo) {
+      // I've claimed this cover but might need to bail. Pass-it-on opens
+      // a modal where I can release it back to the board or send it to a
+      // specific coach.
+      actions = (
+        <div style={styles.coverCardActionRow}>
+          <button onClick={() => onPassOn(req.id)} className="salus-btn"
+            style={styles.coverCardCantBtn}>
+            <ArrowLeftRight size={13} strokeWidth={2.4} style={{ marginRight: 6 }} />
+            Pass it on
+          </button>
+        </div>
+      );
     }
 
     return (
-      <div key={req.id} style={styles.coverCardTile}>
+      <div key={req.id} style={{
+        ...styles.coverCardTile,
+        // Mentioned cards get a warm amber accent border to stand out
+        ...(askedMe && !isMyClaim ? {
+          boxShadow: '0 1px 3px rgba(198, 146, 106, 0.18), 0 8px 24px rgba(198, 146, 106, 0.18)',
+          borderLeft: '3px solid #c6926a',
+          paddingLeft: 19,
+        } : {}),
+        // Whole card is the tap target for the discussion thread modal.
+        // Action buttons inside stopPropagation so they fire their own
+        // handlers without also opening the thread.
+        cursor: req.__demo ? 'default' : 'pointer',
+      }}
+      onClick={() => { if (!req.__demo) onOpenThread(req.id); }}
+      >
         <div style={styles.coverCardChipRow}>
           <span style={styles.coverCardDateEyebrow}>
             {dayLabel} {String('·')} {cls.time}
@@ -15096,8 +15200,27 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
           {STUDIOS[cls.studio]?.label || 'Studio'} {String('·')} {cls.dur} min
         </div>
         <div style={styles.coverCardDescription}>{description}</div>
-        {actions && <div style={styles.coverCardActionDivider} />}
-        {actions}
+
+        {/* Footer row: comment count indicator (left), action buttons (right).
+            Comment count signals there's a discussion to read. */}
+        {(actions || commentCount > 0) && (
+          <div style={styles.coverCardActionDivider} />
+        )}
+        {(actions || commentCount > 0) && (
+          <div style={styles.coverCardFooterRow}>
+            <div style={styles.coverCardCommentCount}>
+              <MessageCircle size={13} strokeWidth={2.2} />
+              <span>
+                {commentCount === 0 ? 'Discuss' : commentCount === 1 ? '1 comment' : `${commentCount} comments`}
+              </span>
+            </div>
+            {actions && (
+              <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex', gap: 8 }}>
+                {actions.props.children}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     );
   };
@@ -16278,6 +16401,9 @@ function ClassDetailModal({ classObj, data, currentUser, isManager, onClose, onR
   const [mode, setMode] = useState('view'); // view | requestCover | swap
   const [reason, setReason] = useState('');
   const [swapTarget, setSwapTarget] = useState('');
+  // @mention picker — coaches the requester wants to nudge directly.
+  // Empty by default; users opt in to tagging specific people.
+  const [mentionedCoaches, setMentionedCoaches] = useState([]);
 
   const coach = data.users.find(u => u.id === classObj.coachId);
   const typeCfg = CLASS_TYPES[classObj.type] || {};
@@ -16612,9 +16738,83 @@ function ClassDetailModal({ classObj, data, currentUser, isManager, onClose, onR
               fontFamily: 'Inter, system-ui, sans-serif',
               fontSize: 14, color: '#1a2620', lineHeight: 1.5,
               resize: 'vertical', minHeight: 90,
-              boxSizing: 'border-box', marginBottom: 12,
+              boxSizing: 'border-box', marginBottom: 18,
             }}
           />
+
+          {/* ── @mention coaches — optional direct nudge ── */}
+          {/* Pick specific coaches to ping. They see "Asked you specifically"
+              on their Cover board. Empty = broadcast to everyone qualified. */}
+          <label style={{
+            display: 'block',
+            fontFamily: 'Inter, system-ui, sans-serif',
+            fontSize: 11, fontWeight: 600,
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            color: '#7a6f5f', marginBottom: 6,
+          }}>
+            Ask specific coaches (optional)
+          </label>
+          <div style={{
+            fontFamily: 'Inter, system-ui, sans-serif',
+            fontSize: 12, color: '#a59478', lineHeight: 1.5,
+            marginBottom: 10,
+          }}>
+            Tap a name to send them a personal nudge. They'll see this at the top of their Cover board.
+          </div>
+          <div style={{
+            display: 'flex', flexWrap: 'wrap', gap: 6,
+            marginBottom: 18,
+          }}>
+            {data.users
+              .filter(u =>
+                u.id !== currentUser.id &&
+                (u.role === 'coach' || u.role === 'manager' || u.role === 'admin')
+              )
+              .slice(0, 24) // safety cap; UI is for a small team
+              .map(u => {
+                const isOn = mentionedCoaches.includes(u.id);
+                return (
+                  <button
+                    key={u.id}
+                    type="button"
+                    onClick={() => {
+                      setMentionedCoaches(prev =>
+                        prev.includes(u.id)
+                          ? prev.filter(id => id !== u.id)
+                          : [...prev, u.id]
+                      );
+                    }}
+                    className="salus-btn"
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      padding: '6px 12px 6px 6px',
+                      borderRadius: 999,
+                      background: isOn ? '#1a2620' : 'transparent',
+                      border: `1px solid ${isOn ? '#1a2620' : 'rgba(92, 74, 56, 0.18)'}`,
+                      color: isOn ? '#fffdf7' : '#5c4a38',
+                      fontFamily: 'Inter, system-ui, sans-serif',
+                      fontSize: 12, fontWeight: isOn ? 600 : 500,
+                      cursor: 'pointer',
+                      appearance: 'none', WebkitAppearance: 'none',
+                    }}
+                  >
+                    <span style={{
+                      width: 22, height: 22, borderRadius: 11,
+                      background: isOn ? 'rgba(255, 253, 247, 0.18)' : '#f5f1e8',
+                      color: isOn ? '#fffdf7' : '#5c4a38',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 10, fontWeight: 600,
+                      flexShrink: 0,
+                    }}>
+                      {u.name?.charAt(0) || '?'}
+                    </span>
+                    {u.name?.split(' ')[0]}
+                    {isOn && <Check size={11} strokeWidth={2.6} />}
+                  </button>
+                );
+              })}
+          </div>
+
           <div style={{
             fontFamily: 'Inter, system-ui, sans-serif',
             fontSize: 12, color: '#7a6f5f', lineHeight: 1.5,
@@ -16626,7 +16826,7 @@ function ClassDetailModal({ classObj, data, currentUser, isManager, onClose, onR
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
             <button
-              onClick={() => onRequestCover(reason)}
+              onClick={() => onRequestCover(reason, mentionedCoaches)}
               className="salus-btn"
               style={{
                 flex: 1, padding: '13px 20px', borderRadius: 999,
@@ -18113,6 +18313,213 @@ function UrgentCoverModal({ requests, classes, users, currentUser, onClaim, onVi
             Later
           </button>
         </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── PassOnCoverModal ─────────────────────────────────────────────────────
+// Opens when a coach taps "Pass it on" on a cover they've claimed but can
+// no longer do. Two paths:
+//   1. Back to the board → cover becomes open, anyone can take it
+//   2. Send to specific coach(es) → also open, but @mentions tagged coaches
+//      so they see "Asked you specifically" on their board
+// Reuses the same coach-chip picker pattern as the request cover form.
+function PassOnCoverModal({ request, data, currentUser, onClose, onPassOn }) {
+  // Mode: 'choose' (initial choice) | 'pick' (specific-coach picker)
+  const [mode, setMode] = useState('choose');
+  const [selected, setSelected] = useState([]);
+
+  if (!request) return null;
+  const cls = data.classes.find(c => c.id === request.classId);
+  const originalRequester = data.users.find(u => u.id === request.requestedBy);
+  const dateObj = cls?.date ? new Date(cls.date) : null;
+  const dateLabel = dateObj
+    ? dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
+    : (cls ? DAYS[cls.day] : '');
+
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ padding: '4px 2px 8px' }}>
+        <div style={{
+          fontFamily: 'Inter, system-ui, sans-serif',
+          fontSize: 10, fontWeight: 700,
+          letterSpacing: '0.14em', textTransform: 'uppercase',
+          color: '#a59478', marginBottom: 8,
+        }}>
+          {dateLabel} &middot; {cls?.time}
+        </div>
+        <h2 style={{
+          fontFamily: '"Playfair Display", Georgia, serif',
+          fontSize: 24, fontWeight: 500,
+          color: '#1a2620', lineHeight: 1.15,
+          letterSpacing: '-0.015em',
+          margin: '0 0 6px',
+        }}>
+          Pass on {cls?.type}
+        </h2>
+        <div style={{
+          fontFamily: 'Inter, system-ui, sans-serif',
+          fontSize: 13, color: '#7a6f5f',
+          marginBottom: 22,
+        }}>
+          Originally for {originalRequester?.name?.split(' ')[0] || 'a teammate'}.
+          You won't be covering this anymore.
+        </div>
+
+        {mode === 'choose' && (
+          <>
+            {/* Two paths — back to board, or send to someone specific */}
+            <button
+              onClick={() => onPassOn([])}
+              className="salus-btn"
+              style={styles.passOnPrimaryBtn}
+            >
+              <ArrowLeftRight size={16} strokeWidth={2.2} />
+              <div style={{ textAlign: 'left' }}>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>Back to the board</div>
+                <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>
+                  Anyone qualified can claim it
+                </div>
+              </div>
+            </button>
+            <button
+              onClick={() => setMode('pick')}
+              className="salus-btn"
+              style={styles.passOnSecondaryBtn}
+            >
+              <AtSign size={16} strokeWidth={2.2} />
+              <div style={{ textAlign: 'left' }}>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>Send to specific coach</div>
+                <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>
+                  Nudge someone you think can take it
+                </div>
+              </div>
+            </button>
+            <button
+              onClick={onClose}
+              className="salus-btn"
+              style={{
+                width: '100%', padding: '13px 20px', borderRadius: 999,
+                background: 'transparent',
+                border: '1px solid rgba(92, 74, 56, 0.15)',
+                color: '#5c4a38',
+                fontFamily: 'Inter, system-ui, sans-serif',
+                fontSize: 14, fontWeight: 500, marginTop: 4,
+                cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+          </>
+        )}
+
+        {mode === 'pick' && (
+          <>
+            <label style={{
+              display: 'block',
+              fontFamily: 'Inter, system-ui, sans-serif',
+              fontSize: 11, fontWeight: 600,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              color: '#7a6f5f', marginBottom: 6,
+            }}>
+              Who should take it?
+            </label>
+            <div style={{
+              fontFamily: 'Inter, system-ui, sans-serif',
+              fontSize: 12, color: '#a59478', lineHeight: 1.5,
+              marginBottom: 10,
+            }}>
+              They'll see this at the top of their Cover board with an "Asked you" badge.
+            </div>
+            <div style={{
+              display: 'flex', flexWrap: 'wrap', gap: 6,
+              marginBottom: 18,
+            }}>
+              {data.users
+                .filter(u =>
+                  u.id !== currentUser.id &&
+                  u.id !== request.requestedBy &&
+                  (u.role === 'coach' || u.role === 'manager' || u.role === 'admin')
+                )
+                .slice(0, 24)
+                .map(u => {
+                  const isOn = selected.includes(u.id);
+                  return (
+                    <button
+                      key={u.id}
+                      type="button"
+                      onClick={() => {
+                        setSelected(prev =>
+                          prev.includes(u.id)
+                            ? prev.filter(id => id !== u.id)
+                            : [...prev, u.id]
+                        );
+                      }}
+                      className="salus-btn"
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                        padding: '6px 12px 6px 6px',
+                        borderRadius: 999,
+                        background: isOn ? '#1a2620' : 'transparent',
+                        border: `1px solid ${isOn ? '#1a2620' : 'rgba(92, 74, 56, 0.18)'}`,
+                        color: isOn ? '#fffdf7' : '#5c4a38',
+                        fontFamily: 'Inter, system-ui, sans-serif',
+                        fontSize: 12, fontWeight: isOn ? 600 : 500,
+                        cursor: 'pointer',
+                        appearance: 'none', WebkitAppearance: 'none',
+                      }}
+                    >
+                      <span style={{
+                        width: 22, height: 22, borderRadius: 11,
+                        background: isOn ? 'rgba(255, 253, 247, 0.18)' : '#f5f1e8',
+                        color: isOn ? '#fffdf7' : '#5c4a38',
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 10, fontWeight: 600,
+                        flexShrink: 0,
+                      }}>
+                        {u.name?.charAt(0) || '?'}
+                      </span>
+                      {u.name?.split(' ')[0]}
+                      {isOn && <Check size={11} strokeWidth={2.6} />}
+                    </button>
+                  );
+                })}
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={() => onPassOn(selected)}
+                disabled={selected.length === 0}
+                className="salus-btn"
+                style={{
+                  flex: 1, padding: '13px 20px', borderRadius: 999,
+                  background: selected.length === 0 ? 'rgba(26, 38, 32, 0.30)' : '#1a2620',
+                  color: '#fffdf7',
+                  fontFamily: 'Inter, system-ui, sans-serif',
+                  fontSize: 14, fontWeight: 600, letterSpacing: '0.02em',
+                  border: 'none', cursor: selected.length === 0 ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {selected.length === 0 ? 'Pick a coach' : `Send to ${selected.length} ${selected.length === 1 ? 'coach' : 'coaches'}`}
+              </button>
+              <button
+                onClick={() => { setMode('choose'); setSelected([]); }}
+                className="salus-btn"
+                style={{
+                  padding: '13px 20px', borderRadius: 999,
+                  background: 'transparent',
+                  border: '1px solid rgba(92, 74, 56, 0.15)',
+                  color: '#5c4a38',
+                  fontFamily: 'Inter, system-ui, sans-serif',
+                  fontSize: 14, fontWeight: 500,
+                  cursor: 'pointer',
+                }}
+              >
+                Back
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </Modal>
   );
@@ -20703,6 +21110,28 @@ const styles = {
     background: 'rgba(26, 38, 32, 0.06)',
     margin: '16px 0 0',
   },
+  // Footer row — comment count on the left, action buttons on the right.
+  // Justify-between so they push to opposite edges. Sits below the
+  // hairline divider for natural visual separation.
+  coverCardFooterRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginTop: 14,
+  },
+  // "Discuss" / "N comments" pill. Sage-tinted when comments exist
+  // (signal there's something to read), muted otherwise (still a CTA).
+  coverCardCommentCount: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 5,
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 12, fontWeight: 600,
+    color: '#7a6f5f',
+    letterSpacing: '0.01em',
+    flexShrink: 0,
+  },
   // Top row: studio chip on left, urgency/state badge on right
   coverCardChipRow: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -20886,6 +21315,51 @@ const styles = {
     fontFamily: 'Inter, system-ui, sans-serif',
     fontSize: 10, fontWeight: 700,
     letterSpacing: '0.08em', textTransform: 'uppercase',
+  },
+  // Amber "asked you" pill — when someone @mentioned you on a cover.
+  // Warmer/more personal than urgency; signals personal nudge.
+  coverCardStatusAsked: {
+    display: 'inline-flex', alignItems: 'center', gap: 4,
+    padding: '4px 10px',
+    background: 'rgba(198, 146, 106, 0.18)',
+    color: '#8a5a32',
+    borderRadius: 999,
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 10, fontWeight: 700,
+    letterSpacing: '0.08em', textTransform: 'uppercase',
+  },
+
+  // ─── PASS-ON MODAL BUTTONS ───
+  // Two stacked option cards inside the modal. Each has an icon + a
+  // title + sub-text, full-width, generous tap area. Primary is filled
+  // forest (back to board — the safer default), secondary is outline.
+  passOnPrimaryBtn: {
+    display: 'flex', alignItems: 'center', gap: 14,
+    width: '100%',
+    padding: '14px 18px',
+    marginBottom: 10,
+    borderRadius: 14,
+    background: '#1a2620',
+    color: '#fffdf7',
+    border: 'none',
+    fontFamily: 'Inter, system-ui, sans-serif',
+    cursor: 'pointer',
+    appearance: 'none', WebkitAppearance: 'none',
+    textAlign: 'left',
+  },
+  passOnSecondaryBtn: {
+    display: 'flex', alignItems: 'center', gap: 14,
+    width: '100%',
+    padding: '14px 18px',
+    marginBottom: 14,
+    borderRadius: 14,
+    background: '#ffffff',
+    color: '#1a2620',
+    border: '1px solid rgba(92, 74, 56, 0.15)',
+    fontFamily: 'Inter, system-ui, sans-serif',
+    cursor: 'pointer',
+    appearance: 'none', WebkitAppearance: 'none',
+    textAlign: 'left',
   },
   // Plain urgency text — TODAY/TOMORROW with coloured text only
   coverCardUrgency: {
