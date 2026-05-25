@@ -353,6 +353,14 @@ export default function SalusStaff() {
   const [lastViewed, setLastViewed] = useState({ chat: 0, cover: 0 });
   const [urgentCoverDismissed, setUrgentCoverDismissed] = useState(false);
   const [showUrgentCover, setShowUrgentCover] = useState(false);
+  // Minimum-show timer for the opening screen so the greeting + quote
+  // can actually be read before the app pops to Home. Flips to true
+  // 2.6s after mount, regardless of how fast auth/data load.
+  const [splashMinElapsed, setSplashMinElapsed] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSplashMinElapsed(true), 2600);
+    return () => clearTimeout(t);
+  }, []);
 
   // Listen for Me page admin section button clicks
   useEffect(() => {
@@ -762,12 +770,19 @@ export default function SalusStaff() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ─── Loading screens — animated logo ────────────────────────────────────
+  // ─── Loading screens — animated logo + greeting + quote ────────────────
+  // Show the opening screen while ANY of the following hold true:
+  //   • auth still resolving
+  //   • signed-in but data still loading
+  //   • signed-in + data loaded BUT the minimum-read timer hasn't elapsed
+  // The third condition is what gives the greeting + quote enough time
+  // to be read on fast loads.
   if (!authChecked) {
     return <LoadingLogo />;
   }
 
-  // Not logged in → show login screen
+  // Not logged in → show login screen (no splash gate needed; login is
+  // its own screen with its own greeting)
   if (!session) {
     return (
       <LoginScreen
@@ -779,7 +794,7 @@ export default function SalusStaff() {
     );
   }
 
-  if (loading) {
+  if (loading || !splashMinElapsed) {
     return <LoadingLogo />;
   }
 
@@ -6384,40 +6399,32 @@ function BroadcastBanner({ broadcasts, broadcastReads, currentUser, onMarkRead }
 
   return (
     <div style={{
-      // ─── LIQUID GLASS EFFECT ───
-      // Inspired by Apple's iOS 26 "Liquid Glass" + the reference Photoshop
-      // overlay. Recipe:
-      //   1. Translucent gradient surface (lit from above, slightly darker
-      //      below) gives the glass its own subtle volume
-      //   2. Backdrop blur + saturate boost = heavy distortion of bg through
-      //      the glass, like looking through a wet pebble
-      //   3. Inset top white highlight = curved glass edge catching light
-      //   4. Inset bottom dark line = subtle refraction/gravity below
-      //   5. Outer soft warm drop shadow = the glass floats
-      //   6. Heavily rounded corners (24px) make it feel like a pill/lens
-      //      rather than a rectangle
+      // ─── CHARCOAL MESSAGE BOARD ───
+      // Most prominent home tile. The studio's voice — Luke speaking to
+      // the team. Deep forest-charcoal background, cream text. Larger
+      // padding + stronger drop shadow so it visually leads the page.
       position: 'relative',
-      background: 'linear-gradient(180deg, rgba(255, 255, 255, 0.32) 0%, rgba(255, 255, 255, 0.18) 100%)',
-      backdropFilter: 'blur(20px) saturate(180%)',
-      WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-      border: '1px solid rgba(255, 255, 255, 0.28)',
-      borderRadius: 24,
-      padding: '20px 22px', marginBottom: 18,
+      background:
+        'radial-gradient(circle 280px at 88% 0%, rgba(198, 146, 106, 0.10) 0%, rgba(198, 146, 106, 0) 70%), ' +
+        'linear-gradient(180deg, #232f29 0%, #1a2620 100%)',
+      color: '#fffdf7',
+      borderRadius: 22,
+      padding: '24px 24px 20px', marginBottom: 22,
       boxShadow:
-        'inset 0 1px 0 rgba(255, 255, 255, 0.55), ' +
-        'inset 0 -1px 0 rgba(0, 0, 0, 0.06), ' +
-        '0 10px 28px rgba(92, 74, 56, 0.12)',
-      display: 'flex', flexDirection: 'column', gap: 10,
+        'inset 0 1px 0 rgba(255, 253, 247, 0.06), ' +
+        '0 14px 36px rgba(26, 38, 32, 0.25), ' +
+        '0 4px 12px rgba(26, 38, 32, 0.14)',
+      display: 'flex', flexDirection: 'column', gap: 14,
     }}>
-      {/* "From Luke" pill — same design language as event card date pills */}
+      {/* "From Luke" pill — invert to live nicely on the dark surface */}
       <div style={{
         alignSelf: 'flex-start',
         fontSize: 9.5, fontWeight: 700,
         letterSpacing: '0.16em', textTransform: 'uppercase',
-        color: isUrgent ? COLOR.coral : COLOR.brown,
-        background: isUrgent ? '#fbe5dd' : '#f5f0e0',
-        border: `1px solid ${isUrgent ? '#f0c6b6' : COLOR.bone}`,
-        padding: '5px 9px', borderRadius: 999,
+        color: isUrgent ? '#fffdf7' : '#c6926a',
+        background: isUrgent ? '#c8442a' : 'rgba(198, 146, 106, 0.16)',
+        border: `1px solid ${isUrgent ? 'transparent' : 'rgba(198, 146, 106, 0.30)'}`,
+        padding: '5px 10px', borderRadius: 999,
       }}>
         {pillLabel}
       </div>
@@ -6425,15 +6432,28 @@ function BroadcastBanner({ broadcasts, broadcastReads, currentUser, onMarkRead }
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           {latest.title && (
-            <div style={{ ...TYPE.cardTitle, fontSize: 15, marginBottom: 4 }}>
+            <div style={{
+              fontFamily: '"Playfair Display", Georgia, serif',
+              fontSize: 19, fontWeight: 500,
+              color: '#fffdf7', letterSpacing: '-0.01em',
+              lineHeight: 1.2, marginBottom: 6,
+            }}>
               {latest.title}
             </div>
           )}
-          <div style={{ ...TYPE.body, color: COLOR.brown, lineHeight: 1.5, fontSize: 13 }}>
+          <div style={{
+            fontSize: 15, lineHeight: 1.5,
+            color: 'rgba(255, 253, 247, 0.88)',
+            fontFamily: 'Inter, system-ui, sans-serif',
+          }}>
             {latest.body}
           </div>
           {!usePlaceholder && unread.length > 1 && (
-            <div style={{ ...TYPE.metaSmall, marginTop: 8 }}>
+            <div style={{
+              fontSize: 11, color: 'rgba(255, 253, 247, 0.5)',
+              marginTop: 10, fontStyle: 'italic',
+              fontFamily: '"Playfair Display", Georgia, serif',
+            }}>
               + {unread.length - 1} more
             </div>
           )}
@@ -6441,9 +6461,9 @@ function BroadcastBanner({ broadcasts, broadcastReads, currentUser, onMarkRead }
         {!usePlaceholder && (
           <button onClick={() => onMarkRead(latest.id)} className="salus-btn" style={{
             background: 'transparent', border: 'none', padding: 4,
-            color: COLOR.taupe, fontSize: 10, letterSpacing: '0.08em',
-            textTransform: 'uppercase', fontWeight: 500, flexShrink: 0,
-            cursor: 'pointer',
+            color: 'rgba(255, 253, 247, 0.6)', fontSize: 10, letterSpacing: '0.08em',
+            textTransform: 'uppercase', fontWeight: 600, flexShrink: 0,
+            cursor: 'pointer', fontFamily: 'inherit',
           }}>
             Got it
           </button>
@@ -6451,31 +6471,44 @@ function BroadcastBanner({ broadcasts, broadcastReads, currentUser, onMarkRead }
       </div>
 
       {/* ─── Tool chips — interactive manager touchpoints ───
-          Hairline divider above, then a wrap row of 4 glass chips:
-          Book 1:1, Ask, Kudos, Idea. Each opens a modal via the
-          salus:openModal event bus. */}
+          Hairline divider above (now in cream tones for the dark theme),
+          then Book 1:1 + Ask. Dark surface needs lighter borders + tones.*/}
       <div style={{
-        marginTop: 4,
-        paddingTop: 14,
-        borderTop: '1px solid rgba(255, 255, 255, 0.32)',
+        marginTop: 6,
+        paddingTop: 16,
+        borderTop: '1px solid rgba(255, 253, 247, 0.10)',
         display: 'flex', gap: 10,
       }}>
         <button
           onClick={() => window.dispatchEvent(new CustomEvent('salus:openModal', { detail: { type: 'bookOneOnOne' } }))}
           className="salus-btn"
-          style={styles.broadcastBox}
+          style={{
+            flex: 1, padding: '12px 16px', borderRadius: 14,
+            background: 'rgba(255, 253, 247, 0.08)',
+            border: '1px solid rgba(255, 253, 247, 0.14)',
+            color: '#fffdf7', fontSize: 14, fontWeight: 500,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            fontFamily: 'inherit', cursor: 'pointer',
+          }}
           aria-label="Book a 1:1 with Luke"
         >
-          <Calendar size={16} strokeWidth={2} />
+          <Calendar size={16} strokeWidth={1.8} />
           <span>Book 1:1</span>
         </button>
         <button
           onClick={() => window.dispatchEvent(new CustomEvent('salus:openModal', { detail: { type: 'quickSend', kind: 'question' } }))}
           className="salus-btn"
-          style={styles.broadcastBox}
+          style={{
+            flex: 1, padding: '12px 16px', borderRadius: 14,
+            background: 'rgba(255, 253, 247, 0.08)',
+            border: '1px solid rgba(255, 253, 247, 0.14)',
+            color: '#fffdf7', fontSize: 14, fontWeight: 500,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            fontFamily: 'inherit', cursor: 'pointer',
+          }}
           aria-label="Ask Luke a question"
         >
-          <MessageCircle size={16} strokeWidth={2} />
+          <MessageCircle size={16} strokeWidth={1.8} />
           <span>Ask</span>
         </button>
       </div>
@@ -12321,7 +12354,7 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
   // becomes a no-op because their stored list now includes them.
   // Detection: if the user has NONE of the listed new tiles, they're
   // still on the old layout and need the backfill.
-  const NEW_TILES_BACKFILL = ['myday', 'wellbeing', 'todos', 'broadcasts', 'spotlight', 'studioevents'];
+  const NEW_TILES_BACKFILL = ['myday', 'todos', 'broadcasts', 'spotlight', 'studioevents'];
   const hasAnyNewTile = NEW_TILES_BACKFILL.some(k => rawWidgets.includes(k));
   const widgetsWithBackfill = hasAnyNewTile
     ? rawWidgets
@@ -12381,17 +12414,6 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
                 currentUser={currentUser}
                 isManager={isManager}
                 onClassClick={onClassClick}
-              />
-            );
-
-          case 'wellbeing':
-            return (
-              <WellbeingCheckin
-                key="wellbeing"
-                data={data}
-                currentUser={currentUser}
-                onLog={onLogWellbeing}
-                onClear={onClearWellbeing}
               />
             );
 
@@ -13444,9 +13466,8 @@ function ChatPreviewWidget({ data, currentUser, onViewChat }) {
 // widget. HomeHero (greeting + next class) is the only fixed element
 // since it's the brand identity. Everything else, the coach picks.
 const ALL_WIDGETS = [
-  // ─── Your day & wellbeing — soft, personal, top of the scroll ───
+  // ─── Your day — soft, personal, top of the scroll ───
   { key: 'myday',         group: 'day',       label: 'Your day',               Icon: Calendar,      desc: 'This week stats + birthdays' },
-  { key: 'wellbeing',     group: 'day',       label: 'Wellbeing check-in',     Icon: Heart,         desc: 'Daily "how are you?" — private to you' },
   { key: 'todos',         group: 'day',       label: 'To-do list',             Icon: ListChecks,    desc: 'Your personal task list — private' },
   { key: 'upcoming',      group: 'day',       label: 'Your upcoming classes', Icon: Calendar,      desc: 'Your next teaching slots' },
 
@@ -13462,10 +13483,11 @@ const ALL_WIDGETS = [
   { key: 'quote',         group: 'extras',    label: 'Quote of the day',      Icon: Quote,         desc: 'A different quote each day' },
 ];
 
-// Sensible defaults — wellbeing and todos lead because they're new
-// and important, then your day's classes + studio news.
-const DEFAULT_WIDGETS_MANAGER = ['myday', 'wellbeing', 'todos', 'cover', 'tasks', 'tours', 'upcoming', 'broadcasts', 'spotlight', 'studioevents'];
-const DEFAULT_WIDGETS_STAFF   = ['myday', 'wellbeing', 'todos', 'upcoming', 'broadcasts', 'spotlight', 'cover', 'studioevents'];
+// Sensible defaults — broadcasts lead because they're the most important
+// thing a coach should see ("what's the studio asking of me?"), then
+// their day, then everything else.
+const DEFAULT_WIDGETS_MANAGER = ['broadcasts', 'myday', 'todos', 'cover', 'tasks', 'tours', 'upcoming', 'spotlight', 'studioevents'];
+const DEFAULT_WIDGETS_STAFF   = ['broadcasts', 'myday', 'todos', 'upcoming', 'spotlight', 'cover', 'studioevents'];
 
 // ─── Per-tab page themes ────────────────────────────────────────────────
 // Each tab can have its own page atmosphere — different background
