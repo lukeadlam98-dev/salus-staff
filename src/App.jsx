@@ -14899,21 +14899,17 @@ function StatusBar({ data, currentUser, isManager, onJumpTo }) {
 }
 
 function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCancel, onManage, onExpressInterest }) {
-  const sortByDay = (a, b) => {
-    const ca = data.classes.find(c => c.id === a.classId);
-    const cb = data.classes.find(c => c.id === b.classId);
-    if (ca.day !== cb.day) return ca.day - cb.day;
-    return ca.time.localeCompare(cb.time);
-  };
+  // ─── Tab state ───
+  // Three tabs: Cover needed (open, can claim) / Cover pending (awaiting
+  // manager approval) / My Cover (things I've claimed or asked for myself)
+  const [activeTab, setActiveTab] = useState('needed');
 
-  const allPending = data.coverRequests.filter(r => r.status === 'pending').sort(sortByDay);
-  const myPending = allPending.filter(r => r.requestedBy === currentUser.id);
-  const openRequests = data.coverRequests.filter(r => r.status === 'open').sort(sortByDay);
-  const resolvedRequests = data.coverRequests.filter(r => r.status === 'claimed' || r.status === 'assigned');
+  // ─── Per-session "Can't take this" dismissals ───
+  // Local state — when staff taps Can't, the card disappears from view.
+  // Refreshing the page brings it back. Lightweight, no backend.
+  const [dismissed, setDismissed] = useState(new Set());
 
-  const totalActive = (isManager ? allPending.length : myPending.length) + openRequests.length;
-
-  // ── Calendar state (collapsed by default, toggled from the header icon)
+  // ─── Calendar state (collapsed by default, toggled from header icon) ───
   const [calendarExpanded, setCalendarExpanded] = useState(false);
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const [selectedDate, setSelectedDate] = useState(today);
@@ -14921,19 +14917,55 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
   const todayIso = toIso(today);
   const selectedIso = toIso(selectedDate);
 
-  // Date metadata — count of OPEN cover requests per date.
-  // Pending ones are excluded from the calendar markers since they're
-  // waiting on manager approval and not yet on the board.
+  // ─── Filter requests by tab ───
+  const allCovers = data?.coverRequests || [];
+  const allClasses = data?.classes || [];
+
+  // Cover needed: open requests, not mine, not dismissed
+  const coverNeeded = allCovers.filter(r =>
+    r.status === 'open' &&
+    r.requestedBy !== currentUser.id &&
+    !dismissed.has(r.id)
+  );
+
+  // Cover pending: all pending (awaiting manager approval)
+  const coverPending = allCovers.filter(r => r.status === 'pending');
+
+  // My Cover: things I'm doing (claimed/assigned to me) + my own requests still active
+  const myCover = allCovers.filter(r =>
+    r.claimedBy === currentUser.id ||
+    (r.requestedBy === currentUser.id && (r.status === 'pending' || r.status === 'open'))
+  );
+
+  const counts = {
+    needed: coverNeeded.length,
+    pending: coverPending.length,
+    mine: myCover.length,
+  };
+
+  // Active list
+  let items;
+  if (activeTab === 'needed') items = coverNeeded;
+  else if (activeTab === 'pending') items = coverPending;
+  else items = myCover;
+
+  // Sort by date + time (soonest first)
+  items = items.slice()
+    .map(r => ({ r, cls: allClasses.find(c => c.id === r.classId) }))
+    .filter(x => x.cls)
+    .sort((a, b) => (a.cls.date + a.cls.time).localeCompare(b.cls.date + b.cls.time));
+
+  // ─── Calendar date metadata ───
   const coverDateMeta = useMemo(() => {
     const meta = {};
-    (data.coverRequests || []).forEach(req => {
-      if (req.status !== 'open') return;
-      const cls = (data.classes || []).find(c => c.id === req.classId);
+    allCovers.forEach(req => {
+      if (req.status !== 'open' && req.status !== 'pending') return;
+      const cls = allClasses.find(c => c.id === req.classId);
       if (!cls) return;
       meta[cls.date] = (meta[cls.date] || 0) + 1;
     });
     return meta;
-  }, [data.coverRequests, data.classes]);
+  }, [allCovers, allClasses]);
 
   // Calendar grid — 6 rows × 7 cols
   const monthYear = selectedDate.getFullYear();
@@ -14958,17 +14990,128 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
   const goNextMonth = () => setSelectedDate(new Date(monthYear, monthIdx + 1, 1));
   const monthLabel = selectedDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 
+  // ─── Handlers ───
+  const handleTake = (req) => {
+    if (isCoverCoach) onExpressInterest(req.id);
+    else onClaim(req.id);
+  };
+  const handleDismiss = (id) => {
+    setDismissed(prev => new Set([...prev, id]));
+  };
+
+  // ─── Card renderer ───
+  // Renders one cover request as a tactile card. Layout/actions vary by
+  // tab and ownership: needed shows Take/Can't, pending shows status,
+  // mine shows Cancel or "covering for X".
+  const renderCard = ({ r: req, cls }) => {
+    const requester = data.users.find(u => u.id === req.requestedBy);
+    const isMyRequest = req.requestedBy === currentUser.id;
+    const isMyClaim = req.claimedBy === currentUser.id;
+    const interested = (req.interestedCovers || []).includes(currentUser.id);
+    const dateObj = cls.date ? new Date(cls.date) : null;
+    const dayLabel = dateObj
+      ? dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase()
+      : DAYS[cls.day];
+    const isToday2 = cls.date === todayIso;
+    const isTomorrow = (() => {
+      if (!dateObj) return false;
+      const tmw = new Date(today); tmw.setDate(tmw.getDate() + 1);
+      return toIso(tmw) === cls.date;
+    })();
+    const urgencyLabel = isToday2 ? 'TODAY' : isTomorrow ? 'TOMORROW' : null;
+    const urgencyColor = isToday2 ? '#c8442a' : '#c6926a';
+
+    // Status badge (top right of card)
+    let statusBadge = null;
+    if (req.status === 'pending') {
+      statusBadge = (
+        <span style={styles.coverCardStatusPending}>
+          <Clock size={10} strokeWidth={2.4} /> Awaiting approval
+        </span>
+      );
+    } else if (isMyClaim) {
+      statusBadge = (
+        <span style={styles.coverCardStatusCovering}>
+          <Check size={10} strokeWidth={2.4} /> Covering
+        </span>
+      );
+    } else if (urgencyLabel) {
+      statusBadge = (
+        <span style={{ ...styles.coverCardUrgency, color: urgencyColor }}>
+          {urgencyLabel}
+        </span>
+      );
+    }
+
+    // Description line — varies by perspective
+    let description;
+    if (isMyClaim) {
+      description = `Covering for ${requester?.name?.split(' ')[0] || 'a teammate'}`;
+    } else if (isMyRequest) {
+      description = 'You asked for cover';
+    } else {
+      description = `${requester?.name?.split(' ')[0] || 'A teammate'} needs cover`;
+    }
+
+    // Action buttons — vary by tab and ownership
+    let actions = null;
+    if (req.status === 'open' && !isMyRequest && !isMyClaim) {
+      // Cover needed — Take it / Can't
+      actions = (
+        <div style={styles.coverCardActionRow}>
+          <button onClick={() => handleTake(req)} className="salus-btn"
+            style={interested ? styles.coverCardCanBtnDone : styles.coverCardCanBtn}>
+            {interested ? (<><Check size={13} strokeWidth={2.4} /> On it</>) : 'I can do this'}
+          </button>
+          <button onClick={() => handleDismiss(req.id)} className="salus-btn"
+            style={styles.coverCardCantBtn}>
+            Can't
+          </button>
+        </div>
+      );
+    } else if (isMyRequest && (req.status === 'pending' || req.status === 'open')) {
+      // My own request — Cancel option
+      actions = (
+        <div style={styles.coverCardActionRow}>
+          <button onClick={() => onCancel(req.id)} className="salus-btn"
+            style={styles.coverCardCancelBtn}>
+            Cancel request
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div key={req.id} style={styles.coverCardTile}>
+        <div style={styles.coverCardChipRow}>
+          <span style={styles.coverCardDateEyebrow}>
+            {dayLabel} {String('·')} {cls.time}
+          </span>
+          {statusBadge}
+        </div>
+        <div style={styles.coverCardTitle}>{cls.type}</div>
+        <div style={styles.coverCardMetaLine}>
+          {STUDIOS[cls.studio]?.label || 'Studio'} {String('·')} {cls.dur} min
+        </div>
+        <div style={styles.coverCardDescription}>{description}</div>
+        {actions}
+      </div>
+    );
+  };
+
+  // ─── Empty state copy varies by tab ───
+  const emptyCopy = {
+    needed: { title: 'Nothing to cover', sub: "You're all set — no cover needed right now." },
+    pending: { title: 'Nothing pending', sub: 'No cover requests are waiting for approval.' },
+    mine: { title: 'Nothing yours', sub: "You're not covering anything and haven't asked for cover." },
+  }[activeTab];
+
   return (
     <div>
-      {/* ── Page header — matches Schedule/Home pattern ── */}
+      {/* ── Page header ── */}
       <PageHeader
         eyebrow="The studio"
         title="Cover board"
-        subtitle={
-          isManager
-            ? `${allPending.length} awaiting your decision \u00b7 ${openRequests.length} on the board`
-            : `${myPending.length} of yours pending \u00b7 ${openRequests.length} on the board`
-        }
         action={
           <button
             onClick={() => setCalendarExpanded(v => !v)}
@@ -14982,7 +15125,7 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
         }
       />
 
-      {/* ── Calendar accordion — markers show dates with open cover ── */}
+      {/* ── Calendar accordion ── */}
       {calendarExpanded && (
         <div style={{ ...styles.calendarPanel, marginTop: 0, marginBottom: 22 }}>
           <div style={styles.calendarNavRow}>
@@ -14994,34 +15137,25 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
               <ChevronRight size={18} />
             </button>
           </div>
-
           {(monthYear !== today.getFullYear() || monthIdx !== today.getMonth()) && (
-            <button
-              onClick={() => setSelectedDate(today)}
-              className="salus-btn"
-              style={styles.calendarJumpToday}
-            >
-              {'\u2190'} Jump to today
+            <button onClick={() => setSelectedDate(today)} className="salus-btn"
+              style={styles.calendarJumpToday}>
+              {'←'} Jump to today
             </button>
           )}
-
           <div style={styles.calendarWeekdayRow}>
             {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
               <div key={i} style={styles.calendarWeekday}>{d}</div>
             ))}
           </div>
-
           <div style={styles.calendarDayGrid}>
             {gridCells.map((cell, idx) => {
               const iso = toIso(cell.d);
               const isToday2 = iso === todayIso;
               const isSelected = iso === selectedIso;
               const coverCount = coverDateMeta[iso] || 0;
-
               return (
-                <button
-                  key={idx}
-                  onClick={() => setSelectedDate(new Date(cell.d))}
+                <button key={idx} onClick={() => setSelectedDate(new Date(cell.d))}
                   className="salus-btn"
                   style={{
                     ...styles.calendarDayBtn,
@@ -15033,9 +15167,7 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
                     <div style={{
                       ...styles.calendarDayCount,
                       color: isSelected ? '#f0c8b8' : '#c8442a',
-                    }}>
-                      {coverCount}
-                    </div>
+                    }}>{coverCount}</div>
                   ) : (
                     <div style={{ height: 13 }} />
                   )}
@@ -15043,9 +15175,7 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
                     ...styles.calendarDayNum,
                     fontWeight: isToday2 || isSelected ? 500 : 400,
                     color: isSelected ? '#d4cdb8' : cell.out ? '#a59478' : '#7a8270',
-                  }}>
-                    {cell.d.getDate()}
-                  </div>
+                  }}>{cell.d.getDate()}</div>
                 </button>
               );
             })}
@@ -15053,193 +15183,48 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
         </div>
       )}
 
-      {/* ── COMPUTE: cover I'm on + open requests grouped by date ── */}
+      {/* ── Tab navigation — pill style with count ── */}
+      <div style={styles.coverTabRow}>
+        {[
+          ['needed', 'Cover needed'],
+          ['pending', 'Cover pending'],
+          ['mine', 'My Cover'],
+        ].map(([key, label]) => {
+          const isActive = activeTab === key;
+          const count = counts[key];
+          return (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              className="salus-btn"
+              style={{
+                ...styles.coverTabBtn,
+                ...(isActive ? styles.coverTabBtnActive : {}),
+              }}
+            >
+              <span>{label}</span>
+              {count > 0 && (
+                <span style={{
+                  ...styles.coverTabCount,
+                  background: isActive ? 'rgba(255, 253, 247, 0.18)' : 'rgba(92, 74, 56, 0.10)',
+                  color: isActive ? '#fffdf7' : '#5c4a38',
+                }}>
+                  {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
 
-      {/* ── Section: AWAITING YOUR DECISION (manager only) ── */}
-      {isManager && allPending.length > 0 && (
-        <div style={{ marginBottom: 26 }}>
-          <div style={styles.coverSectionHeader}>
-            <Bell size={11} color="#c8442a" strokeWidth={2.4} />
-            <span style={{ color: '#c8442a' }}>Awaiting your decision</span>
-            <span style={styles.coverSectionCount}>{allPending.length}</span>
-          </div>
-          {allPending.map(req => {
-            const cls = data.classes.find(c => c.id === req.classId);
-            const requester = data.users.find(u => u.id === req.requestedBy);
-            const dateObj = cls?.date ? new Date(cls.date) : null;
-            const whenLabel = dateObj
-              ? dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
-              : DAYS[cls?.day];
-            return (
-              <div key={req.id} style={{
-                ...styles.coverPostCard,
-                background: '#fffaf2',
-                borderLeft: '3px solid #c8442a',
-              }}>
-                <div style={styles.coverPostHeader}>
-                  <div style={styles.coverPostPoster}>
-                    {requester && <UserAvatar user={requester} size={26} fontSize={10} />}
-                    <div style={{ minWidth: 0 }}>
-                      <div style={styles.coverPostName}>{requester?.name?.split(' ')[0]}</div>
-                      <div style={styles.coverPostTime}>{fmtTime(req.timestamp)}</div>
-                    </div>
-                  </div>
-                </div>
-                <div style={styles.coverPostTitle}>{cls?.type}</div>
-                <div style={styles.coverPostMeta}>
-                  {whenLabel} · {cls?.time}
-                </div>
-                <div style={styles.coverPostReason}>"{req.reason}"</div>
-                <div style={styles.coverPostActions}>
-                  <button
-                    onClick={() => onManage(req.id)}
-                    className="salus-btn"
-                    style={styles.coverPrimaryBtn}
-                  >
-                    Review &amp; decide
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+      {/* ── List of cards or empty state ── */}
+      {items.length === 0 ? (
+        <div style={styles.coverEmptyTile}>
+          <div style={styles.coverEmptyTitle}>{emptyCopy.title}</div>
+          <div style={styles.coverEmptyText}>{emptyCopy.sub}</div>
         </div>
-      )}
-
-      {/* ── Section: COVER I'M ON (non-manager, has claimed) ── */}
-      {(() => {
-        const myCovering = (data.coverRequests || [])
-          .filter(r => (r.status === 'claimed' || r.status === 'assigned') && r.claimedBy === currentUser.id)
-          .map(r => ({ ...r, cls: (data.classes || []).find(c => c.id === r.classId) }))
-          .filter(x => x.cls && x.cls.date >= todayIso)
-          .sort((a, b) => (a.cls.date + a.cls.time).localeCompare(b.cls.date + b.cls.time));
-
-        if (myCovering.length === 0) return null;
-        return (
-          <div style={{ marginBottom: 26 }}>
-            <div style={styles.coverSectionHeader}>
-              <Check size={11} color="#7a8c5c" strokeWidth={2.4} />
-              <span>You're covering</span>
-              <span style={styles.coverSectionCount}>{myCovering.length}</span>
-            </div>
-            {myCovering.map(item => {
-              const cls = item.cls;
-              const requester = data.users.find(u => u.id === item.requestedBy);
-              const dateObj = cls.date ? new Date(cls.date) : null;
-              const dayLabel = dateObj
-                ? dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
-                : DAYS[cls.day];
-              const isToday2 = cls.date === todayIso;
-              const isTomorrow = (() => {
-                if (!dateObj) return false;
-                const tmw = new Date(today); tmw.setDate(tmw.getDate() + 1);
-                return toIso(tmw) === cls.date;
-              })();
-              const studioColor = cls.studio === 'reformer' ? '#c6926a' : cls.studio === 'hybrid' ? '#7a8c5c' : '#5c4a38';
-              const studioBg = cls.studio === 'reformer' ? 'rgba(198, 146, 106, 0.14)' : cls.studio === 'hybrid' ? 'rgba(122, 140, 92, 0.14)' : 'rgba(92, 74, 56, 0.10)';
-
-              return (
-                <div key={item.id} style={styles.coverCardTile}>
-                  <div style={styles.coverCardChipRow}>
-                    <span style={{ ...styles.coverCardChip, color: studioColor, background: studioBg }}>
-                      {STUDIOS[cls.studio]?.label || 'Studio'}
-                    </span>
-                    <span style={styles.coverCardCoveringBadge}>
-                      <Check size={10} strokeWidth={2.4} /> Covering
-                    </span>
-                  </div>
-                  <div style={styles.coverCardTitle}>{cls.type}</div>
-                  <div style={styles.coverCardWhen}>
-                    {isToday2 ? 'Today' : isTomorrow ? 'Tomorrow' : dayLabel} · {cls.time} · for {requester?.name?.split(' ')[0]}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        );
-      })()}
-
-      {/* ── Section: COVER AVAILABLE (open requests, discrete card tiles) ── */}
-      {(() => {
-        const visibleOpen = openRequests.filter(r =>
-          isManager || r.requestedBy !== currentUser.id
-        );
-        if (visibleOpen.length === 0) return null;
-
-        // Sort by date+time ascending — most urgent first
-        const sortedOpen = visibleOpen
-          .map(req => ({ req, cls: data.classes.find(c => c.id === req.classId) }))
-          .filter(x => x.cls)
-          .sort((a, b) => (a.cls.date + a.cls.time).localeCompare(b.cls.date + b.cls.time));
-
-        return (
-          <div style={{ marginBottom: 26 }}>
-            <div style={styles.coverSectionHeader}>
-              <span>Cover available</span>
-              <span style={styles.coverSectionCount}>{visibleOpen.length}</span>
-            </div>
-            {sortedOpen.map(({ req, cls }) => {
-              const requester = data.users.find(u => u.id === req.requestedBy);
-              const interested = (req.interestedCovers || []).includes(currentUser.id);
-              const isMine = req.requestedBy === currentUser.id;
-              const dateObj = cls.date ? new Date(cls.date) : null;
-              const dayLabel = dateObj
-                ? dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
-                : DAYS[cls.day];
-              const isToday2 = cls.date === todayIso;
-              const isTomorrow = (() => {
-                if (!dateObj) return false;
-                const tmw = new Date(today); tmw.setDate(tmw.getDate() + 1);
-                return toIso(tmw) === cls.date;
-              })();
-              const studioColor = cls.studio === 'reformer' ? '#c6926a' : cls.studio === 'hybrid' ? '#7a8c5c' : '#5c4a38';
-              const studioBg = cls.studio === 'reformer' ? 'rgba(198, 146, 106, 0.14)' : cls.studio === 'hybrid' ? 'rgba(122, 140, 92, 0.14)' : 'rgba(92, 74, 56, 0.10)';
-
-              return (
-                <div key={req.id} style={styles.coverCardTile}>
-                  <div style={styles.coverCardChipRow}>
-                    <span style={{ ...styles.coverCardChip, color: studioColor, background: studioBg }}>
-                      {STUDIOS[cls.studio]?.label || 'Studio'}
-                    </span>
-                    {isToday2 && <span style={styles.coverCardUrgencyToday}>Today</span>}
-                    {isTomorrow && <span style={styles.coverCardUrgencyTomorrow}>Tomorrow</span>}
-                  </div>
-                  <div style={styles.coverCardTitle}>{cls.type}</div>
-                  <div style={styles.coverCardWhen}>
-                    {!isToday2 && !isTomorrow && <>{dayLabel} · </>}
-                    {cls.time} · for {requester?.name?.split(' ')[0]}
-                  </div>
-                  {!isMine && !isManager && (
-                    <button
-                      onClick={() => isCoverCoach ? onExpressInterest(req.id) : onClaim(req.id)}
-                      className="salus-btn"
-                      style={interested ? styles.coverCardTakeBtnDone : styles.coverCardTakeBtn}
-                    >
-                      {interested ? (<><Check size={12} strokeWidth={2.4} /> On it</>) : 'Take'}
-                    </button>
-                  )}
-                  {isManager && !isMine && (
-                    <button
-                      onClick={() => onManage(req.id)}
-                      className="salus-btn"
-                      style={styles.coverCardManageBtn}
-                    >
-                      Manage
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        );
-      })()}
-
-      {/* Empty state */}
-      {totalActive === 0 && (
-        <div style={styles.emptyState}>
-          <Check size={32} color="#7a8c5c" />
-          <div style={styles.emptyTitle}>All clear</div>
-          <div style={styles.emptyText}>No cover needed right now.</div>
-        </div>
+      ) : (
+        items.map(item => renderCard(item))
       )}
     </div>
   );
@@ -20868,6 +20853,194 @@ const styles = {
     letterSpacing: '0.04em', textTransform: 'uppercase',
     cursor: 'pointer',
     appearance: 'none', WebkitAppearance: 'none',
+  },
+
+  // ─── COVER TAB NAV ───
+  // Three pill tabs at the top of the Cover board: Cover needed,
+  // Cover pending, My Cover. Active pill has dark forest fill; inactive
+  // pills are transparent with a light border. Each pill carries an
+  // optional count badge.
+  coverTabRow: {
+    display: 'flex',
+    gap: 6,
+    marginBottom: 18,
+    overflowX: 'auto',
+    WebkitOverflowScrolling: 'touch',
+    scrollbarWidth: 'none',
+    msOverflowStyle: 'none',
+    padding: '0 2px 4px',
+  },
+  coverTabBtn: {
+    flexShrink: 0,
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '8px 14px',
+    borderRadius: 999,
+    background: 'transparent',
+    border: '1px solid rgba(92, 74, 56, 0.18)',
+    color: '#5c4a38',
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 13, fontWeight: 500,
+    letterSpacing: '0.01em',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    appearance: 'none', WebkitAppearance: 'none',
+  },
+  coverTabBtnActive: {
+    background: '#1a2620',
+    border: '1px solid #1a2620',
+    color: '#fffdf7',
+    fontWeight: 600,
+  },
+  coverTabCount: {
+    display: 'inline-flex',
+    alignItems: 'center', justifyContent: 'center',
+    minWidth: 18, height: 18,
+    padding: '0 5px',
+    borderRadius: 999,
+    fontSize: 10, fontWeight: 700,
+    letterSpacing: '0.02em',
+    fontFamily: 'Inter, system-ui, sans-serif',
+  },
+
+  // ─── COVER CARD — task-style layout ───
+  // Date+time eyebrow at the top, with a status badge on the right.
+  // Bold serif title, then a meta line (studio + duration), then a
+  // single-line description ("Sarah needs cover" / "Covering for Sarah").
+  // Action row at the bottom with one or two pill buttons.
+  coverCardDateEyebrow: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 10, fontWeight: 700,
+    color: '#7a6f5f',
+    letterSpacing: '0.12em',
+    textTransform: 'uppercase',
+  },
+  // Coral pending pill — for "Awaiting approval" state
+  coverCardStatusPending: {
+    display: 'inline-flex', alignItems: 'center', gap: 4,
+    padding: '4px 10px',
+    background: 'rgba(200, 68, 42, 0.10)',
+    color: '#c8442a',
+    borderRadius: 999,
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 10, fontWeight: 700,
+    letterSpacing: '0.08em', textTransform: 'uppercase',
+  },
+  // Sage covering pill — for "You're covering" state
+  coverCardStatusCovering: {
+    display: 'inline-flex', alignItems: 'center', gap: 4,
+    padding: '4px 10px',
+    background: 'rgba(122, 140, 92, 0.14)',
+    color: '#5b6d3f',
+    borderRadius: 999,
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 10, fontWeight: 700,
+    letterSpacing: '0.08em', textTransform: 'uppercase',
+  },
+  // Plain urgency text — TODAY/TOMORROW with coloured text only
+  coverCardUrgency: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 11, fontWeight: 700,
+    letterSpacing: '0.08em', textTransform: 'uppercase',
+  },
+  // Meta line — studio + duration. One muted line below the title.
+  coverCardMetaLine: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 13, color: '#7a6f5f',
+    marginBottom: 8,
+  },
+  // Description — who needs/is covering, single line under meta
+  coverCardDescription: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 14, color: '#1a2620',
+    fontWeight: 400,
+    lineHeight: 1.4,
+  },
+  // Action row — two-button layout at bottom of card
+  coverCardActionRow: {
+    display: 'flex',
+    gap: 8,
+    marginTop: 14,
+  },
+  // Primary "I can do this" — dark forest, takes most space
+  coverCardCanBtn: {
+    flex: 1,
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+    padding: '12px 16px',
+    background: '#1a2620',
+    color: '#fffdf7',
+    border: 'none',
+    borderRadius: 999,
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 13, fontWeight: 600,
+    letterSpacing: '0.04em',
+    cursor: 'pointer',
+    appearance: 'none', WebkitAppearance: 'none',
+  },
+  // "On it" state after expressing interest — sage confirmation
+  coverCardCanBtnDone: {
+    flex: 1,
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+    padding: '12px 16px',
+    background: 'rgba(122, 140, 92, 0.14)',
+    color: '#5b6d3f',
+    border: 'none',
+    borderRadius: 999,
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 13, fontWeight: 700,
+    letterSpacing: '0.04em',
+    cursor: 'pointer',
+    appearance: 'none', WebkitAppearance: 'none',
+  },
+  // "Can't" — outline ghost button, smaller weight
+  coverCardCantBtn: {
+    padding: '12px 18px',
+    background: 'transparent',
+    border: '1px solid rgba(92, 74, 56, 0.18)',
+    color: '#7a6f5f',
+    borderRadius: 999,
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 13, fontWeight: 500,
+    letterSpacing: '0.02em',
+    cursor: 'pointer',
+    appearance: 'none', WebkitAppearance: 'none',
+  },
+  // Cancel request (for own pending/open) — full-width ghost
+  coverCardCancelBtn: {
+    flex: 1,
+    padding: '12px 18px',
+    background: 'transparent',
+    border: '1px solid rgba(200, 68, 42, 0.25)',
+    color: '#c8442a',
+    borderRadius: 999,
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 13, fontWeight: 500,
+    letterSpacing: '0.02em',
+    cursor: 'pointer',
+    appearance: 'none', WebkitAppearance: 'none',
+  },
+
+  // ─── COVER EMPTY STATE (per-tab) ───
+  // Replaces the generic empty state when a tab has no items. Soft,
+  // friendly, no harsh borders.
+  coverEmptyTile: {
+    padding: '36px 22px',
+    textAlign: 'center',
+    background: 'rgba(255, 255, 255, 0.6)',
+    borderRadius: 18,
+  },
+  coverEmptyTitle: {
+    fontFamily: '"Playfair Display", Georgia, serif',
+    fontSize: 20, fontWeight: 500,
+    color: '#1a2620',
+    letterSpacing: '-0.015em',
+    marginBottom: 6,
+  },
+  coverEmptyText: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 13, color: '#7a6f5f',
+    lineHeight: 1.5,
   },
 
   // ─── CALENDAR ACCORDION ───
