@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Calendar, MessageSquare, Users, BarChart3, AlertCircle, AlertOctagon, Plus,
-  Send, ArrowLeftRight, Check, X, Clock, Bell, RotateCcw, Settings, Mail, LogOut, Eye,
+  Send, ArrowLeftRight, Check, X, Clock, Bell, BellRing, RotateCcw, Settings, Mail, LogOut, Eye,
   ChevronLeft, ChevronRight, ChevronDown, TrendingUp, Award, Activity, Trash2,
   Sparkles, Play, Heart, Flame, Bookmark, MoreHorizontal, Music, Lightbulb,
   Inbox, Shield, RefreshCw, MapPin, Target, Phone, AtSign, Briefcase,
@@ -12490,7 +12490,9 @@ function Eyebrow({ children, style }) {
 // ─── PageHeader — top of every major page (Home, Admin, Schedule, etc.) ──
 function PageHeader({ eyebrow, title, subtitle, photo, compact, action }) {
   return (
-    <div style={{ padding: compact ? '4px 0 10px' : '8px 0 18px' }}>
+    // Top padding matches Home's hero greeting row (14px) so all tabs
+    // start at the same vertical position from the status bar.
+    <div style={{ padding: compact ? '8px 0 10px' : '14px 0 20px' }}>
       {photo && (
         <div style={{
           height: 120, borderRadius: 18, overflow: 'hidden',
@@ -15539,7 +15541,6 @@ function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onEditMes
       {/* ─── HERO: editorial date block (Silo's "Delivery / Monday, 9/2") ─── */}
       <div style={styles.chatStudioHero}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={styles.chatStudioEyebrow}>Team chat</div>
           <h2 style={styles.chatStudioHeroTitle}>{todayLabel}</h2>
           <div style={styles.chatStudioNowLine}>{nowVerb}</div>
         </div>
@@ -15556,7 +15557,10 @@ function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onEditMes
         )}
       </div>
 
-      {/* ─── SECTION: in-the-studio roster (Silo's "AVAILABLE SUPPLIERS") ─── */}
+      {/* ─── SECTION: in-the-studio roster ─── */}
+      {/* Compact avatars only — names dropped since the team recognises
+          each other by avatar. Status colour ring signals teaching vs
+          on-shift vs around. */}
       <div style={styles.chatStudioRosterSection}>
         <div style={styles.chatStudioSectionHeader}>
           <div style={styles.chatStudioEyebrow}>In the studio</div>
@@ -15575,15 +15579,12 @@ function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onEditMes
                 kind === 'on_shift' ? '#8a5a2e' :
                                       '#a59478';
               return (
-                <div key={user.id} style={styles.chatRosterItem}>
-                  <div style={styles.chatRosterAvatarWrap}>
-                    <UserAvatar user={user} size={68} fontSize={22} />
-                  </div>
-                  <div style={styles.chatRosterName}>
-                    {(user.name || '').split(' ')[0]}
-                  </div>
-                  <div style={{ ...styles.chatRosterStatusLine, color: statusColor }}>
-                    {label}
+                <div key={user.id} style={styles.chatRosterItemCompact} title={`${user.name} · ${label}`}>
+                  <div style={{
+                    ...styles.chatRosterAvatarWrapCompact,
+                    boxShadow: `0 0 0 2px ${statusColor}`,
+                  }}>
+                    <UserAvatar user={user} size={44} fontSize={15} />
                   </div>
                 </div>
               );
@@ -15624,7 +15625,7 @@ function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onEditMes
               <div style={{ ...styles.messageBubble, marginLeft: 36, position: 'relative', ...(msg.isUrgent ? styles.messageBubbleUrgent : {}) }}>
                 {msg.isUrgent && (
                   <div style={styles.urgentBanner}>
-                    <AlertOctagon size={12} /> URGENT
+                    <BellRing size={11} strokeWidth={2.4} /> Urgent
                   </div>
                 )}
                 {isEditing ? (
@@ -20933,7 +20934,7 @@ const styles = {
   },
   scheduleRowBadge: {
     fontFamily: 'Inter, system-ui, sans-serif',
-    fontSize: 9, fontWeight: 700,
+    fontSize: 10, fontWeight: 700,
     letterSpacing: '0.14em', textTransform: 'uppercase',
     marginBottom: 5,
   },
@@ -22789,12 +22790,17 @@ const styles = {
     borderRadius: 12,
     padding: '10px 12px 10px 12px',
   },
+  // ─── URGENT — refined pill, not a klaxon ───
+  // Coral fill + warm tone makes urgent messages visible without feeling
+  // alarming. BellRing is friendlier than stop-sign icons; signals
+  // "heads up" rather than "danger".
   urgentBanner: {
-    display: 'inline-flex', alignItems: 'center', gap: 4,
-    background: '#c8442a', color: '#fff',
-    fontSize: 10, fontWeight: 700, padding: '3px 8px',
-    borderRadius: 4, marginBottom: 6,
-    textTransform: 'uppercase', letterSpacing: 0.6,
+    display: 'inline-flex', alignItems: 'center', gap: 5,
+    background: '#c8442a', color: '#fffdf7',
+    fontSize: 9.5, fontWeight: 700, padding: '4px 9px 4px 8px',
+    borderRadius: 999, marginBottom: 8,
+    textTransform: 'uppercase', letterSpacing: '0.12em',
+    boxShadow: '0 1px 2px rgba(200, 68, 42, 0.25)',
   },
 
   // ─── ONBOARDING ───
@@ -23643,9 +23649,9 @@ const styles = {
     letterSpacing: '0.02em',
   },
   chatRosterScroll: {
-    display: 'flex', gap: 10,
+    display: 'flex', gap: 12,
     overflowX: 'auto', overflowY: 'hidden',
-    padding: '2px 22px 4px',
+    padding: '4px 22px 4px',
     scrollSnapType: 'x proximity',
     WebkitOverflowScrolling: 'touch',
   },
@@ -23653,6 +23659,19 @@ const styles = {
     display: 'flex', flexDirection: 'column', alignItems: 'center',
     flexShrink: 0, gap: 4, width: 80,
     scrollSnapAlign: 'start',
+  },
+  // Compact roster — avatar only, no name. Smaller (44 vs 68) since
+  // the team recognises each other by face. Status colour ring (via
+  // boxShadow on the avatar wrap) signals teaching / on-shift / around.
+  chatRosterItemCompact: {
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    flexShrink: 0,
+    scrollSnapAlign: 'start',
+  },
+  chatRosterAvatarWrapCompact: {
+    width: 44, height: 44, borderRadius: '50%',
+    overflow: 'hidden',
+    // boxShadow set inline so the status colour can vary per user
   },
   chatRosterAvatarWrap: {
     width: 68, height: 68, borderRadius: '50%',
