@@ -13478,19 +13478,7 @@ const DEFAULT_WIDGETS_STAFF   = ['myday', 'wellbeing', 'todos', 'upcoming', 'bro
 // Add a tab here to give it its own theme. Tabs not listed inherit
 // the default cream gradient (`styles.main`).
 const TAB_THEMES = {
-  me: {
-    // Warm dark brown — intimate, personal, like the inside of a leather
-    // notebook. Cream content cards pop richly against this.
-    background:
-      // Subtle deeper-brown circle top-right for warmth
-      'radial-gradient(circle 480px at 88% 12%, rgba(120, 85, 55, 0.30) 0%, rgba(120, 85, 55, 0) 65%), ' +
-      // Subtle brown bloom middle-left
-      'radial-gradient(circle 440px at 5% 45%, rgba(95, 70, 45, 0.28) 0%, rgba(95, 70, 45, 0) 65%), ' +
-      // Subtle deeper coffee circle bottom-right
-      'radial-gradient(circle 380px at 92% 78%, rgba(75, 55, 35, 0.32) 0%, rgba(75, 55, 35, 0) 65%), ' +
-      // Base — deep warm coffee brown gradient
-      'linear-gradient(180deg, #3d2e1e 0%, #2e2218 100%)',
-  },
+  // (empty for now — all tabs use the default cream gradient)
 };
 
 const WIDGET_GROUPS = [
@@ -13825,23 +13813,65 @@ function CloseButton({ onClick, variant }) {
   );
 }
 
+// ─── OpeningScreen — the moment the app first appears ───────────────────
+// Replaces the stark logo-on-sand splash with an editorial welcome:
+// time-based greeting in Playfair + the day's quote + subtle breathing
+// brand mark. Sits there while auth/data resolve so the app feels
+// considered, not blank.
+//
+// Stable across renders — greeting + quote computed once via useMemo
+// so transient auth/loading state changes can't make the text flip
+// mid-show. This is the "no glitching" guarantee.
 function LoadingLogo() {
+  return <OpeningScreen />;
+}
+
+function OpeningScreen() {
+  // Lock greeting + quote in on first render so any state churn
+  // (auth check → session load → data load) doesn't change what's on
+  // screen. Same instance renders for the whole pre-Home journey.
+  const { greeting, quote } = useMemo(() => {
+    const hour = new Date().getHours();
+    let g;
+    if (hour < 5)       g = 'Hello there';
+    else if (hour < 12) g = 'Good morning';
+    else if (hour < 18) g = 'Good afternoon';
+    else if (hour < 22) g = 'Good evening';
+    else                g = 'Hello there';
+    const dayOfYear = Math.floor(Date.now() / 86400000) % QUOTES.length;
+    return { greeting: g, quote: QUOTES[dayOfYear] };
+  }, []);
+
   return (
     <div style={{
-      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: '#f5f1e8', fontFamily: "'Inter', sans-serif",
-      flexDirection: 'column', gap: 24,
+      position: 'fixed', inset: 0,
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      padding: '40px 28px',
+      // Same warm cream gradient as Home so the transition into the
+      // app feels seamless — no jarring colour shift on first render.
+      background:
+        'radial-gradient(circle 480px at 88% 12%, rgba(155, 115, 80, 0.20) 0%, rgba(155, 115, 80, 0) 65%), ' +
+        'radial-gradient(circle 440px at 5% 45%, rgba(170, 135, 100, 0.18) 0%, rgba(170, 135, 100, 0) 65%), ' +
+        'radial-gradient(circle 380px at 92% 78%, rgba(140, 100, 70, 0.18) 0%, rgba(140, 100, 70, 0) 65%), ' +
+        'linear-gradient(180deg, #fefdf9 0%, #f5f1e8 100%)',
+      fontFamily: "'Inter', sans-serif",
       zIndex: 1,
     }}>
       <style>{`
         @keyframes salus-breathe {
-          0%, 100% { transform: scale(1); opacity: 0.45; }
-          50% { transform: scale(1.12); opacity: 1; }
+          0%, 100% { transform: scale(1); opacity: 0.6; }
+          50% { transform: scale(1.08); opacity: 1; }
+        }
+        @keyframes salus-fade-in {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
         }
       `}</style>
+
+      {/* Breathing logo — small, anchored above the greeting */}
       <div style={{
-        width: 64, height: 64,
+        width: 44, height: 44, marginBottom: 28,
         animation: 'salus-breathe 4.5s ease-in-out infinite',
       }}>
         <img
@@ -13854,7 +13884,48 @@ function LoadingLogo() {
           }}
         />
       </div>
+
+      {/* Time-based greeting */}
       <div style={{
+        fontFamily: '"Playfair Display", Georgia, serif',
+        fontSize: 38, fontWeight: 400,
+        color: '#1a2620',
+        letterSpacing: '-0.02em',
+        textAlign: 'center',
+        lineHeight: 1.1,
+        marginBottom: 22,
+        animation: 'salus-fade-in 0.6s ease-out',
+      }}>
+        {greeting}
+      </div>
+
+      {/* Aspirational quote — italic Playfair, soft brown */}
+      <div style={{
+        maxWidth: 340,
+        textAlign: 'center',
+        animation: 'salus-fade-in 0.8s ease-out 0.1s both',
+      }}>
+        <div style={{
+          fontFamily: '"Playfair Display", Georgia, serif',
+          fontSize: 16, fontStyle: 'italic',
+          color: '#5c4a38', lineHeight: 1.55,
+          letterSpacing: '-0.005em',
+        }}>
+          "{quote.text}"
+        </div>
+        <div style={{
+          fontSize: 10, color: '#a59478',
+          marginTop: 14, letterSpacing: '0.2em',
+          textTransform: 'uppercase', fontWeight: 600,
+        }}>
+          — {quote.author}
+        </div>
+      </div>
+
+      {/* Salus House mark, anchored bottom */}
+      <div style={{
+        position: 'absolute',
+        bottom: 'calc(36px + env(safe-area-inset-bottom, 0px))',
         fontSize: 10, fontWeight: 500, color: '#a59478',
         letterSpacing: 3, textTransform: 'uppercase',
       }}>
