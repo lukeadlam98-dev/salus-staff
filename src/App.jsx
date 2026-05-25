@@ -1945,7 +1945,20 @@ export default function SalusStaff() {
       `}</style>
 
       {/* Main */}
-      <main className={tab === 'chat' ? 'salus-main salus-main-chat' : 'salus-main'} style={tab === 'chat' ? styles.mainChat : styles.main}>
+      <main
+        className={tab === 'chat' ? 'salus-main salus-main-chat' : 'salus-main'}
+        style={(() => {
+          if (tab === 'chat') return styles.mainChat;
+          // Layer the tab-specific theme (if any) on top of the default
+          // main styles. Only the background gets overridden; padding +
+          // overflow etc. stay consistent across all tabs.
+          const tabTheme = TAB_THEMES[tab];
+          if (tabTheme) {
+            return { ...styles.main, background: tabTheme.background };
+          }
+          return styles.main;
+        })()}
+      >
         {tab === 'home' && (
           <Home
             data={data}
@@ -12302,8 +12315,19 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
   const rawWidgets = currentUser.homeWidgets && currentUser.homeWidgets.length > 0
     ? currentUser.homeWidgets
     : defaultWidgets;
+  // Backfill: tiles added after a user first customised their home
+  // get prepended so they don't have to "discover" new features in
+  // settings. As soon as the user re-saves (via Customize Home), this
+  // becomes a no-op because their stored list now includes them.
+  // Detection: if the user has NONE of the listed new tiles, they're
+  // still on the old layout and need the backfill.
+  const NEW_TILES_BACKFILL = ['myday', 'wellbeing', 'todos', 'broadcasts', 'spotlight', 'studioevents'];
+  const hasAnyNewTile = NEW_TILES_BACKFILL.some(k => rawWidgets.includes(k));
+  const widgetsWithBackfill = hasAnyNewTile
+    ? rawWidgets
+    : [...NEW_TILES_BACKFILL, ...rawWidgets];
   // Filter out manager-only widgets if the user is currently in staff mode
-  const widgets = rawWidgets.filter(key => {
+  const widgets = widgetsWithBackfill.filter(key => {
     const meta = ALL_WIDGETS.find(w => w.key === key);
     if (meta?.managerOnly && !isManager) return false;
     return true;
@@ -12335,7 +12359,9 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
       paddingLeft: 28,
       paddingRight: 28,
     }}>
-      {/* Editorial hero — big photo, greeting overlay, next class overlay */}
+      {/* Editorial hero — big photo, greeting overlay, next class overlay.
+          The ONLY fixed home element — sets the brand. Everything else
+          below is a widget the coach chooses to see (or hide). */}
       <HomeHero
         data={data}
         currentUser={currentUser}
@@ -12344,53 +12370,60 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
         onClassClick={onClassClick}
       />
 
-      {/* My Day summary — keeps stats, birthdays. Greeting + Up next now in hero */}
-      <MyDayHero
-        data={data}
-        currentUser={currentUser}
-        isManager={isManager}
-        onClassClick={onClassClick}
-      />
-
-      {/* Wellbeing check-in — soft daily "how are you?" prompt.
-          Sits between My Day and Spotlight so it lands warm and early
-          in the scroll without dominating. Hides itself once logged
-          (well, collapses to a small summary line). */}
-      <WellbeingCheckin
-        data={data}
-        currentUser={currentUser}
-        onLog={onLogWellbeing}
-        onClear={onClearWellbeing}
-      />
-
-      {/* Personal to-do list — coach-private quick list.
-          Separate from team `tasks`; this is "stuff I want to remember
-          to do for myself". Lands right after wellbeing because both
-          are personal, private tiles. */}
-      <PersonalTodos
-        data={data}
-        currentUser={currentUser}
-        onAdd={onAddTodo}
-        onToggle={onToggleTodo}
-        onDelete={onDeleteTodo}
-        onClearDone={onClearDoneTodos}
-      />
-
-      {/* ─── Spotlight CTA — cinematic image card promoting one thing ─── */}
-      <SpotlightCard />
-
-      {/* Manager broadcasts — message from the studio, sits between Spotlight
-          and the widget stack as the primary "news" surface. */}
-      <BroadcastBanner
-        broadcasts={data.broadcasts || []}
-        broadcastReads={data.broadcastReads || []}
-        currentUser={currentUser}
-        onMarkRead={onMarkBroadcastRead}
-      />
-
       {/* Render widgets in user's chosen order */}
       {widgets.map(widgetKey => {
         switch (widgetKey) {
+          case 'myday':
+            return (
+              <MyDayHero
+                key="myday"
+                data={data}
+                currentUser={currentUser}
+                isManager={isManager}
+                onClassClick={onClassClick}
+              />
+            );
+
+          case 'wellbeing':
+            return (
+              <WellbeingCheckin
+                key="wellbeing"
+                data={data}
+                currentUser={currentUser}
+                onLog={onLogWellbeing}
+                onClear={onClearWellbeing}
+              />
+            );
+
+          case 'todos':
+            return (
+              <PersonalTodos
+                key="todos"
+                data={data}
+                currentUser={currentUser}
+                onAdd={onAddTodo}
+                onToggle={onToggleTodo}
+                onDelete={onDeleteTodo}
+                onClearDone={onClearDoneTodos}
+              />
+            );
+
+          case 'spotlight':
+            return <SpotlightCard key="spotlight" />;
+
+          case 'broadcasts':
+            return (
+              <BroadcastBanner
+                key="broadcasts"
+                broadcasts={data.broadcasts || []}
+                broadcastReads={data.broadcastReads || []}
+                currentUser={currentUser}
+                onMarkRead={onMarkBroadcastRead}
+              />
+            );
+
+          case 'studioevents':
+            return <StudioEvents key="studioevents" />;
           case 'cover':
             // Hide entirely when nothing needs cover — no "all shifts covered" empty state.
             if (totalCoverAttention === 0) return null;
@@ -12526,12 +12559,6 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
           default: return null;
         }
       })}
-
-      {/* ─── Studio events — horizontal slider of what's happening.
-          Lives at the bottom as the "community moment" — separated from the
-          Spotlight CTA by the manager broadcast + widgets so the page doesn't
-          stack two image-heavy sections back-to-back. */}
-      <StudioEvents />
 
       {/* Customize home — prominent link at the bottom */}
       <button onClick={() => setShowCustomize(true)} className="salus-btn" style={{
@@ -13412,16 +13439,59 @@ function ChatPreviewWidget({ data, currentUser, onViewChat }) {
 // ─── Widget registry — used by the customize modal ───
 // Groups: 'attention' (urgent today) | 'day' (your day) | 'actions' (quick actions) | 'extras'
 // managerOnly: true means this widget is hidden from non-manager staff entirely
+//
+// As of customised-home v2, ALL home content below the photo hero is a
+// widget. HomeHero (greeting + next class) is the only fixed element
+// since it's the brand identity. Everything else, the coach picks.
 const ALL_WIDGETS = [
+  // ─── Your day & wellbeing — soft, personal, top of the scroll ───
+  { key: 'myday',         group: 'day',       label: 'Your day',               Icon: Calendar,      desc: 'This week stats + birthdays' },
+  { key: 'wellbeing',     group: 'day',       label: 'Wellbeing check-in',     Icon: Heart,         desc: 'Daily "how are you?" — private to you' },
+  { key: 'todos',         group: 'day',       label: 'To-do list',             Icon: ListChecks,    desc: 'Your personal task list — private' },
+  { key: 'upcoming',      group: 'day',       label: 'Your upcoming classes', Icon: Calendar,      desc: 'Your next teaching slots' },
+
+  // ─── Needs your attention ───
   { key: 'cover',         group: 'attention', label: 'Cover requests',        Icon: CoverIcon,     desc: 'Classes and shifts that need cover' },
   { key: 'tasks',         group: 'attention', label: 'Tasks',                 Icon: ListChecks,    desc: 'Your task list',                              managerOnly: true },
-  { key: 'upcoming',      group: 'day',       label: 'Your upcoming classes', Icon: Calendar,      desc: 'Your next teaching slots' },
   { key: 'tours',         group: 'day',       label: 'Tours',                 Icon: MapPin,        desc: 'Upcoming tours from Google Calendar',         managerOnly: true },
+
+  // ─── From the studio ───
+  { key: 'broadcasts',    group: 'extras',    label: 'From the studio',       Icon: MessageSquare, desc: 'Latest broadcast from your manager' },
+  { key: 'spotlight',     group: 'extras',    label: 'Spotlight',             Icon: Sparkles,      desc: 'Featured event card' },
+  { key: 'studioevents',  group: 'extras',    label: 'Studio events',         Icon: Calendar,      desc: 'Horizontal slider of what\'s happening' },
   { key: 'quote',         group: 'extras',    label: 'Quote of the day',      Icon: Quote,         desc: 'A different quote each day' },
 ];
 
-const DEFAULT_WIDGETS_MANAGER = ['cover', 'upcoming', 'tours', 'tasks'];
-const DEFAULT_WIDGETS_STAFF   = ['upcoming'];
+// Sensible defaults — wellbeing and todos lead because they're new
+// and important, then your day's classes + studio news.
+const DEFAULT_WIDGETS_MANAGER = ['myday', 'wellbeing', 'todos', 'cover', 'tasks', 'tours', 'upcoming', 'broadcasts', 'spotlight', 'studioevents'];
+const DEFAULT_WIDGETS_STAFF   = ['myday', 'wellbeing', 'todos', 'upcoming', 'broadcasts', 'spotlight', 'cover', 'studioevents'];
+
+// ─── Per-tab page themes ────────────────────────────────────────────────
+// Each tab can have its own page atmosphere — different background
+// colour, different orb gradients. Like flipping through sections of
+// a magazine, each section has its own personality.
+//
+// Cards inside the page keep their cream/light styling, so the theme
+// shows in the gaps between cards and sets the overall mood.
+//
+// Add a tab here to give it its own theme. Tabs not listed inherit
+// the default cream gradient (`styles.main`).
+const TAB_THEMES = {
+  me: {
+    // Warm dark brown — intimate, personal, like the inside of a leather
+    // notebook. Cream content cards pop richly against this.
+    background:
+      // Subtle deeper-brown circle top-right for warmth
+      'radial-gradient(circle 480px at 88% 12%, rgba(120, 85, 55, 0.30) 0%, rgba(120, 85, 55, 0) 65%), ' +
+      // Subtle brown bloom middle-left
+      'radial-gradient(circle 440px at 5% 45%, rgba(95, 70, 45, 0.28) 0%, rgba(95, 70, 45, 0) 65%), ' +
+      // Subtle deeper coffee circle bottom-right
+      'radial-gradient(circle 380px at 92% 78%, rgba(75, 55, 35, 0.32) 0%, rgba(75, 55, 35, 0) 65%), ' +
+      // Base — deep warm coffee brown gradient
+      'linear-gradient(180deg, #3d2e1e 0%, #2e2218 100%)',
+  },
+};
 
 const WIDGET_GROUPS = [
   { key: 'attention', label: 'Needs your attention' },
