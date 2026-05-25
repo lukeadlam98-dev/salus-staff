@@ -15061,230 +15061,213 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
         </div>
       )}
 
-      {/* Manager: pending approvals */}
+      {/* ─── Section: AWAITING YOUR DECISION (manager only) ─── */}
       {isManager && allPending.length > 0 && (
-        <div style={{ marginBottom: 32 }}>
-          <h3 style={{ ...styles.h3, marginTop: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Bell size={16} color="#c8442a" />
-            Awaiting your decision
-          </h3>
-          <div style={styles.coverList}>
-            {allPending.map(req => {
-              const cls = data.classes.find(c => c.id === req.classId);
-              const requester = data.users.find(u => u.id === req.requestedBy);
-              const typeCfg = CLASS_TYPES[cls.type];
-              const urgency = getUrgency(cls.date);
-              return (
-                <div key={req.id} className="salus-card" style={{ ...styles.coverCard, background: '#fffaf2' }}>
-                  <div style={{ ...styles.coverCardStripe, background: urgency.color }} />
-                  <div style={styles.coverCardBody}>
-                    <div style={styles.coverCardTop}>
-                      <div>
-                        <div style={styles.coverCardDay}>{DAYS[cls.day]} {cls.date?.slice(8)} May · {cls.time}–{endTime(cls.time, cls.dur)}</div>
-                        <div style={styles.coverCardType}>{cls.type}</div>
-                        <div style={styles.coverCardSub}>
-                          <span style={{ ...styles.studioTagInline, color: typeCfg.color }}>{STUDIOS[cls.studio]?.label}</span>
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
-                        <UrgencyBadge urgency={urgency} />
-                        <div style={styles.coverCardMeta}>
-                          <UserAvatar user={requester} size={20} fontSize={9} />
-                          <div>
-                            <div style={styles.coverCardRequester}>{requester.name.split(' ')[0]}</div>
-                            <div style={styles.coverCardTime}>{fmtTime(req.timestamp)}</div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <div style={styles.coverCardReason}>
-                      <span style={styles.reasonLabel}>Reason</span>
-                      <span>{req.reason}</span>
-                    </div>
-                    <div style={styles.coverCardActions}>
-                      <button onClick={() => onManage(req.id)} className="salus-btn" style={styles.btnPrimary}>
-                        Review &amp; decide
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+        <div style={{ marginBottom: 26 }}>
+          <div style={styles.coverSectionHeader}>
+            <Bell size={11} color="#c8442a" strokeWidth={2.4} />
+            <span style={{ color: '#c8442a' }}>Awaiting your decision</span>
+            <span style={styles.coverSectionCount}>{allPending.length}</span>
           </div>
+          {allPending.map(req => {
+            const cls = data.classes.find(c => c.id === req.classId);
+            const requester = data.users.find(u => u.id === req.requestedBy);
+            const urgency = getUrgency(cls.date);
+            const dateObj = cls.date ? new Date(cls.date) : null;
+            const whenLabel = dateObj
+              ? `${dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} \u00b7 ${cls.time} \u00b7 ${cls.dur} min`
+              : `${DAYS[cls.day]} \u00b7 ${cls.time} \u00b7 ${cls.dur} min`;
+            return (
+              <div key={req.id} style={{
+                ...styles.coverPostCard,
+                background: '#fffaf2',
+                borderLeft: '3px solid #c8442a',
+              }}>
+                <CoverPostHeader requester={requester} timestamp={req.timestamp} urgency={urgency} />
+                <div style={styles.coverPostTitle}>{cls.type}</div>
+                <div style={styles.coverPostMeta}>{whenLabel}</div>
+                <div style={styles.coverPostMeta}>{STUDIOS[cls.studio]?.label}</div>
+                <div style={styles.coverPostReason}>"{req.reason}"</div>
+                <div style={styles.coverPostActions}>
+                  <button
+                    onClick={() => onManage(req.id)}
+                    className="salus-btn"
+                    style={styles.coverPrimaryBtn}
+                  >
+                    Review &amp; decide
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {/* Coach: my own pending requests */}
+      {/* ─── Section: YOUR REQUESTS (non-manager) ─── */}
       {!isManager && myPending.length > 0 && (
-        <div style={{ marginBottom: 32 }}>
-          <h3 style={{ ...styles.h3, marginTop: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Clock size={16} color="#7a8270" />
-            Your pending requests
-          </h3>
-          <div style={styles.coverList}>
-            {myPending.map(req => {
-              const cls = data.classes.find(c => c.id === req.classId);
-              const typeCfg = CLASS_TYPES[cls.type];
-              const urgency = getUrgency(cls.date);
-              return (
-                <div key={req.id} className="salus-card" style={styles.coverCard}>
-                  <div style={{ ...styles.coverCardStripe, background: urgency.color }} />
-                  <div style={styles.coverCardBody}>
-                    <div style={styles.coverCardTop}>
-                      <div>
-                        <div style={styles.coverCardDay}>{DAYS[cls.day]} {cls.date?.slice(8)} May · {cls.time}–{endTime(cls.time, cls.dur)}</div>
-                        <div style={styles.coverCardType}>{cls.type}</div>
-                        <div style={styles.coverCardSub}>
-                          <span style={{ ...styles.studioTagInline, color: typeCfg.color }}>{STUDIOS[cls.studio]?.label}</span>
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
-                        <UrgencyBadge urgency={urgency} />
-                        <div style={styles.pendingBadge}>
-                          <Clock size={11} /> Awaiting manager
-                        </div>
-                      </div>
-                    </div>
-                    <div style={styles.coverCardReason}>
-                      <span style={styles.reasonLabel}>Your reason</span>
-                      <span>{req.reason}</span>
-                    </div>
-                    <div style={styles.coverCardActions}>
-                      <button onClick={() => onCancel(req.id)} className="salus-btn" style={styles.btnGhost}>
-                        Cancel request
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+        <div style={{ marginBottom: 26 }}>
+          <div style={styles.coverSectionHeader}>
+            <Clock size={11} color="#7a8270" strokeWidth={2.4} />
+            <span>Your requests</span>
+            <span style={styles.coverSectionCount}>{myPending.length}</span>
           </div>
+          {myPending.map(req => {
+            const cls = data.classes.find(c => c.id === req.classId);
+            const urgency = getUrgency(cls.date);
+            const dateObj = cls.date ? new Date(cls.date) : null;
+            const whenLabel = dateObj
+              ? `${dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} \u00b7 ${cls.time} \u00b7 ${cls.dur} min`
+              : `${DAYS[cls.day]} \u00b7 ${cls.time} \u00b7 ${cls.dur} min`;
+            return (
+              <div key={req.id} style={styles.coverPostCard}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <div style={styles.coverPostPendingPill}>
+                    <Clock size={10} strokeWidth={2.4} />
+                    Awaiting manager
+                  </div>
+                  <UrgencyBadge urgency={urgency} />
+                </div>
+                <div style={styles.coverPostTitle}>{cls.type}</div>
+                <div style={styles.coverPostMeta}>{whenLabel}</div>
+                <div style={styles.coverPostMeta}>{STUDIOS[cls.studio]?.label}</div>
+                <div style={styles.coverPostReason}>"{req.reason}"</div>
+                <div style={styles.coverPostActions}>
+                  <button
+                    onClick={() => onCancel(req.id)}
+                    className="salus-btn"
+                    style={styles.coverGhostBtn}
+                  >
+                    Cancel request
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {/* Everyone: open on board */}
+      {/* ─── Section: ON THE BOARD (everyone) ─── */}
       {openRequests.length > 0 && (
-        <div style={{ marginBottom: 32 }}>
-          <h3 style={{ ...styles.h3, marginTop: 0 }}>On the board</h3>
-          <div style={styles.coverList}>
-            {openRequests.map(req => {
-              const cls = data.classes.find(c => c.id === req.classId);
-              const requester = data.users.find(u => u.id === req.requestedBy);
-              const typeCfg = CLASS_TYPES[cls.type];
-              const isMine = req.requestedBy === currentUser.id;
-              const urgency = getUrgency(cls.date);
-              return (
-                <div key={req.id} className="salus-card" style={styles.coverCard}>
-                  <div style={{ ...styles.coverCardStripe, background: urgency.color }} />
-                  <div style={styles.coverCardBody}>
-                    <div style={styles.coverCardTop}>
-                      <div>
-                        <div style={styles.coverCardDay}>{DAYS[cls.day]} {cls.date?.slice(8)} May · {cls.time}–{endTime(cls.time, cls.dur)}</div>
-                        <div style={styles.coverCardType}>{cls.type}</div>
-                        <div style={styles.coverCardSub}>
-                          <span style={{ ...styles.studioTagInline, color: typeCfg.color }}>{STUDIOS[cls.studio]?.label}</span>
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
-                        <UrgencyBadge urgency={urgency} />
-                        <div style={styles.coverCardMeta}>
-                          <UserAvatar user={requester} size={20} fontSize={9} />
-                          <div>
-                            <div style={styles.coverCardRequester}>{requester.name.split(' ')[0]}</div>
-                            <div style={styles.coverCardTime}>{fmtTime(req.timestamp)}</div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <div style={styles.coverCardReason}>
-                      <span style={styles.reasonLabel}>Reason</span>
-                      <span>{req.reason}</span>
-                    </div>
+        <div style={{ marginBottom: 26 }}>
+          <div style={styles.coverSectionHeader}>
+            <span>On the board</span>
+            <span style={styles.coverSectionCount}>{openRequests.length}</span>
+          </div>
+          {openRequests.map(req => {
+            const cls = data.classes.find(c => c.id === req.classId);
+            const requester = data.users.find(u => u.id === req.requestedBy);
+            const isMine = req.requestedBy === currentUser.id;
+            const urgency = getUrgency(cls.date);
+            const dateObj = cls.date ? new Date(cls.date) : null;
+            const whenLabel = dateObj
+              ? `${dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} \u00b7 ${cls.time} \u00b7 ${cls.dur} min`
+              : `${DAYS[cls.day]} \u00b7 ${cls.time} \u00b7 ${cls.dur} min`;
+            const interestedCount = req.interestedCovers?.length || 0;
+            return (
+              <div key={req.id} style={styles.coverPostCard}>
+                <CoverPostHeader requester={requester} timestamp={req.timestamp} urgency={urgency} />
+                <div style={styles.coverPostTitle}>{cls.type}</div>
+                <div style={styles.coverPostMeta}>{whenLabel}</div>
+                <div style={styles.coverPostMeta}>{STUDIOS[cls.studio]?.label}</div>
+                <div style={styles.coverPostReason}>"{req.reason}"</div>
 
-                    {/* Interested coaches (cover + permanent who might be available) */}
-                    {(req.interestedCovers && req.interestedCovers.length > 0) && (
-                      <div style={styles.interestedSection}>
-                        <div style={styles.interestedLabel}>Coaches available</div>
-                        <div style={styles.interestedList}>
-                          {req.interestedCovers.map(cid => {
-                            const cv = data.users.find(u => u.id === cid);
-                            if (!cv) return null;
-                            const isCoverCv = cv.coachType === 'cover';
-                            return (
-                              <div key={cid} style={styles.interestedChip}>
-                                <UserAvatar user={cv} size={22} fontSize={9} />
-                                <span>{cv.name.split(' ')[0]}</span>
-                                <span style={{ ...styles.chipTypeTag, ...(isCoverCv ? styles.chipTypeCover : styles.chipTypePermanent) }}>
-                                  {isCoverCv ? 'Cover' : 'Perm'}
-                                </span>
-                                {isManager && (
-                                  <button
-                                    onClick={() => onClaim(req.id, cid)}
-                                    className="salus-btn"
-                                    style={styles.assignChipBtn}
-                                  >
-                                    Assign
-                                  </button>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    <div style={styles.coverCardActions}>
-                      {isMine ? (
-                        <button onClick={() => onCancel(req.id)} className="salus-btn" style={styles.btnGhost}>
-                          Cancel request
-                        </button>
-                      ) : isManager ? (
-                        <span style={styles.hint}>Posted to the team — waiting for a coach to claim</span>
-                      ) : isCoverCoach ? (
-                        (() => {
-                          const interested = (req.interestedCovers || []).includes(currentUser.id);
-                          return (
-                            <button
-                              onClick={() => onExpressInterest(req.id)}
-                              className="salus-btn"
-                              style={interested ? styles.btnSecondary : styles.btnPrimary}
-                            >
-                              {interested ? (
-                                <><Check size={14} /> You've marked yourself available</>
-                              ) : (
-                                <>I'm available for this</>
-                              )}
-                            </button>
-                          );
-                        })()
-                      ) : (
-                        // Permanent coach — both options
-                        (() => {
-                          const interested = (req.interestedCovers || []).includes(currentUser.id);
-                          return (
-                            <>
-                              <button onClick={() => onClaim(req.id)} className="salus-btn" style={styles.btnPrimary}>
-                                <Check size={14} /> I'll cover this
-                              </button>
+                {/* Interested coaches strip */}
+                {interestedCount > 0 && (
+                  <div style={styles.coverPostInterested}>
+                    <div style={styles.coverPostInterestedLabel}>
+                      {interestedCount} {interestedCount === 1 ? 'coach' : 'coaches'} available
+                    </div>
+                    <div style={styles.coverPostInterestedList}>
+                      {req.interestedCovers.map(cid => {
+                        const cv = data.users.find(u => u.id === cid);
+                        if (!cv) return null;
+                        const isCoverCv = cv.coachType === 'cover';
+                        return (
+                          <div key={cid} style={styles.coverPostInterestedChip}>
+                            <UserAvatar user={cv} size={20} fontSize={9} />
+                            <span style={{ fontSize: 12, color: '#1a2620', fontWeight: 500 }}>
+                              {cv.name.split(' ')[0]}
+                            </span>
+                            <span style={{
+                              fontSize: 9, fontWeight: 700, letterSpacing: '0.1em',
+                              textTransform: 'uppercase',
+                              color: isCoverCv ? '#c6926a' : '#7a8c5c',
+                            }}>
+                              {isCoverCv ? 'Cover' : 'Perm'}
+                            </span>
+                            {isManager && (
                               <button
-                                onClick={() => onExpressInterest(req.id)}
+                                onClick={() => onClaim(req.id, cid)}
                                 className="salus-btn"
-                                style={styles.btnSecondary}
+                                style={styles.coverAssignChipBtn}
                               >
-                                {interested
-                                  ? <><Check size={14} /> Marked available</>
-                                  : 'I might be available'}
+                                Assign
                               </button>
-                            </>
-                          );
-                        })()
-                      )}
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
+                )}
+
+                {/* Actions */}
+                <div style={styles.coverPostActions}>
+                  {isMine ? (
+                    <button onClick={() => onCancel(req.id)} className="salus-btn" style={styles.coverGhostBtn}>
+                      Cancel request
+                    </button>
+                  ) : isManager ? (
+                    <div style={styles.coverPostHint}>
+                      Posted to the team \u2014 waiting for a coach to claim
+                    </div>
+                  ) : isCoverCoach ? (
+                    (() => {
+                      const interested = (req.interestedCovers || []).includes(currentUser.id);
+                      return (
+                        <button
+                          onClick={() => onExpressInterest(req.id)}
+                          className="salus-btn"
+                          style={interested ? styles.coverSecondaryBtn : styles.coverPrimaryBtn}
+                        >
+                          {interested ? (
+                            <><Check size={14} /> You're marked available</>
+                          ) : (
+                            <>I'm available for this</>
+                          )}
+                        </button>
+                      );
+                    })()
+                  ) : (
+                    // Permanent coach — both options
+                    (() => {
+                      const interested = (req.interestedCovers || []).includes(currentUser.id);
+                      return (
+                        <>
+                          <button
+                            onClick={() => onClaim(req.id)}
+                            className="salus-btn"
+                            style={styles.coverPrimaryBtn}
+                          >
+                            <Check size={14} /> Take it
+                          </button>
+                          <button
+                            onClick={() => onExpressInterest(req.id)}
+                            className="salus-btn"
+                            style={styles.coverSecondaryBtn}
+                          >
+                            {interested
+                              ? <><Check size={14} /> Marked available</>
+                              : 'I might be free'}
+                          </button>
+                        </>
+                      );
+                    })()
+                  )}
                 </div>
-              );
-            })}
-          </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -15297,37 +15280,68 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
         </div>
       )}
 
-      {/* Recently resolved */}
+      {/* ─── Section: RECENTLY COVERED ─── */}
       {resolvedRequests.length > 0 && (
         <div style={{ marginTop: 8 }}>
-          <h3 style={styles.h3}>Recently covered</h3>
-          <div style={styles.coverList}>
-            {resolvedRequests.slice(-5).reverse().map(req => {
-              const cls = data.classes.find(c => c.id === req.classId);
-              const claimer = data.users.find(u => u.id === req.claimedBy);
-              const requester = data.users.find(u => u.id === req.requestedBy);
-              const wasAssigned = req.status === 'assigned';
-              return (
-                <div key={req.id} style={{ ...styles.coverCard, opacity: 0.65 }}>
-                  <div style={{ ...styles.coverCardStripe, background: '#7a8c5c' }} />
-                  <div style={styles.coverCardBody}>
-                    <div style={styles.coverCardTop}>
-                      <div>
-                        <div style={styles.coverCardDay}>{DAYS[cls.day]} · {cls.time} · {cls.type}</div>
-                        <div style={styles.coveredText}>
-                          <span style={{ color: '#7a8c5c', fontWeight: 600 }}>{claimer?.name.split(' ')[0]}</span>
-                          {wasAssigned ? ' assigned by manager' : ' covering'} for {requester.name.split(' ')[0]}
-                        </div>
-                      </div>
-                      <Check size={20} color="#7a8c5c" />
+          <div style={styles.coverSectionHeader}>
+            <Check size={11} color="#7a8c5c" strokeWidth={2.4} />
+            <span>Recently covered</span>
+          </div>
+          {resolvedRequests.slice(-5).reverse().map(req => {
+            const cls = data.classes.find(c => c.id === req.classId);
+            const claimer = data.users.find(u => u.id === req.claimedBy);
+            const requester = data.users.find(u => u.id === req.requestedBy);
+            const wasAssigned = req.status === 'assigned';
+            return (
+              <div key={req.id} style={{ ...styles.coverPostCard, opacity: 0.7 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ ...styles.coverPostTitle, fontSize: 17, marginBottom: 4 }}>
+                      {cls.type}
+                    </div>
+                    <div style={styles.coverPostMeta}>
+                      {DAYS[cls.day]} \u00b7 {cls.time}
+                    </div>
+                    <div style={{
+                      fontFamily: 'Inter, system-ui, sans-serif',
+                      fontSize: 12, color: '#7a8c5c', marginTop: 8,
+                    }}>
+                      <strong>{claimer?.name.split(' ')[0]}</strong>
+                      {wasAssigned ? ' assigned by manager' : ' is covering'} for {requester.name.split(' ')[0]}
                     </div>
                   </div>
+                  <div style={{
+                    width: 32, height: 32, borderRadius: '50%',
+                    background: '#eef0e2',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    flexShrink: 0,
+                  }}>
+                    <Check size={16} color="#7a8c5c" strokeWidth={2.4} />
+                  </div>
                 </div>
-              );
-            })}
-          </div>
+              </div>
+            );
+          })}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── CoverPostHeader — shared top row for cover cards ───────────────────
+// Avatar + name + time-ago on the left, urgency badge on the right.
+// Used in pending-approval and on-the-board sections.
+function CoverPostHeader({ requester, timestamp, urgency }) {
+  return (
+    <div style={styles.coverPostHeader}>
+      <div style={styles.coverPostPoster}>
+        <UserAvatar user={requester} size={28} fontSize={11} />
+        <div style={{ minWidth: 0 }}>
+          <div style={styles.coverPostName}>{requester?.name?.split(' ')[0]}</div>
+          <div style={styles.coverPostTime}>{fmtTime(timestamp)}</div>
+        </div>
+      </div>
+      <UrgencyBadge urgency={urgency} />
     </div>
   );
 }
@@ -20668,6 +20682,161 @@ const styles = {
     background: '#c8442a',
     padding: '5px 10px',
     borderRadius: 999,
+  },
+
+  // ─── COVER BOARD POST CARDS — job-board / message-board pattern ───
+  // Each cover request renders as a clean white "post" tile: requester
+  // avatar + time on top, urgency badge, big Playfair class title, when/
+  // where meta, italic reason, optional interested-coaches strip, then
+  // primary action(s) at the bottom.
+  coverSectionHeader: {
+    display: 'flex', alignItems: 'center', gap: 8,
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 10, fontWeight: 700,
+    letterSpacing: '0.16em', textTransform: 'uppercase',
+    color: '#7a6f5f',
+    padding: '0 4px',
+    marginBottom: 12,
+  },
+  coverSectionCount: {
+    fontSize: 10, fontWeight: 700,
+    color: '#a59478', letterSpacing: '0.06em',
+    marginLeft: 2,
+  },
+  coverPostCard: {
+    background: '#ffffff',
+    borderRadius: 16,
+    padding: '16px 18px',
+    marginBottom: 10,
+  },
+  coverPostHeader: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    gap: 12, marginBottom: 14,
+  },
+  coverPostPoster: {
+    display: 'flex', alignItems: 'center', gap: 10, minWidth: 0,
+  },
+  coverPostName: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 13, fontWeight: 600, color: '#1a2620',
+    lineHeight: 1.2,
+  },
+  coverPostTime: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 11, color: '#a59478',
+    marginTop: 1,
+  },
+  coverPostTitle: {
+    fontFamily: '"Playfair Display", Georgia, serif',
+    fontSize: 21, fontWeight: 500,
+    color: '#1a2620', lineHeight: 1.15,
+    letterSpacing: '-0.015em',
+    marginBottom: 6,
+  },
+  coverPostMeta: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 12.5, color: '#7a6f5f',
+    lineHeight: 1.4,
+  },
+  // Italic blockquote-style reason — visual quote, gives it presence.
+  coverPostReason: {
+    fontFamily: '"Playfair Display", Georgia, serif',
+    fontStyle: 'italic',
+    fontSize: 14, color: '#5c4a38', lineHeight: 1.45,
+    padding: '12px 0 0',
+    marginTop: 10,
+    borderTop: '1px solid rgba(26, 38, 32, 0.06)',
+  },
+  // Action row at the bottom — primary + optional secondary pill.
+  coverPostActions: {
+    display: 'flex', gap: 8, flexWrap: 'wrap',
+    marginTop: 16,
+  },
+  coverPrimaryBtn: {
+    flex: '1 1 auto',
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+    padding: '12px 18px',
+    borderRadius: 999,
+    background: '#1a2620',
+    color: '#fffdf7',
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 13, fontWeight: 600, letterSpacing: '0.02em',
+    border: 'none', cursor: 'pointer',
+    appearance: 'none', WebkitAppearance: 'none',
+  },
+  coverSecondaryBtn: {
+    flex: '1 1 auto',
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+    padding: '12px 18px',
+    borderRadius: 999,
+    background: 'transparent',
+    border: '1px solid rgba(92, 74, 56, 0.18)',
+    color: '#5c4a38',
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 13, fontWeight: 500, letterSpacing: '0.02em',
+    cursor: 'pointer',
+    appearance: 'none', WebkitAppearance: 'none',
+  },
+  coverGhostBtn: {
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+    padding: '10px 16px',
+    background: 'transparent',
+    border: 'none',
+    color: '#a59478',
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 12, fontWeight: 500, letterSpacing: '0.02em',
+    cursor: 'pointer',
+    appearance: 'none', WebkitAppearance: 'none',
+  },
+  coverPostHint: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 12, color: '#a59478', fontStyle: 'italic',
+    lineHeight: 1.4,
+  },
+  // Pending pill on your own pending requests — same family as glass chips.
+  coverPostPendingPill: {
+    display: 'inline-flex', alignItems: 'center', gap: 5,
+    padding: '4px 9px',
+    background: 'rgba(122, 130, 112, 0.12)',
+    borderRadius: 999,
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 10, fontWeight: 600,
+    color: '#7a8270',
+    letterSpacing: '0.08em', textTransform: 'uppercase',
+  },
+  // Interested coaches strip — small avatars in a row at the bottom.
+  coverPostInterested: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTop: '1px solid rgba(26, 38, 32, 0.06)',
+  },
+  coverPostInterestedLabel: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 10, fontWeight: 700,
+    letterSpacing: '0.12em', textTransform: 'uppercase',
+    color: '#7a8c5c', marginBottom: 8,
+  },
+  coverPostInterestedList: {
+    display: 'flex', flexWrap: 'wrap', gap: 6,
+  },
+  coverPostInterestedChip: {
+    display: 'inline-flex', alignItems: 'center', gap: 6,
+    padding: '5px 8px 5px 5px',
+    background: '#f5f1e8',
+    borderRadius: 999,
+  },
+  coverAssignChipBtn: {
+    padding: '4px 10px',
+    background: '#1a2620',
+    color: '#fffdf7',
+    border: 'none',
+    borderRadius: 999,
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 10, fontWeight: 600,
+    letterSpacing: '0.04em',
+    cursor: 'pointer',
+    marginLeft: 4,
+    appearance: 'none', WebkitAppearance: 'none',
   },
 
   // ─── CALENDAR ACCORDION ───
