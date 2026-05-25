@@ -1765,14 +1765,6 @@ export default function SalusStaff() {
             onOpenDm={(userId) => setModal({ type: 'dm', otherUserId: userId })}
           />
         )}
-        {tab === 'cover' && (
-          <CoverPage
-            data={data}
-            currentUser={currentUser}
-            isManager={isManager}
-            onClassClick={(id) => setModal({ type: 'classDetail', classId: id })}
-          />
-        )}
         {tab === 'me' && (
           <MePage
             data={data}
