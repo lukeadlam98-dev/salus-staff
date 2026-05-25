@@ -15095,7 +15095,7 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
                 </div>
                 <div style={styles.coverPostTitle}>{cls?.type}</div>
                 <div style={styles.coverPostMeta}>
-                  {whenLabel} \u00b7 {cls?.time}
+                  {whenLabel} · {cls?.time}
                 </div>
                 <div style={styles.coverPostReason}>"{req.reason}"</div>
                 <div style={styles.coverPostActions}>
@@ -15157,7 +15157,7 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
                   </div>
                   <div style={styles.coverCardTitle}>{cls.type}</div>
                   <div style={styles.coverCardWhen}>
-                    {isToday2 ? 'Today' : isTomorrow ? 'Tomorrow' : dayLabel} \u00b7 {cls.time} \u00b7 for {requester?.name?.split(' ')[0]}
+                    {isToday2 ? 'Today' : isTomorrow ? 'Tomorrow' : dayLabel} · {cls.time} · for {requester?.name?.split(' ')[0]}
                   </div>
                 </div>
               );
@@ -15213,8 +15213,8 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
                   </div>
                   <div style={styles.coverCardTitle}>{cls.type}</div>
                   <div style={styles.coverCardWhen}>
-                    {!isToday2 && !isTomorrow && <>{dayLabel} \u00b7 </>}
-                    {cls.time} \u00b7 for {requester?.name?.split(' ')[0]}
+                    {!isToday2 && !isTomorrow && <>{dayLabel} · </>}
+                    {cls.time} · for {requester?.name?.split(' ')[0]}
                   </div>
                   {!isMine && !isManager && (
                     <button
@@ -16785,7 +16785,7 @@ function ClassDetailModal({ classObj, data, currentUser, isManager, onClose, onR
               : myOtherClasses
             ).map(c => (
               <option key={c.id} value={c.id}>
-                {DAYS[c.day]} {c.time} \u00b7 {c.type} \u00b7 {data.users.find(u => u.id === c.coachId)?.name.split(' ')[0]}
+                {DAYS[c.day]} {c.time} · {c.type} · {data.users.find(u => u.id === c.coachId)?.name.split(' ')[0]}
               </option>
             ))}
           </select>
