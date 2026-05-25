@@ -98,6 +98,7 @@ const EMPTY_DATA = {
   onboardingSteps: [],
   expenses: [],
   flows: [],
+  externalIncome: [],
 };
 
 const CLASS_TYPES = {
@@ -465,7 +466,7 @@ export default function SalusStaff() {
     if (!session) return;
     if (!silent) setLoading(true);
     try {
-      const [profilesRes, classesRes, coverReqRes, coverCmRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes, emailIntRes, stockRes, storeCardsRes, broadcastsRes, broadcastReadsRes, incidentsRes, onboardingStepsRes, expensesRes, flowsRes] = await Promise.all([
+      const [profilesRes, classesRes, coverReqRes, coverCmRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes, emailIntRes, stockRes, storeCardsRes, broadcastsRes, broadcastReadsRes, incidentsRes, onboardingStepsRes, expensesRes, flowsRes, extIncomeRes] = await Promise.all([
         supabase.from('profiles').select('*'),
         supabase.from('classes').select('*'),
         supabase.from('cover_requests').select('*'),
@@ -495,6 +496,9 @@ export default function SalusStaff() {
         supabase.from('onboarding_steps').select('*'),
         supabase.from('expenses').select('*').eq('user_id', session.user?.id).order('spent_on', { ascending: false }),
         supabase.from('flows').select('*').eq('user_id', session.user?.id).order('updated_at', { ascending: false }),
+        // External income — coach earnings from other studios. Wrapped
+        // so pre-migration loads don't break the whole reload.
+        supabase.from('external_income').select('*').eq('user_id', session.user?.id).order('earned_on', { ascending: false }).then(r => r, () => ({ data: [], error: null })),
       ]);
 
       const errors = [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes]
@@ -536,6 +540,19 @@ export default function SalusStaff() {
         onboardingSteps: (onboardingStepsRes.data || []).map(onboardingStepFromDb),
         expenses: (expensesRes.data || []).map(expenseFromDb),
         flows: (flowsRes.data || []).map(flowFromDb),
+        // Coach earnings from other studios. Camel-case the columns for
+        // consistent in-app shape; amount stored in pence to match
+        // session_rate_pence pattern.
+        externalIncome: (extIncomeRes?.data || []).map(r => ({
+          id: r.id,
+          userId: r.user_id,
+          earnedOn: r.earned_on,
+          studioName: r.studio_name,
+          amountPence: r.amount_pence,
+          classCount: r.class_count,
+          notes: r.notes,
+          createdAt: r.created_at,
+        })),
       });
     } catch (e) {
       console.error('Failed to load data:', e);
@@ -580,6 +597,7 @@ export default function SalusStaff() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'shift_notes' }, silentReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tours' }, silentReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'email_integrations' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'external_income' }, silentReload)
       .subscribe();
     return () => { supabase.removeChannel(channel); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -870,6 +888,48 @@ export default function SalusStaff() {
     }).eq('id', req.classId);
     if (er2) { console.error('releaseCover-class', er2); return; }
     await reloadData(true);
+  };
+
+  // ───────────────────────────────────────────────────────────────────
+  // EXTERNAL INCOME — earnings from other studios (self-employed life)
+  // Lets a coach log money earned outside of Salus House so the in-app
+  // tax-year totals reflect their actual self-employed income.
+  // RLS in the migration ensures each coach only ever reads/writes their
+  // own rows. amountPence stored as integer pence for precision.
+  // ───────────────────────────────────────────────────────────────────
+  const addExternalIncome = async ({ earnedOn, studioName, amountPence, classCount, notes }) => {
+    if (!session?.user?.id) return { error: new Error('Not signed in') };
+    const { error } = await supabase.from('external_income').insert({
+      user_id: session.user.id,
+      earned_on: earnedOn,
+      studio_name: studioName?.trim() || 'Other studio',
+      amount_pence: Math.max(0, Math.round(Number(amountPence) || 0)),
+      class_count: classCount != null && classCount !== '' ? Number(classCount) : null,
+      notes: notes?.trim() || null,
+    });
+    if (error) console.error('addExternalIncome', error);
+    else await reloadData(true);
+    return { error };
+  };
+
+  const updateExternalIncome = async (id, patch) => {
+    const dbPatch = {};
+    if (patch.earnedOn !== undefined) dbPatch.earned_on = patch.earnedOn;
+    if (patch.studioName !== undefined) dbPatch.studio_name = patch.studioName?.trim() || 'Other studio';
+    if (patch.amountPence !== undefined) dbPatch.amount_pence = Math.max(0, Math.round(Number(patch.amountPence) || 0));
+    if (patch.classCount !== undefined) dbPatch.class_count = patch.classCount != null && patch.classCount !== '' ? Number(patch.classCount) : null;
+    if (patch.notes !== undefined) dbPatch.notes = patch.notes?.trim() || null;
+    const { error } = await supabase.from('external_income').update(dbPatch).eq('id', id);
+    if (error) console.error('updateExternalIncome', error);
+    else await reloadData(true);
+    return { error };
+  };
+
+  const deleteExternalIncome = async (id) => {
+    const { error } = await supabase.from('external_income').delete().eq('id', id);
+    if (error) console.error('deleteExternalIncome', error);
+    else await reloadData(true);
+    return { error };
   };
 
   const approveCoverRequest = async (requestId, action, assignTo) => {
@@ -2238,6 +2298,9 @@ export default function SalusStaff() {
         <StaffInvoicesModal
           data={data}
           currentUser={currentUser}
+          onAddExternal={addExternalIncome}
+          onUpdateExternal={updateExternalIncome}
+          onDeleteExternal={deleteExternalIncome}
           onClose={() => setModal(null)}
         />
       )}
@@ -8698,8 +8761,17 @@ function AdminSectionModal({ section, data, currentUser, isManager, emailIntegra
   );
 }
 
-function StaffInvoicesModal({ data, currentUser, onClose }) {
+function StaffInvoicesModal({ data, currentUser, onAddExternal, onUpdateExternal, onDeleteExternal, onClose }) {
   const [period, setPeriod] = useState('this_month');
+  // External-income add form state — appears as an inline sheet when
+  // the coach taps "Add other income".
+  const [addingExt, setAddingExt] = useState(false);
+  const [extDate, setExtDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [extStudio, setExtStudio] = useState('');
+  const [extAmount, setExtAmount] = useState('');
+  const [extClassCount, setExtClassCount] = useState('');
+  const [extNotes, setExtNotes] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const now = new Date();
   const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -8720,17 +8792,27 @@ function StaffInvoicesModal({ data, currentUser, onClose }) {
   const range = (() => {
     if (period === 'this_month') return { start: toIso(thisMonthStart), end: toIso(thisMonthEnd), label: thisMonthStart.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) };
     if (period === 'last_month') return { start: toIso(lastMonthStart), end: toIso(lastMonthEnd), label: lastMonthStart.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) };
+    if (period === 'all_time')  return { start: '1970-01-01', end: '2999-12-31', label: 'All time' };
     return { start: toIso(taxYearStart), end: toIso(taxYearEnd), label: `Tax year ${taxYearStart.getFullYear()}/${String(taxYearStart.getFullYear() + 1).slice(-2)}` };
   })();
 
-  const myClasses = data.classes
+  // Salus House classes — what the studio pays the coach for.
+  const myClasses = (data.classes || [])
     .filter(c => c.coachId === currentUser.id && c.date >= range.start && c.date <= range.end)
     .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
 
   const rate = currentUser.sessionRatePence || 3000;
-  const totalPence = rate * myClasses.length;
+  const salusPence = rate * myClasses.length;
 
-  // Group by week for the list
+  // External income — earnings from other studios.
+  const myExternal = (data.externalIncome || [])
+    .filter(e => e.earnedOn >= range.start && e.earnedOn <= range.end)
+    .sort((a, b) => a.earnedOn.localeCompare(b.earnedOn));
+  const externalPence = myExternal.reduce((acc, e) => acc + (e.amountPence || 0), 0);
+
+  const totalPence = salusPence + externalPence;
+
+  // Group Salus classes by week for the list
   const byWeek = {};
   myClasses.forEach(c => {
     const d = new Date(c.date);
@@ -8744,35 +8826,74 @@ function StaffInvoicesModal({ data, currentUser, onClose }) {
 
   const fmt = (pence) => `£${(pence / 100).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+  // Save handler for the add-external sheet
+  const submitExternal = async () => {
+    const amountPence = Math.round(parseFloat(extAmount || '0') * 100);
+    if (!extStudio.trim() || !amountPence || amountPence <= 0) return;
+    setSaving(true);
+    const { error } = (await onAddExternal?.({
+      earnedOn: extDate,
+      studioName: extStudio,
+      amountPence,
+      classCount: extClassCount,
+      notes: extNotes,
+    })) || {};
+    setSaving(false);
+    if (!error) {
+      setAddingExt(false);
+      setExtStudio(''); setExtAmount(''); setExtClassCount(''); setExtNotes('');
+      setExtDate(new Date().toISOString().slice(0, 10));
+    }
+  };
+
   const exportCsv = () => {
-    const rows = [['Date', 'Time', 'Class', 'Studio', 'Rate (£)', 'Amount (£)']];
+    const rows = [['Date', 'Time', 'Source', 'Detail', 'Class count', 'Amount (£)']];
+    // Salus classes
     myClasses.forEach(c => {
+      const studioLabel = c.studio === 'reformer' ? 'Reformer studio'
+        : c.studio === 'hybrid' ? 'Hybrid studio'
+        : (c.studio || '');
       rows.push([
         c.date,
-        c.time,
-        c.type,
-        c.studio === 'reformer' ? 'Reformer studio' : c.studio === 'hybrid' ? 'Hybrid studio' : (c.studio || ''),
-        (rate / 100).toFixed(2),
+        c.time || '',
+        'Salus House',
+        `${c.type}${studioLabel ? ` — ${studioLabel}` : ''}`,
+        '1',
         (rate / 100).toFixed(2),
       ]);
     });
-    rows.push(['', '', '', '', 'Total', (totalPence / 100).toFixed(2)]);
+    // External income rows
+    myExternal.forEach(e => {
+      rows.push([
+        e.earnedOn,
+        '',
+        e.studioName,
+        e.notes || '',
+        e.classCount ?? '',
+        ((e.amountPence || 0) / 100).toFixed(2),
+      ]);
+    });
+    rows.push(['', '', '', '', 'Salus total',    (salusPence / 100).toFixed(2)]);
+    rows.push(['', '', '', '', 'External total', (externalPence / 100).toFixed(2)]);
+    rows.push(['', '', '', '', 'Combined total', (totalPence / 100).toFixed(2)]);
     const csv = rows.map(r => r.map(cell => {
       const s = String(cell ?? '');
-      return s.includes(',') || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s;
+      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
     }).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     const todayIso = new Date().toISOString().slice(0, 10);
-    const name = (currentUser.name || 'invoice').toLowerCase().replace(/[^a-z0-9]/g, '-');
-    a.download = `${name}-invoice-${period}-${todayIso}.csv`;
+    const name = (currentUser.name || 'earnings').toLowerCase().replace(/[^a-z0-9]/g, '-');
+    a.download = `${name}-earnings-${period}-${todayIso}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
+
+  const nothingInPeriod = myClasses.length === 0 && myExternal.length === 0;
 
   return createPortal(
     <>
@@ -8787,8 +8908,8 @@ function StaffInvoicesModal({ data, currentUser, onClose }) {
       }}>
         <ModalHeader
           eyebrow="Personal"
-          title="Your invoices"
-          subtitle="View what you're owed for sessions you've taught."
+          title="Earnings"
+          subtitle="Classes you've taught here, plus what you've earned elsewhere."
           onClose={onClose}
         />
         <ModalBody>
@@ -8796,11 +8917,14 @@ function StaffInvoicesModal({ data, currentUser, onClose }) {
           <div style={{
             display: 'flex', gap: 22, padding: '0 4px 8px',
             borderBottom: '1px solid #efe7d2', marginBottom: 18,
+            overflowX: 'auto', WebkitOverflowScrolling: 'touch',
+            scrollbarWidth: 'none', msOverflowStyle: 'none',
           }}>
             {[
               ['this_month', 'This month'],
               ['last_month', 'Last month'],
               ['tax_year', 'Tax year'],
+              ['all_time', 'All time'],
             ].map(([key, label]) => {
               const isActive = period === key;
               return (
@@ -8814,6 +8938,7 @@ function StaffInvoicesModal({ data, currentUser, onClose }) {
                     color: isActive ? '#1a2620' : '#a59478',
                     letterSpacing: '0.08em', textTransform: 'uppercase',
                     fontFamily: 'inherit', cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap',
+                    flexShrink: 0,
                   }}>
                   {label}
                 </button>
@@ -8821,7 +8946,7 @@ function StaffInvoicesModal({ data, currentUser, onClose }) {
             })}
           </div>
 
-          {/* Hero stats card */}
+          {/* Hero stats — combined earnings, with Salus + External split underneath */}
           <div style={{
             padding: '20px 22px', marginBottom: 22,
             background: '#fffdf7', border: '1px solid #efe7d2',
@@ -8832,72 +8957,300 @@ function StaffInvoicesModal({ data, currentUser, onClose }) {
             </div>
             <div style={{
               fontFamily: '"Playfair Display", Georgia, serif',
-              fontSize: 32, fontWeight: 400, color: '#1a2620',
-              letterSpacing: '-0.015em', lineHeight: 1.1,
+              fontSize: 36, fontWeight: 400, color: '#1a2620',
+              letterSpacing: '-0.015em', lineHeight: 1.05,
             }}>
               {fmt(totalPence)}
             </div>
-            <div style={{ fontSize: 13, color: '#7a8270', marginTop: 6, fontStyle: 'italic', fontFamily: '"Playfair Display", Georgia, serif' }}>
-              {myClasses.length} {myClasses.length === 1 ? 'class' : 'classes'} · {fmt(rate)} per session
+            <div style={{ fontSize: 13, color: '#7a8270', marginTop: 8, fontStyle: 'italic', fontFamily: '"Playfair Display", Georgia, serif' }}>
+              Combined earnings, all sources
+            </div>
+            {/* Split */}
+            <div style={{
+              display: 'flex', gap: 24, marginTop: 16,
+              paddingTop: 14, borderTop: '1px solid #efe7d2',
+            }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: '#a59478', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 4 }}>
+                  Salus House
+                </div>
+                <div style={{ fontFamily: '"Playfair Display", Georgia, serif', fontSize: 20, color: '#1a2620', fontVariantNumeric: 'tabular-nums' }}>
+                  {fmt(salusPence)}
+                </div>
+                <div style={{ fontSize: 11, color: '#a59478', marginTop: 2 }}>
+                  {myClasses.length} {myClasses.length === 1 ? 'class' : 'classes'} · {fmt(rate)}/session
+                </div>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: '#a59478', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 4 }}>
+                  Other studios
+                </div>
+                <div style={{ fontFamily: '"Playfair Display", Georgia, serif', fontSize: 20, color: '#1a2620', fontVariantNumeric: 'tabular-nums' }}>
+                  {fmt(externalPence)}
+                </div>
+                <div style={{ fontSize: 11, color: '#a59478', marginTop: 2 }}>
+                  {myExternal.length} {myExternal.length === 1 ? 'entry' : 'entries'}
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Classes by week */}
-          {myClasses.length === 0 ? (
-            <EmptyState sub="Once you teach a class in this period, it'll appear here.">
-              No classes in this period.
+          {nothingInPeriod && (
+            <EmptyState sub="Once you teach a class here or log other income, it'll appear here.">
+              Nothing in this period yet.
             </EmptyState>
-          ) : (
-            weekKeys.map(weekKey => {
-              const weekClasses = byWeek[weekKey];
-              const weekTotal = rate * weekClasses.length;
-              const monDate = new Date(weekKey);
-              const sunDate = new Date(monDate); sunDate.setDate(sunDate.getDate() + 6);
-              const sameMonth = monDate.getMonth() === sunDate.getMonth();
-              const weekLabel = sameMonth
-                ? `${monDate.getDate()} – ${sunDate.getDate()} ${sunDate.toLocaleDateString('en-GB', { month: 'short' })}`
-                : `${monDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} – ${sunDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`;
+          )}
 
-              return (
-                <div key={weekKey} style={{ marginBottom: 22 }}>
-                  <SectionLabel>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                      <span>{weekLabel}</span>
-                      <span style={{ fontSize: 11, color: '#a59478', fontStyle: 'normal', fontFamily: "'Inter', sans-serif", fontVariantNumeric: 'tabular-nums' }}>
-                        {fmt(weekTotal)}
-                      </span>
+          {/* ─── SALUS CLASSES — grouped by week ─── */}
+          {myClasses.length > 0 && (
+            <>
+              <div style={{ marginBottom: 10 }}>
+                <SectionLabel>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                    <span>Salus House classes</span>
+                    <span style={{ fontSize: 11, color: '#a59478', fontStyle: 'normal', fontFamily: "'Inter', sans-serif", fontVariantNumeric: 'tabular-nums' }}>
+                      {fmt(salusPence)}
+                    </span>
+                  </div>
+                </SectionLabel>
+              </div>
+              {weekKeys.map(weekKey => {
+                const weekClasses = byWeek[weekKey];
+                const weekTotal = rate * weekClasses.length;
+                const monDate = new Date(weekKey);
+                const sunDate = new Date(monDate); sunDate.setDate(sunDate.getDate() + 6);
+                const sameMonth = monDate.getMonth() === sunDate.getMonth();
+                const weekLabel = sameMonth
+                  ? `${monDate.getDate()} – ${sunDate.getDate()} ${sunDate.toLocaleDateString('en-GB', { month: 'short' })}`
+                  : `${monDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} – ${sunDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`;
+                return (
+                  <div key={weekKey} style={{ marginBottom: 18 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6, padding: '0 2px' }}>
+                      <span style={{ fontSize: 11, color: '#7a8270', letterSpacing: 0.5, textTransform: 'uppercase', fontWeight: 600 }}>{weekLabel}</span>
+                      <span style={{ fontSize: 11, color: '#a59478', fontVariantNumeric: 'tabular-nums' }}>{fmt(weekTotal)}</span>
                     </div>
-                  </SectionLabel>
-                  {weekClasses.map(c => {
-                    const dateLabel = new Date(c.date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-                    return (
-                      <div key={c.id} style={{
-                        display: 'flex', gap: 12, padding: '12px 4px',
-                        borderBottom: '1px solid #efe7d2',
-                        alignItems: 'center',
-                      }}>
-                        <div style={{ flexShrink: 0, minWidth: 110 }}>
-                          <div style={{ fontSize: 13, color: '#1a2620', fontWeight: 500 }}>{dateLabel}</div>
-                          <div style={{ fontSize: 11, color: '#a59478', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>{c.time}</div>
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{
-                            fontSize: 14, color: '#1a2620',
-                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                          }}>{c.type}</div>
-                        </div>
-                        <div style={{
-                          fontSize: 14, color: '#1a2620', fontVariantNumeric: 'tabular-nums',
-                          flexShrink: 0,
+                    {weekClasses.map(c => {
+                      const dateLabel = new Date(c.date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+                      return (
+                        <div key={c.id} style={{
+                          display: 'flex', gap: 12, padding: '12px 4px',
+                          borderBottom: '1px solid #efe7d2',
+                          alignItems: 'center',
                         }}>
-                          {fmt(rate)}
+                          <div style={{ flexShrink: 0, minWidth: 110 }}>
+                            <div style={{ fontSize: 13, color: '#1a2620', fontWeight: 500 }}>{dateLabel}</div>
+                            <div style={{ fontSize: 11, color: '#a59478', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>{c.time}</div>
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{
+                              fontSize: 14, color: '#1a2620',
+                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            }}>{c.type}</div>
+                          </div>
+                          <div style={{
+                            fontSize: 14, color: '#1a2620', fontVariantNumeric: 'tabular-nums',
+                            flexShrink: 0,
+                          }}>
+                            {fmt(rate)}
+                          </div>
                         </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </>
+          )}
+
+          {/* ─── EXTERNAL INCOME — other studios ─── */}
+          <div style={{ marginTop: 8, marginBottom: 10 }}>
+            <SectionLabel>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <span>Other studios</span>
+                <span style={{ fontSize: 11, color: '#a59478', fontStyle: 'normal', fontFamily: "'Inter', sans-serif", fontVariantNumeric: 'tabular-nums' }}>
+                  {fmt(externalPence)}
+                </span>
+              </div>
+            </SectionLabel>
+          </div>
+
+          {myExternal.length === 0 ? (
+            <div style={{
+              padding: '14px 16px', marginBottom: 14,
+              background: '#faf6ec', border: '1px dashed #e5dcc4',
+              borderRadius: 12, color: '#7a8270', fontSize: 13, fontStyle: 'italic',
+              fontFamily: '"Playfair Display", Georgia, serif',
+            }}>
+              Working at other studios? Add what you earn outside Salus so your tax-year picture is complete.
+            </div>
+          ) : (
+            myExternal.map(e => {
+              const dateLabel = new Date(e.earnedOn).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+              return (
+                <div key={e.id} style={{
+                  display: 'flex', gap: 12, padding: '12px 4px',
+                  borderBottom: '1px solid #efe7d2',
+                  alignItems: 'center',
+                }}>
+                  <div style={{ flexShrink: 0, minWidth: 110 }}>
+                    <div style={{ fontSize: 13, color: '#1a2620', fontWeight: 500 }}>{dateLabel}</div>
+                    {e.classCount != null && (
+                      <div style={{ fontSize: 11, color: '#a59478', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
+                        {e.classCount} {e.classCount === 1 ? 'class' : 'classes'}
                       </div>
-                    );
-                  })}
+                    )}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontSize: 14, color: '#1a2620',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>{e.studioName}</div>
+                    {e.notes && (
+                      <div style={{ fontSize: 12, color: '#7a8270', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {e.notes}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                    <div style={{ fontSize: 14, color: '#1a2620', fontVariantNumeric: 'tabular-nums' }}>
+                      {fmt(e.amountPence)}
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (confirm(`Delete this entry from ${e.studioName}?`)) {
+                          onDeleteExternal?.(e.id);
+                        }
+                      }}
+                      className="salus-btn"
+                      style={{
+                        background: 'transparent', border: 'none',
+                        padding: 6, color: '#a59478', cursor: 'pointer',
+                        display: 'inline-flex', alignItems: 'center',
+                      }}
+                      aria-label="Delete entry"
+                      title="Delete"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
               );
             })
+          )}
+
+          {/* Add external — pill button */}
+          {!addingExt && (
+            <button
+              onClick={() => setAddingExt(true)}
+              className="salus-btn"
+              style={{
+                width: '100%', marginTop: 14, marginBottom: 14,
+                padding: '12px 18px',
+                background: 'transparent',
+                border: '1px solid rgba(92, 74, 56, 0.22)',
+                borderRadius: 999,
+                fontSize: 13, fontWeight: 500, color: '#1a2620',
+                fontFamily: 'inherit', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              }}
+            >
+              <Plus size={15} strokeWidth={2} /> Add other income
+            </button>
+          )}
+
+          {/* Inline add form */}
+          {addingExt && (
+            <div style={{
+              padding: '18px 20px', marginTop: 14, marginBottom: 14,
+              background: '#faf6ec', border: '1px solid #ebe3cf',
+              borderRadius: 14,
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#1a2620', marginBottom: 14 }}>
+                Add income from another studio
+              </div>
+
+              <label style={extLabelStyle}>Date</label>
+              <input
+                type="date"
+                value={extDate}
+                onChange={(e) => setExtDate(e.target.value)}
+                style={extInputStyle}
+              />
+
+              <label style={extLabelStyle}>Studio name</label>
+              <input
+                type="text"
+                value={extStudio}
+                onChange={(e) => setExtStudio(e.target.value)}
+                placeholder="e.g. Soul Pilates Bromley"
+                style={extInputStyle}
+              />
+
+              <label style={extLabelStyle}>Amount (£)</label>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min="0"
+                value={extAmount}
+                onChange={(e) => setExtAmount(e.target.value)}
+                placeholder="0.00"
+                style={extInputStyle}
+              />
+
+              <label style={extLabelStyle}>Class count (optional)</label>
+              <input
+                type="number"
+                inputMode="numeric"
+                min="0"
+                value={extClassCount}
+                onChange={(e) => setExtClassCount(e.target.value)}
+                placeholder="e.g. 2"
+                style={extInputStyle}
+              />
+
+              <label style={extLabelStyle}>Notes (optional)</label>
+              <input
+                type="text"
+                value={extNotes}
+                onChange={(e) => setExtNotes(e.target.value)}
+                placeholder="e.g. Reformer cover"
+                style={extInputStyle}
+              />
+
+              <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+                <button
+                  onClick={() => {
+                    setAddingExt(false);
+                    setExtStudio(''); setExtAmount(''); setExtClassCount(''); setExtNotes('');
+                  }}
+                  className="salus-btn"
+                  style={{
+                    flex: 1, padding: '12px 16px',
+                    background: 'transparent', border: '1px solid rgba(92, 74, 56, 0.22)',
+                    borderRadius: 999, fontSize: 13, fontWeight: 500, color: '#5c4a38',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={submitExternal}
+                  disabled={!extStudio.trim() || !parseFloat(extAmount || '0') || saving}
+                  className="salus-btn"
+                  style={{
+                    flex: 1, padding: '12px 16px',
+                    background: '#1a2620', color: '#fffdf7',
+                    border: 'none', borderRadius: 999,
+                    fontSize: 13, fontWeight: 500,
+                    cursor: (!extStudio.trim() || !parseFloat(extAmount || '0') || saving) ? 'not-allowed' : 'pointer',
+                    opacity: (!extStudio.trim() || !parseFloat(extAmount || '0') || saving) ? 0.5 : 1,
+                  }}
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </div>
           )}
 
           {myClasses.length > 0 && (
@@ -8906,21 +9259,22 @@ function StaffInvoicesModal({ data, currentUser, onClose }) {
               background: '#f5f1e8', borderRadius: 12,
               fontSize: 12, color: '#5c4a38', lineHeight: 1.5,
             }}>
-              <strong>Note:</strong> rate shown is per the manager's setting (£{(rate / 100).toFixed(2)} per session).
+              <strong>Note:</strong> Salus House rate is per the manager's setting (£{(rate / 100).toFixed(2)} per session).
               Final amounts may differ — check with the studio for adjustments, holiday pay, or special rates.
+              External income is what you enter yourself.
             </div>
           )}
         </ModalBody>
         <ModalFooter>
-          <button onClick={exportCsv} disabled={myClasses.length === 0} className="salus-btn"
+          <button onClick={exportCsv} disabled={nothingInPeriod} className="salus-btn"
             style={{
               width: '100%', padding: '14px 22px',
               background: '#1a2620', color: '#fffdf7',
               border: 'none', borderRadius: 999,
               fontSize: 13, letterSpacing: '0.08em', textTransform: 'uppercase',
-              fontFamily: 'inherit', cursor: myClasses.length === 0 ? 'not-allowed' : 'pointer',
+              fontFamily: 'inherit', cursor: nothingInPeriod ? 'not-allowed' : 'pointer',
               fontWeight: 500,
-              opacity: myClasses.length === 0 ? 0.4 : 1,
+              opacity: nothingInPeriod ? 0.4 : 1,
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
             }}
           >
@@ -8931,6 +9285,20 @@ function StaffInvoicesModal({ data, currentUser, onClose }) {
     </>
   , document.body);
 }
+
+// Shared form input styling for the inline external-income add sheet
+const extLabelStyle = {
+  display: 'block', fontSize: 11, fontWeight: 600,
+  color: '#5c4a38', letterSpacing: '0.04em',
+  textTransform: 'uppercase', marginBottom: 5, marginTop: 10,
+};
+const extInputStyle = {
+  width: '100%', padding: '11px 13px',
+  background: '#fffdf7', border: '1px solid #ebe3cf',
+  borderRadius: 10, fontSize: 14, color: '#1a2620',
+  fontFamily: 'inherit', boxSizing: 'border-box',
+  outline: 'none',
+};
 
 function ExpensesModal({ data, currentUser, sessionToken, onClose, onReload }) {
   return createPortal(
@@ -13294,7 +13662,15 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
   ).length;
 
   return (
-    <>
+    // Match Home's edge padding via the bleed wrapper. Without this,
+    // Schedule content sat at 14px from the screen edge whereas Home
+    // sits at 28px — visible misalignment between tabs.
+    <div className="salus-home-bleed" style={{
+      marginLeft: -14,
+      marginRight: -14,
+      paddingLeft: 28,
+      paddingRight: 28,
+    }}>
       {/* ── Page header — matches Home's editorial title pattern.
           Non-compact so it has breathing room at the top, similar to Home. ── */}
       <PageHeader
@@ -13561,7 +13937,7 @@ function StaffScheduleView({ data, currentUser, onClassClick }) {
           );
         })
       )}
-    </>
+    </div>
   );
 }
 
@@ -13593,7 +13969,14 @@ function ScheduleView({
                scheduleView;
 
   return (
-    <>
+    // Match Home's edge padding via the bleed wrapper for consistency
+    // across tabs.
+    <div className="salus-home-bleed" style={{
+      marginLeft: -14,
+      marginRight: -14,
+      paddingLeft: 28,
+      paddingRight: 28,
+    }}>
       {/* Editorial page header — non-compact, matches Home's breathing room. */}
       <PageHeader
         eyebrow="The week"
@@ -13665,7 +14048,7 @@ function ScheduleView({
           onCreate={() => setScheduleView('hire')}
         />
       )}
-    </>
+    </div>
   );
 }
 
@@ -15538,13 +15921,10 @@ function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onEditMes
         />
       ) : (
         <>
-      {/* ─── HERO: editorial date block (Silo's "Delivery / Monday, 9/2") ─── */}
-      <div style={styles.chatStudioHero}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <h2 style={styles.chatStudioHeroTitle}>{todayLabel}</h2>
-          <div style={styles.chatStudioNowLine}>{nowVerb}</div>
-        </div>
-        {isManager && data.messages.length > 0 && (
+      {/* Clear-chat button (manager only) — sits in the empty space where
+          the date hero used to live, top-right above the roster. */}
+      {isManager && data.messages.length > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '4px 4px 0' }}>
           <button
             onClick={onClearAll}
             className="salus-btn"
@@ -15554,8 +15934,8 @@ function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onEditMes
           >
             <Trash2 size={15} />
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* ─── SECTION: in-the-studio roster ─── */}
       {/* Compact avatars only — names dropped since the team recognises
@@ -15625,7 +16005,7 @@ function Chat({ data, currentUser, isManager, onSend, onDeleteMessage, onEditMes
               <div style={{ ...styles.messageBubble, marginLeft: 36, position: 'relative', ...(msg.isUrgent ? styles.messageBubbleUrgent : {}) }}>
                 {msg.isUrgent && (
                   <div style={styles.urgentBanner}>
-                    <BellRing size={11} strokeWidth={2.4} /> Urgent
+                    Urgent
                   </div>
                 )}
                 {isEditing ? (
@@ -16089,6 +16469,80 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
           );
         })()}
 
+        {/* ── HERO TILE: Earnings glance — tax-year-to-date ── */}
+        {/* Sits prominently before the work-admin group so a coach can
+            see at a glance "how am I doing this tax year" without
+            tapping in. Combined Salus + external income; tappable to
+            open the full Earnings dashboard. */}
+        {(() => {
+          const now = new Date();
+          // UK tax year 6 April → 5 April
+          const aprilSixth = new Date(now.getFullYear(), 3, 6);
+          const tyStart = now < aprilSixth ? new Date(now.getFullYear() - 1, 3, 6) : aprilSixth;
+          const tyStartIso = tyStart.toISOString().slice(0, 10);
+          const todayIso = now.toISOString().slice(0, 10);
+          const rate = currentUser.sessionRatePence || 3000;
+          const tySalusClasses = (data.classes || []).filter(c =>
+            c.coachId === currentUser.id && c.date >= tyStartIso && c.date <= todayIso
+          );
+          const tySalusPence = rate * tySalusClasses.length;
+          const tyExternal = (data.externalIncome || []).filter(e =>
+            e.earnedOn >= tyStartIso && e.earnedOn <= todayIso
+          );
+          const tyExternalPence = tyExternal.reduce((acc, e) => acc + (e.amountPence || 0), 0);
+          const tyTotal = (tySalusPence + tyExternalPence) / 100;
+          const tyLabel = `Tax year ${tyStart.getFullYear()}/${String(tyStart.getFullYear() + 1).slice(-2)}`;
+          return (
+            <button
+              onClick={onShowStaffInvoices}
+              className="salus-btn"
+              style={{
+                width: '100%',
+                background: '#1a2620',
+                color: '#fffdf7',
+                border: 'none',
+                borderRadius: 18,
+                padding: '20px 22px',
+                marginBottom: 14,
+                textAlign: 'left',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'flex-end',
+                justifyContent: 'space-between',
+                gap: 14,
+                boxShadow: '0 10px 28px rgba(26, 38, 32, 0.18)',
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontSize: 10, fontWeight: 600, letterSpacing: 2,
+                  textTransform: 'uppercase', color: 'rgba(255, 253, 247, 0.55)',
+                  marginBottom: 8,
+                }}>
+                  Earnings · {tyLabel}
+                </div>
+                <div style={{
+                  fontFamily: '"Playfair Display", Georgia, serif',
+                  fontSize: 32, fontWeight: 400, lineHeight: 1.05,
+                  letterSpacing: '-0.015em',
+                  fontVariantNumeric: 'tabular-nums',
+                }}>
+                  £{tyTotal.toLocaleString('en-GB', { maximumFractionDigits: 0 })}
+                </div>
+                <div style={{
+                  fontSize: 12, color: 'rgba(255, 253, 247, 0.6)',
+                  marginTop: 6, fontStyle: 'italic',
+                  fontFamily: '"Playfair Display", Georgia, serif',
+                }}>
+                  {tySalusClasses.length} {tySalusClasses.length === 1 ? 'class here' : 'classes here'}
+                  {tyExternal.length > 0 && ` + ${tyExternal.length} ${tyExternal.length === 1 ? 'entry' : 'entries'} elsewhere`}
+                </div>
+              </div>
+              <ChevronRight size={20} color="rgba(255, 253, 247, 0.5)" />
+            </button>
+          );
+        })()}
+
         {/* ── GROUP: Your work (personal admin — everyone gets this) ── */}
         {(() => {
           const now = new Date();
@@ -16098,17 +16552,27 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
             c.coachId === currentUser.id && c.date >= monthStartIso && c.date <= monthEndIso
           );
           const rate = currentUser.sessionRatePence || 3000;
-          const monthTotal = (rate * myMonth.length) / 100;
+          const salusMonthPence = rate * myMonth.length;
+          // Include external (other-studio) income in the month total so
+          // the tile reflects the coach's true earnings, not just Salus.
+          const externalMonthPence = (data.externalIncome || [])
+            .filter(e => e.earnedOn >= monthStartIso && e.earnedOn <= monthEndIso)
+            .reduce((acc, e) => acc + (e.amountPence || 0), 0);
+          const monthTotal = (salusMonthPence + externalMonthPence) / 100;
           const monthLabel = now.toLocaleDateString('en-GB', { month: 'long' });
-          const invoiceSub = myMonth.length > 0
-            ? `${monthLabel}: ${myMonth.length} ${myMonth.length === 1 ? 'class' : 'classes'} · £${monthTotal.toLocaleString('en-GB', { maximumFractionDigits: 0 })}`
+          const extEntries = (data.externalIncome || [])
+            .filter(e => e.earnedOn >= monthStartIso && e.earnedOn <= monthEndIso).length;
+          const earningsSub = (myMonth.length > 0 || extEntries > 0)
+            ? `${monthLabel}: £${monthTotal.toLocaleString('en-GB', { maximumFractionDigits: 0 })}${
+                extEntries > 0 ? ` · ${myMonth.length} here + ${extEntries} elsewhere` : ` · ${myMonth.length} ${myMonth.length === 1 ? 'class' : 'classes'}`
+              }`
             : `${monthLabel}: nothing yet`;
 
           const items = [
-            { key: 'invoice',  icon: FileText,  label: 'Your invoice',  sub: invoiceSub,                                           onClick: onShowStaffInvoices },
-            { key: 'expenses', icon: Briefcase, label: 'Expenses',      sub: `${data.expenses?.length || 0} receipts · for your tax return`, onClick: onShowExpenses },
-            { key: 'flows',    icon: Bookmark,  label: 'Flows',         sub: `${(data.flows || []).filter(f => !f.archived).length} active · session library`, onClick: onShowFlows },
-            { key: 'timeoff',  icon: Calendar,  label: 'Time off',      sub: 'Bank holidays and leave',                            onClick: onShowTimeOff },
+            { key: 'invoice',  icon: TrendingUp, label: 'Earnings',      sub: earningsSub,                                                                                              onClick: onShowStaffInvoices },
+            { key: 'expenses', icon: Briefcase,  label: 'Expenses',      sub: `${data.expenses?.length || 0} receipts · for your tax return`,                                            onClick: onShowExpenses },
+            { key: 'flows',    icon: Bookmark,   label: 'Flows',         sub: `${(data.flows || []).filter(f => !f.archived).length} active · session library`,                          onClick: onShowFlows },
+            { key: 'timeoff',  icon: Calendar,   label: 'Time off',      sub: 'Bank holidays and leave',                                                                                  onClick: onShowTimeOff },
           ];
           return (
             <div style={styles.meGroupCard}>
@@ -21293,11 +21757,19 @@ const styles = {
     display: 'flex',
     gap: 6,
     marginBottom: 18,
+    // Tabs extend to the screen edge on the right so all three fit on
+    // narrow phones, with a soft right padding revealing that more is
+    // scrollable if needed. Negative right margin escapes the bleed
+    // wrapper's 28px padding.
+    marginLeft: -2,
+    marginRight: -28,
+    paddingLeft: 2,
+    paddingRight: 28,
+    paddingBottom: 4,
     overflowX: 'auto',
     WebkitOverflowScrolling: 'touch',
     scrollbarWidth: 'none',
     msOverflowStyle: 'none',
-    padding: '0 2px 4px',
   },
   coverTabBtn: {
     flexShrink: 0,
