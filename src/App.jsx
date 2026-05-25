@@ -528,6 +528,7 @@ export default function SalusStaff() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, silentReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'classes' }, silentReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cover_requests' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cover_messages' }, silentReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'swap_requests' }, silentReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, silentReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'foh_shifts' }, silentReload)
@@ -15176,12 +15177,6 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
     return (
       <div key={req.id} style={{
         ...styles.coverCardTile,
-        // Mentioned cards get a warm amber accent border to stand out
-        ...(askedMe && !isMyClaim ? {
-          boxShadow: '0 1px 3px rgba(198, 146, 106, 0.18), 0 8px 24px rgba(198, 146, 106, 0.18)',
-          borderLeft: '3px solid #c6926a',
-          paddingLeft: 19,
-        } : {}),
         // Whole card is the tap target for the discussion thread modal.
         // Action buttons inside stopPropagation so they fire their own
         // handlers without also opening the thread.
@@ -15202,24 +15197,39 @@ function CoverBoard({ data, currentUser, isManager, isCoverCoach, onClaim, onCan
         <div style={styles.coverCardDescription}>{description}</div>
 
         {/* Footer row: comment count indicator (left), action buttons (right).
-            Comment count signals there's a discussion to read. */}
-        {(actions || commentCount > 0) && (
+            Hidden entirely on demo cards since they don't have a real
+            backend row for the thread to attach to. */}
+        {!req.__demo && (actions || true) && (
           <div style={styles.coverCardActionDivider} />
         )}
-        {(actions || commentCount > 0) && (
+        {!req.__demo && (
           <div style={styles.coverCardFooterRow}>
-            <div style={styles.coverCardCommentCount}>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onOpenThread(req.id); }}
+              className="salus-btn"
+              style={styles.coverCardCommentBtn}
+            >
               <MessageCircle size={13} strokeWidth={2.2} />
               <span>
                 {commentCount === 0 ? 'Discuss' : commentCount === 1 ? '1 comment' : `${commentCount} comments`}
               </span>
-            </div>
+            </button>
             {actions && (
               <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex', gap: 8 }}>
                 {actions.props.children}
               </div>
             )}
           </div>
+        )}
+        {/* Demos: render action buttons in original layout (no Discuss row) */}
+        {req.__demo && actions && (
+          <>
+            <div style={styles.coverCardActionDivider} />
+            <div onClick={(e) => e.stopPropagation()}>
+              {actions}
+            </div>
+          </>
         )}
       </div>
     );
@@ -21119,6 +21129,25 @@ const styles = {
     justifyContent: 'space-between',
     gap: 12,
     marginTop: 14,
+  },
+  // "Discuss" / "N comments" tappable pill. Acts as a button — taps
+  // open the discussion thread modal independent of card-level tap.
+  coverCardCommentBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 5,
+    padding: '8px 12px',
+    margin: '-4px -4px -4px -6px',  // negative margins so it taps wider
+    borderRadius: 999,
+    background: 'transparent',
+    border: 'none',
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: 12, fontWeight: 600,
+    color: '#7a6f5f',
+    letterSpacing: '0.01em',
+    cursor: 'pointer',
+    appearance: 'none', WebkitAppearance: 'none',
+    flexShrink: 0,
   },
   // "Discuss" / "N comments" pill. Sage-tinted when comments exist
   // (signal there's something to read), muted otherwise (still a CTA).
