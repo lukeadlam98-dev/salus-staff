@@ -100,6 +100,7 @@ const EMPTY_DATA = {
   flows: [],
   externalIncome: [],
   wellbeingCheckins: [],
+  personalTodos: [],
 };
 
 const CLASS_TYPES = {
@@ -467,7 +468,7 @@ export default function SalusStaff() {
     if (!session) return;
     if (!silent) setLoading(true);
     try {
-      const [profilesRes, classesRes, coverReqRes, coverCmRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes, emailIntRes, stockRes, storeCardsRes, broadcastsRes, broadcastReadsRes, incidentsRes, onboardingStepsRes, expensesRes, flowsRes, extIncomeRes, wellbeingRes] = await Promise.all([
+      const [profilesRes, classesRes, coverReqRes, coverCmRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes, emailIntRes, stockRes, storeCardsRes, broadcastsRes, broadcastReadsRes, incidentsRes, onboardingStepsRes, expensesRes, flowsRes, extIncomeRes, wellbeingRes, personalTodosRes] = await Promise.all([
         supabase.from('profiles').select('*'),
         supabase.from('classes').select('*'),
         supabase.from('cover_requests').select('*'),
@@ -503,6 +504,8 @@ export default function SalusStaff() {
         // Wellbeing check-ins — last 90 days for the personal trend +
         // manager aggregate. Graceful fallback pre-migration.
         supabase.from('wellbeing_checkins').select('*').gte('checked_in_on', new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)).order('checked_in_on', { ascending: false }).then(r => r, () => ({ data: [], error: null })),
+        // Personal to-do list — coach-private. Graceful fallback pre-migration.
+        supabase.from('personal_todos').select('*').eq('user_id', session.user?.id).order('done', { ascending: true }).order('position', { ascending: true }).order('created_at', { ascending: false }).then(r => r, () => ({ data: [], error: null })),
       ]);
 
       const errors = [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes]
@@ -568,6 +571,17 @@ export default function SalusStaff() {
           createdAt: r.created_at,
           updatedAt: r.updated_at,
         })),
+        // Personal to-do list — coach-private. Simple shape.
+        personalTodos: (personalTodosRes?.data || []).map(r => ({
+          id: r.id,
+          userId: r.user_id,
+          text: r.text,
+          done: r.done,
+          doneAt: r.done_at,
+          position: r.position,
+          createdAt: r.created_at,
+          updatedAt: r.updated_at,
+        })),
       });
     } catch (e) {
       console.error('Failed to load data:', e);
@@ -614,6 +628,7 @@ export default function SalusStaff() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'email_integrations' }, silentReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'external_income' }, silentReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'wellbeing_checkins' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'personal_todos' }, silentReload)
       .subscribe();
     return () => { supabase.removeChannel(channel); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -976,6 +991,57 @@ export default function SalusStaff() {
       .eq('user_id', session.user.id)
       .eq('checked_in_on', today);
     if (error) console.error('clearWellbeingCheckin', error);
+    else await reloadData(true);
+    return { error };
+  };
+
+  // ───────────────────────────────────────────────────────────────────
+  // PERSONAL TO-DOS — private coach to-do list (separate from team tasks)
+  // ───────────────────────────────────────────────────────────────────
+  const addPersonalTodo = async (text) => {
+    if (!session?.user?.id) return { error: new Error('Not signed in') };
+    const trimmed = (text || '').trim();
+    if (!trimmed) return { error: new Error('Empty') };
+    // Position above all existing active todos so newest sits at top
+    const active = (data.personalTodos || []).filter(t => !t.done);
+    const minPos = active.length > 0 ? Math.min(...active.map(t => t.position ?? 0)) : 0;
+    const { error } = await supabase.from('personal_todos').insert({
+      user_id: session.user.id,
+      text: trimmed,
+      position: minPos - 1,
+    });
+    if (error) console.error('addPersonalTodo', error);
+    else await reloadData(true);
+    return { error };
+  };
+
+  const togglePersonalTodo = async (id) => {
+    const todo = (data.personalTodos || []).find(t => t.id === id);
+    if (!todo) return { error: new Error('Not found') };
+    const nextDone = !todo.done;
+    const { error } = await supabase.from('personal_todos').update({
+      done: nextDone,
+      done_at: nextDone ? new Date().toISOString() : null,
+    }).eq('id', id);
+    if (error) console.error('togglePersonalTodo', error);
+    else await reloadData(true);
+    return { error };
+  };
+
+  const deletePersonalTodo = async (id) => {
+    const { error } = await supabase.from('personal_todos').delete().eq('id', id);
+    if (error) console.error('deletePersonalTodo', error);
+    else await reloadData(true);
+    return { error };
+  };
+
+  const clearDonePersonalTodos = async () => {
+    if (!session?.user?.id) return { error: new Error('Not signed in') };
+    const { error } = await supabase.from('personal_todos')
+      .delete()
+      .eq('user_id', session.user.id)
+      .eq('done', true);
+    if (error) console.error('clearDonePersonalTodos', error);
     else await reloadData(true);
     return { error };
   };
@@ -1912,6 +1978,10 @@ export default function SalusStaff() {
             onMarkBroadcastRead={markBroadcastRead}
             onLogWellbeing={logWellbeingCheckin}
             onClearWellbeing={clearWellbeingCheckin}
+            onAddTodo={addPersonalTodo}
+            onToggleTodo={togglePersonalTodo}
+            onDeleteTodo={deletePersonalTodo}
+            onClearDoneTodos={clearDonePersonalTodos}
           />
         )}
 
@@ -12173,7 +12243,7 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
   );
 }
 
-function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestCover, onHireStudio, onClaim, onExpressInterest, onViewAllCover, onViewChat, onCreateTask, onOpenTask, onOpenAllTasks, onOpenTour, onCreateMaintenance, onOpenMaintenance, onCreateFeedback, onOpenFeedback, onMarkBroadcastRead, onLogWellbeing, onClearWellbeing }) {
+function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestCover, onHireStudio, onClaim, onExpressInterest, onViewAllCover, onViewChat, onCreateTask, onOpenTask, onOpenAllTasks, onOpenTour, onCreateMaintenance, onOpenMaintenance, onCreateFeedback, onOpenFeedback, onMarkBroadcastRead, onLogWellbeing, onClearWellbeing, onAddTodo, onToggleTodo, onDeleteTodo, onClearDoneTodos }) {
   const now = new Date();
   const hour = now.getHours();
   const greeting = hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening';
@@ -12291,6 +12361,19 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
         currentUser={currentUser}
         onLog={onLogWellbeing}
         onClear={onClearWellbeing}
+      />
+
+      {/* Personal to-do list — coach-private quick list.
+          Separate from team `tasks`; this is "stuff I want to remember
+          to do for myself". Lands right after wellbeing because both
+          are personal, private tiles. */}
+      <PersonalTodos
+        data={data}
+        currentUser={currentUser}
+        onAdd={onAddTodo}
+        onToggle={onToggleTodo}
+        onDelete={onDeleteTodo}
+        onClearDone={onClearDoneTodos}
       />
 
       {/* ─── Spotlight CTA — cinematic image card promoting one thing ─── */}
@@ -12753,6 +12836,290 @@ function WellbeingCheckin({ data, currentUser, onLog, onClear }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Personal to-do list ────────────────────────────────────────────────
+// Coach-private quick list. Separate from team `tasks` (manager-assigned).
+// The whole point: open the app, jot a thing, tick it off when done.
+// No categories, no priorities, no due dates. Just text + checkbox.
+//
+// UI rules:
+// - Active items always visible
+// - Tapping the circle ticks an item — animates out, lands in "done today"
+// - + inline add at the bottom
+// - "Done today" count + tappable to reveal the day's ticked items
+function PersonalTodos({ data, currentUser, onAdd, onToggle, onDelete, onClearDone }) {
+  const all = data.personalTodos || [];
+  const active = all.filter(t => !t.done);
+  const done = all.filter(t => t.done);
+
+  // "Done today" — only show items ticked today, to keep the panel tidy
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const doneToday = done.filter(t => (t.doneAt || '').slice(0, 10) === todayIso);
+
+  const [addingText, setAddingText] = useState('');
+  const [isAdding, setIsAdding] = useState(false);
+  const [showDone, setShowDone] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const addInputRef = useRef(null);
+
+  // Focus the input as soon as it appears
+  useEffect(() => {
+    if (isAdding && addInputRef.current) {
+      addInputRef.current.focus();
+    }
+  }, [isAdding]);
+
+  const submitAdd = async () => {
+    if (!addingText.trim()) {
+      setIsAdding(false);
+      return;
+    }
+    setSaving(true);
+    await onAdd?.(addingText);
+    setSaving(false);
+    setAddingText('');
+    // Stay in add mode so the coach can rattle off multiple at once
+    if (addInputRef.current) addInputRef.current.focus();
+  };
+
+  return (
+    <div style={{
+      background: '#fffdf7',
+      border: '1px solid #efe7d2',
+      borderRadius: 18,
+      padding: '18px 20px 14px',
+      marginBottom: 18,
+      boxShadow: '0 4px 14px rgba(92, 74, 56, 0.05)',
+    }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+        marginBottom: 12,
+      }}>
+        <div style={{
+          fontFamily: '"Playfair Display", Georgia, serif',
+          fontSize: 18, color: '#1a2620',
+          letterSpacing: '-0.01em',
+        }}>
+          To-do
+        </div>
+        {active.length > 0 && (
+          <div style={{
+            fontSize: 11, color: '#a59478',
+            letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 600,
+            fontVariantNumeric: 'tabular-nums',
+          }}>
+            {active.length} {active.length === 1 ? 'thing' : 'things'}
+          </div>
+        )}
+      </div>
+
+      {/* Active list */}
+      {active.length === 0 && !isAdding ? (
+        <div style={{
+          fontSize: 13, color: '#a59478', fontStyle: 'italic',
+          fontFamily: '"Playfair Display", Georgia, serif',
+          marginBottom: 12,
+        }}>
+          Nothing on the list. What's on your mind?
+        </div>
+      ) : (
+        <div style={{ marginBottom: 10 }}>
+          {active.map(t => (
+            <TodoRow
+              key={t.id}
+              todo={t}
+              onToggle={() => onToggle?.(t.id)}
+              onDelete={() => onDelete?.(t.id)}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Inline add */}
+      {isAdding ? (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '10px 12px', marginTop: 4,
+          background: '#faf6ec', border: '1px solid #ebe3cf',
+          borderRadius: 12,
+        }}>
+          <div style={{
+            width: 18, height: 18, borderRadius: '50%',
+            border: '1.5px solid #c4b8a0', flexShrink: 0,
+          }} />
+          <input
+            ref={addInputRef}
+            type="text"
+            value={addingText}
+            onChange={(e) => setAddingText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') submitAdd();
+              if (e.key === 'Escape') { setIsAdding(false); setAddingText(''); }
+            }}
+            onBlur={() => {
+              // If they tap away without typing, close. Don't auto-save empty.
+              if (!addingText.trim()) {
+                setTimeout(() => setIsAdding(false), 150);
+              }
+            }}
+            placeholder="Type a task…"
+            maxLength={500}
+            style={{
+              flex: 1, minWidth: 0,
+              padding: 0, background: 'transparent', border: 'none',
+              fontSize: 14, color: '#1a2620',
+              fontFamily: 'inherit', outline: 'none',
+            }}
+          />
+          <button
+            onClick={submitAdd}
+            disabled={saving || !addingText.trim()}
+            className="salus-btn"
+            style={{
+              background: '#1a2620', color: '#fffdf7',
+              border: 'none', borderRadius: 999,
+              padding: '6px 14px', fontSize: 11, fontWeight: 600,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              cursor: (saving || !addingText.trim()) ? 'not-allowed' : 'pointer',
+              opacity: (saving || !addingText.trim()) ? 0.4 : 1,
+              fontFamily: 'inherit',
+            }}
+          >
+            Add
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => setIsAdding(true)}
+          className="salus-btn"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            background: 'transparent', border: 'none',
+            color: '#7a6f5f', fontSize: 13, fontWeight: 500,
+            cursor: 'pointer', padding: '8px 4px',
+            fontFamily: 'inherit',
+          }}
+        >
+          <Plus size={15} strokeWidth={2} /> Add a task
+        </button>
+      )}
+
+      {/* Done today */}
+      {doneToday.length > 0 && (
+        <div style={{
+          marginTop: 14, paddingTop: 12,
+          borderTop: '1px solid #efe7d2',
+        }}>
+          <button
+            onClick={() => setShowDone(v => !v)}
+            className="salus-btn"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              width: '100%', background: 'transparent', border: 'none',
+              padding: 0, cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            <div style={{
+              fontSize: 11, color: '#7a8c5c',
+              letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 600,
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              <Check size={12} strokeWidth={2.5} />
+              {doneToday.length} done today
+            </div>
+            <span style={{
+              fontSize: 11, color: '#a59478', fontWeight: 500,
+            }}>
+              {showDone ? 'Hide' : 'Show'}
+            </span>
+          </button>
+          {showDone && (
+            <div style={{ marginTop: 8 }}>
+              {doneToday.map(t => (
+                <TodoRow
+                  key={t.id}
+                  todo={t}
+                  onToggle={() => onToggle?.(t.id)}
+                  onDelete={() => onDelete?.(t.id)}
+                />
+              ))}
+              <button
+                onClick={onClearDone}
+                className="salus-btn"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: 'transparent', border: 'none',
+                  color: '#a59478', fontSize: 11, fontWeight: 500,
+                  letterSpacing: '0.04em', textTransform: 'uppercase',
+                  cursor: 'pointer', padding: '8px 4px', marginTop: 4,
+                  fontFamily: 'inherit',
+                }}
+              >
+                Clear done
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Single row in the to-do list. Soft tappable checkbox + text.
+// Long-press / right-click would be ideal for delete; here we expose
+// a small X that appears on hover (desktop) / always-on (mobile).
+function TodoRow({ todo, onToggle, onDelete }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'flex-start', gap: 10,
+      padding: '10px 4px',
+      borderBottom: '1px solid #f5f0e0',
+    }}>
+      <button
+        onClick={onToggle}
+        className="salus-btn"
+        style={{
+          width: 18, height: 18, borderRadius: '50%',
+          border: todo.done ? '1.5px solid #7a8c5c' : '1.5px solid #c4b8a0',
+          background: todo.done ? '#7a8c5c' : 'transparent',
+          padding: 0, cursor: 'pointer', flexShrink: 0,
+          marginTop: 1,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          transition: 'background 0.15s, border-color 0.15s',
+        }}
+        aria-label={todo.done ? 'Mark not done' : 'Mark done'}
+      >
+        {todo.done && <Check size={11} color="#fffdf7" strokeWidth={3} />}
+      </button>
+      <div style={{
+        flex: 1, minWidth: 0,
+        fontSize: 14, color: todo.done ? '#a59478' : '#1a2620',
+        textDecoration: todo.done ? 'line-through' : 'none',
+        lineHeight: 1.4,
+        wordBreak: 'break-word',
+      }}>
+        {todo.text}
+      </div>
+      <button
+        onClick={() => {
+          if (confirm('Delete this task?')) onDelete?.();
+        }}
+        className="salus-btn"
+        style={{
+          background: 'transparent', border: 'none',
+          padding: 4, color: '#c4b8a0', cursor: 'pointer',
+          flexShrink: 0, opacity: 0.6,
+          display: 'inline-flex', alignItems: 'center',
+        }}
+        aria-label="Delete task"
+        title="Delete"
+      >
+        <X size={13} strokeWidth={2} />
+      </button>
     </div>
   );
 }
