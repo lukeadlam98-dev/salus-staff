@@ -362,6 +362,62 @@ export default function SalusStaff() {
     return () => clearTimeout(t);
   }, []);
 
+  // ─── Image preload — push critical photos through the browser as early
+  //     as possible. CSS background-images don't trigger preload, so we
+  //     inject <link rel="preload"> tags into <head> the moment the app
+  //     mounts. Browsers see the URL during HTML parse and start fetching
+  //     in parallel with React hydration — meaning the photos are
+  //     usually already in the cache by the time HomeHero / meHero
+  //     render. Same trick for the opening screen logo.
+  useEffect(() => {
+    const PRELOAD_URLS = [
+      '/brand/reformer.jpg',
+      '/brand/cardio.jpg',
+      '/brand/exterior.jpg',
+      '/brand/sign.jpg',
+      'https://cdn.prod.website-files.com/66803175747777a7dd2956e8/668c04b49ff0954ea73d39ef_download-compresskaru.com.png',
+    ];
+    const links = PRELOAD_URLS.map(url => {
+      const link = document.createElement('link');
+      link.rel = 'preload';
+      link.as = 'image';
+      link.href = url;
+      // Cross-origin hint for the external CDN logo
+      if (url.startsWith('http')) link.crossOrigin = 'anonymous';
+      // High fetch priority — these are above-the-fold visuals
+      link.setAttribute('fetchpriority', 'high');
+      document.head.appendChild(link);
+      return link;
+    });
+    // DNS prefetch for the external CDN — speeds up first-time loads
+    const dns = document.createElement('link');
+    dns.rel = 'dns-prefetch';
+    dns.href = 'https://cdn.prod.website-files.com';
+    document.head.appendChild(dns);
+    return () => {
+      links.forEach(l => document.head.removeChild(l));
+      document.head.removeChild(dns);
+    };
+  }, []);
+
+  // Preload the current user's homePhotoUrl the moment we have it.
+  // Per-user URL so we can't bake it into the static preload list above.
+  useEffect(() => {
+    const userId = session?.user?.id;
+    if (!userId || !data.users.length) return;
+    const me = data.users.find(u => u.id === userId);
+    if (!me?.homePhotoUrl) return;
+    const link = document.createElement('link');
+    link.rel = 'preload';
+    link.as = 'image';
+    link.href = me.homePhotoUrl;
+    link.setAttribute('fetchpriority', 'high');
+    document.head.appendChild(link);
+    return () => {
+      try { document.head.removeChild(link); } catch (e) { /* already removed */ }
+    };
+  }, [session?.user?.id, data.users.length]);
+
   // Listen for Me page admin section button clicks
   useEffect(() => {
     const handler = (e) => {
@@ -9749,6 +9805,7 @@ function ExpensesModal({ data, currentUser, sessionToken, onClose, onReload }) {
 // ─── FlowsPage — list + archive ──────────────────────────────────────────
 function FlowsPage({ data, currentUser, onReload }) {
   const [editing, setEditing] = useState(null); // null | 'new' | flowObj
+  const [teaching, setTeaching] = useState(null); // null | flowObj — opens TeachFlowModal directly from list
   const [showArchived, setShowArchived] = useState(false);
 
   const allFlows = data.flows || [];
@@ -9802,7 +9859,12 @@ function FlowsPage({ data, currentUser, onReload }) {
         </EmptyState>
       ) : (
         visible.map(flow => (
-          <FlowRow key={flow.id} flow={flow} onTap={() => setEditing(flow)} />
+          <FlowRow
+            key={flow.id}
+            flow={flow}
+            onTap={() => setEditing(flow)}
+            onTeach={() => setTeaching(flow)}
+          />
         ))
       )}
 
@@ -9814,61 +9876,94 @@ function FlowsPage({ data, currentUser, onReload }) {
           onSaved={() => { setEditing(null); onReload?.(true); }}
         />
       )}
+      {teaching && (
+        <TeachFlowModal
+          flow={teaching}
+          onClose={() => setTeaching(null)}
+        />
+      )}
     </>
   );
 }
 
 // ─── FlowRow — single row in the list ────────────────────────────────────
-function FlowRow({ flow, onTap }) {
+function FlowRow({ flow, onTap, onTeach }) {
   const dateLabel = flow.flowDate
     ? new Date(flow.flowDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-    : new Date(flow.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    : (flow.updatedAt ? new Date(flow.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
   const sketchCount = (flow.sketches || []).length;
+  const sectionCount = (flow.sections || []).length;
   const hasNotes = !!(flow.notes && flow.notes.trim());
+  const canTeach = sectionCount > 0 || hasNotes;
 
   return (
-    <button onClick={onTap} className="salus-btn" style={{
-      width: '100%', textAlign: 'left',
-      padding: '14px 4px',
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 4,
       borderBottom: `1px solid ${COLOR.bone}`,
-      background: 'transparent', border: 'none', borderRadius: 0,
-      fontFamily: 'inherit', cursor: 'pointer',
-      display: 'flex', alignItems: 'center', gap: 12,
     }}>
-      {/* Sketch thumbnail if available */}
-      {sketchCount > 0 && flow.sketches[0]?.url ? (
-        <div style={{
-          width: 44, height: 44, borderRadius: 8, flexShrink: 0,
-          backgroundImage: `url(${flow.sketches[0].url})`,
-          backgroundSize: 'cover', backgroundPosition: 'center',
-          background: COLOR.sand, border: `0.5px solid ${COLOR.bone}`,
-        }} />
-      ) : (
-        <div style={{
-          width: 44, height: 44, borderRadius: 8, flexShrink: 0,
-          background: COLOR.sand,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 16, color: COLOR.taupe,
-        }}>
-          ✎
-        </div>
-      )}
+      <button onClick={onTap} className="salus-btn" style={{
+        flex: 1, textAlign: 'left',
+        padding: '14px 4px',
+        background: 'transparent', border: 'none', borderRadius: 0,
+        fontFamily: 'inherit', cursor: 'pointer',
+        display: 'flex', alignItems: 'center', gap: 12, minWidth: 0,
+      }}>
+        {/* Sketch thumbnail if available */}
+        {sketchCount > 0 && flow.sketches[0]?.url ? (
+          <div style={{
+            width: 44, height: 44, borderRadius: 8, flexShrink: 0,
+            backgroundImage: `url(${flow.sketches[0].url})`,
+            backgroundSize: 'cover', backgroundPosition: 'center',
+            background: COLOR.sand, border: `0.5px solid ${COLOR.bone}`,
+          }} />
+        ) : (
+          <div style={{
+            width: 44, height: 44, borderRadius: 8, flexShrink: 0,
+            background: COLOR.sand,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 16, color: COLOR.taupe,
+          }}>
+            ✎
+          </div>
+        )}
 
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{
-          ...TYPE.itemTitle,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {flow.title}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            ...TYPE.itemTitle,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            {flow.title}
+          </div>
+          <div style={{ ...TYPE.metaSmall, marginTop: 3 }}>
+            {dateLabel}
+            {flow.classType ? ` · ${flow.classType}` : ''}
+            {sectionCount > 0 ? ` · ${sectionCount} ${sectionCount === 1 ? 'section' : 'sections'}` : ''}
+            {sectionCount === 0 && sketchCount > 0 ? ` · ${sketchCount} sketch${sketchCount === 1 ? '' : 'es'}` : ''}
+            {sectionCount === 0 && !sketchCount && hasNotes ? ' · notes' : ''}
+          </div>
         </div>
-        <div style={{ ...TYPE.metaSmall, marginTop: 3 }}>
-          {dateLabel}
-          {flow.classType ? ` · ${flow.classType}` : ''}
-          {sketchCount > 0 ? ` · ${sketchCount} sketch${sketchCount === 1 ? '' : 'es'}` : ''}
-          {hasNotes ? ' · notes' : ''}
-        </div>
-      </div>
-    </button>
+      </button>
+
+      {/* Quick Teach button — only when there's something to teach */}
+      {canTeach && onTeach && (
+        <button onClick={(e) => { e.stopPropagation(); onTeach(); }}
+          className="salus-btn"
+          style={{
+            flexShrink: 0, padding: '8px 12px', marginRight: 4,
+            background: 'transparent',
+            border: '1px solid rgba(92, 74, 56, 0.22)',
+            borderRadius: 999,
+            color: '#1a2620', fontSize: 11, fontWeight: 600,
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            cursor: 'pointer', fontFamily: 'inherit',
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+          }}
+          aria-label="Teach this flow"
+        >
+          <Play size={11} strokeWidth={2} /> Teach
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -9880,13 +9975,54 @@ function FlowEditor({ flow, currentUserId, onClose, onSaved }) {
   const [classType, setClassType] = useState(flow?.classType || '');
   const [duration, setDuration] = useState(flow?.durationMinutes != null ? String(flow.durationMinutes) : '');
   const [notes, setNotes] = useState(flow?.notes || '');
+  // Ordered list of sections. Each: { id, title, durationMinutes, content }.
+  // Falls back to empty for legacy flows.
+  const [sections, setSections] = useState(() => {
+    const raw = Array.isArray(flow?.sections) ? flow.sections : [];
+    return raw.map(s => ({
+      id: s.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `s_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`),
+      title: s.title || '',
+      durationMinutes: s.duration_minutes ?? s.durationMinutes ?? null,
+      content: s.content || '',
+    }));
+  });
   const [sketches, setSketches] = useState(flow?.sketches || []);
   const [archived, setArchived] = useState(flow?.archived || false);
 
   const [sketching, setSketching] = useState(false);
   const [viewingSketch, setViewingSketch] = useState(null);
+  const [teachMode, setTeachMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+
+  // Section CRUD — local state only until Save
+  const addSection = (preset) => {
+    const presets = {
+      warmup:   { title: 'Warm-up',  durationMinutes: 10, content: '' },
+      main:     { title: 'Main',     durationMinutes: 30, content: '' },
+      cooldown: { title: 'Cool-down', durationMinutes: 8, content: '' },
+      custom:   { title: '',         durationMinutes: null, content: '' },
+    };
+    const seed = presets[preset] || presets.custom;
+    setSections(prev => [...prev, { id: (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `s_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`), ...seed }]);
+  };
+  const updateSection = (id, patch) => {
+    setSections(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
+  };
+  const removeSection = (id) => {
+    setSections(prev => prev.filter(s => s.id !== id));
+  };
+  const moveSection = (id, dir) => {
+    setSections(prev => {
+      const i = prev.findIndex(s => s.id === id);
+      if (i < 0) return prev;
+      const j = i + dir;
+      if (j < 0 || j >= prev.length) return prev;
+      const copy = [...prev];
+      [copy[i], copy[j]] = [copy[j], copy[i]];
+      return copy;
+    });
+  };
 
   const save = async () => {
     if (!title.trim()) {
@@ -9896,6 +10032,16 @@ function FlowEditor({ flow, currentUserId, onClose, onSaved }) {
     setSaving(true);
     setError(null);
     try {
+      // Persist sections in snake_case shape to match the JSONB column
+      // convention used elsewhere in the schema.
+      const sectionsToSave = sections.map((s, idx) => ({
+        id: s.id,
+        title: (s.title || '').trim(),
+        duration_minutes: s.durationMinutes ?? null,
+        content: s.content || '',
+        position: idx,
+      }));
+
       const payload = {
         user_id: currentUserId,
         title: title.trim(),
@@ -9903,6 +10049,7 @@ function FlowEditor({ flow, currentUserId, onClose, onSaved }) {
         class_type: classType.trim() || null,
         duration_minutes: duration ? Number(duration) : null,
         notes: notes.trim() || null,
+        sections: sectionsToSave,
         sketches: sketches,
         archived,
         updated_at: new Date().toISOString(),
@@ -10011,11 +10158,162 @@ function FlowEditor({ flow, currentUserId, onClose, onSaved }) {
                 style={styles.loginInput} placeholder="Signature, Reformer, Hybrid..." />
             </FormField>
 
-            <FormField label="Notes">
+            {/* ─── SECTIONS — the real flow ─── */}
+            {/* The structured spine of a class: warm-up → main → cool-down,
+                plus any custom sections. Stored as an ordered jsonb array.
+                Each section has its own title / duration / content so
+                Teach mode can flip through them like flash cards. */}
+            <div>
+              <div style={{
+                display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+                marginBottom: 10,
+              }}>
+                <div style={TYPE.eyebrow}>Sections</div>
+                {sections.length > 0 && (
+                  <button
+                    onClick={() => setTeachMode(true)}
+                    className="salus-btn"
+                    style={{
+                      background: 'transparent', border: 'none',
+                      color: '#5c4a38', fontSize: 11, fontWeight: 600,
+                      letterSpacing: '0.12em', textTransform: 'uppercase',
+                      padding: 0, cursor: 'pointer', fontFamily: 'inherit',
+                      display: 'inline-flex', alignItems: 'center', gap: 5,
+                    }}
+                  >
+                    <Play size={12} strokeWidth={2} /> Teach this
+                  </button>
+                )}
+              </div>
+
+              {sections.length === 0 ? (
+                <div style={{
+                  padding: '14px 16px', marginBottom: 10,
+                  background: '#faf6ec', border: '1px dashed #e5dcc4',
+                  borderRadius: 12, color: '#7a8270', fontSize: 13, fontStyle: 'italic',
+                  fontFamily: '"Playfair Display", Georgia, serif',
+                }}>
+                  Break the class into sections so you can flip through them while teaching.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}>
+                  {sections.map((s, idx) => (
+                    <div key={s.id} style={{
+                      padding: '14px 14px 12px',
+                      background: '#fffdf7',
+                      border: '1px solid #efe7d2',
+                      borderRadius: 12,
+                    }}>
+                      {/* Section header — index, controls */}
+                      <div style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        marginBottom: 10, gap: 8,
+                      }}>
+                        <div style={{
+                          fontSize: 9.5, fontWeight: 700, letterSpacing: '0.14em',
+                          textTransform: 'uppercase', color: '#a59478',
+                        }}>
+                          Section {idx + 1}
+                        </div>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button onClick={() => moveSection(s.id, -1)} disabled={idx === 0}
+                            className="salus-btn"
+                            style={{
+                              background: 'transparent', border: 'none', padding: '4px 6px',
+                              color: idx === 0 ? '#d8cdb8' : '#a59478', cursor: idx === 0 ? 'not-allowed' : 'pointer',
+                              fontFamily: 'inherit',
+                            }}
+                            aria-label="Move section up"
+                          ><ChevronLeft size={14} style={{ transform: 'rotate(90deg)' }} /></button>
+                          <button onClick={() => moveSection(s.id, 1)} disabled={idx === sections.length - 1}
+                            className="salus-btn"
+                            style={{
+                              background: 'transparent', border: 'none', padding: '4px 6px',
+                              color: idx === sections.length - 1 ? '#d8cdb8' : '#a59478',
+                              cursor: idx === sections.length - 1 ? 'not-allowed' : 'pointer',
+                              fontFamily: 'inherit',
+                            }}
+                            aria-label="Move section down"
+                          ><ChevronRight size={14} style={{ transform: 'rotate(90deg)' }} /></button>
+                          <button onClick={() => removeSection(s.id)}
+                            className="salus-btn"
+                            style={{
+                              background: 'transparent', border: 'none', padding: '4px 6px',
+                              color: '#a59478', cursor: 'pointer',
+                              fontFamily: 'inherit',
+                            }}
+                            aria-label="Delete section"
+                          ><X size={14} /></button>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 8, marginBottom: 8 }}>
+                        <input
+                          value={s.title}
+                          onChange={e => updateSection(s.id, { title: e.target.value })}
+                          placeholder="Warm-up, Reformer flow, Cool-down..."
+                          style={{ ...styles.loginInput, padding: '10px 12px' }}
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          inputMode="numeric"
+                          value={s.durationMinutes ?? ''}
+                          onChange={e => updateSection(s.id, {
+                            durationMinutes: e.target.value === '' ? null : Number(e.target.value),
+                          })}
+                          placeholder="min"
+                          style={{ ...styles.loginInput, padding: '10px 12px' }}
+                        />
+                      </div>
+                      <textarea
+                        value={s.content}
+                        onChange={e => updateSection(s.id, { content: e.target.value })}
+                        rows={4}
+                        placeholder="Cues, equipment, sequence, music..."
+                        style={{
+                          ...styles.loginInput,
+                          resize: 'vertical', minHeight: 90, lineHeight: 1.55,
+                          fontSize: 14,
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add section preset buttons */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {[
+                  ['warmup',   'Warm-up'],
+                  ['main',     'Main'],
+                  ['cooldown', 'Cool-down'],
+                  ['custom',   '+ Custom'],
+                ].map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => addSection(key)}
+                    className="salus-btn"
+                    style={{
+                      padding: '8px 14px',
+                      background: 'transparent',
+                      border: '1px solid rgba(92, 74, 56, 0.22)',
+                      borderRadius: 999,
+                      fontSize: 12, fontWeight: 500, color: '#1a2620',
+                      fontFamily: 'inherit', cursor: 'pointer',
+                    }}
+                  >
+                    {key === 'custom' ? label : `+ ${label}`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <FormField label="Quick notes">
               <textarea value={notes} onChange={e => setNotes(e.target.value)}
-                rows={5}
-                style={{ ...styles.loginInput, resize: 'vertical', minHeight: 110, lineHeight: 1.5 }}
-                placeholder="Equipment used, sequence, cues, anything you want to remember..." />
+                rows={4}
+                style={{ ...styles.loginInput, resize: 'vertical', minHeight: 90, lineHeight: 1.5 }}
+                placeholder="Anything that doesn't fit in a section — equipment list, music link, members to watch for..." />
             </FormField>
 
             <div>
@@ -10123,8 +10421,246 @@ function FlowEditor({ flow, currentUserId, onClose, onSaved }) {
             style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 8, background: '#fff' }} />
         </div>
       )}
+      {teachMode && (
+        <TeachFlowModal
+          flow={{
+            title: title || 'Untitled flow',
+            classType,
+            durationMinutes: duration ? Number(duration) : null,
+            sections,
+            notes,
+          }}
+          onClose={() => setTeachMode(false)}
+        />
+      )}
     </>
   , document.body);
+}
+
+// ─── TeachFlowModal — full-screen, in-class readable view of a flow ──
+// Opens from the FlowEditor's "Teach this" button. Shows one section
+// at a time in big readable text — designed for glancing at while
+// teaching, not reading at length. Tap arrows or swipe to advance.
+// Optional running clock per section if duration is set.
+function TeachFlowModal({ flow, onClose }) {
+  const sections = Array.isArray(flow.sections) && flow.sections.length > 0
+    ? flow.sections.map(s => ({
+        title: s.title || '',
+        durationMinutes: s.duration_minutes ?? s.durationMinutes ?? null,
+        content: s.content || '',
+      }))
+    : (flow.notes ? [{ title: 'Notes', durationMinutes: flow.durationMinutes, content: flow.notes }] : []);
+
+  const [idx, setIdx] = useState(0);
+  const [elapsedSec, setElapsedSec] = useState(0);
+  // Reset elapsed when section changes; tick once per second.
+  useEffect(() => {
+    setElapsedSec(0);
+    const t = setInterval(() => setElapsedSec(s => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [idx]);
+
+  const cur = sections[idx];
+  const targetSec = (cur?.durationMinutes || 0) * 60;
+  const remaining = targetSec > 0 ? Math.max(0, targetSec - elapsedSec) : null;
+  const fmtClock = (sec) => {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}:${String(s).padStart(2, '0')}`;
+  };
+
+  const totalDuration = sections.reduce((acc, s) => acc + (s.durationMinutes || 0), 0);
+
+  if (sections.length === 0) {
+    return createPortal(
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, background: '#1a2620', zIndex: 10002,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: '#fffdf7', padding: 40, textAlign: 'center',
+        fontFamily: '"Playfair Display", Georgia, serif', fontSize: 18, fontStyle: 'italic',
+      }}>
+        Add a section to this flow first.
+      </div>,
+      document.body
+    );
+  }
+
+  return createPortal(
+    <div style={{
+      position: 'fixed', inset: 0,
+      background:
+        'radial-gradient(circle 600px at 50% 0%, rgba(198, 146, 106, 0.10) 0%, rgba(198, 146, 106, 0) 70%), ' +
+        'linear-gradient(180deg, #1a2620 0%, #0f1813 100%)',
+      color: '#fffdf7', zIndex: 10002,
+      display: 'flex', flexDirection: 'column',
+      padding: 'calc(env(safe-area-inset-top, 0px) + 18px) 20px calc(env(safe-area-inset-bottom, 0px) + 18px)',
+      fontFamily: 'Inter, system-ui, sans-serif',
+    }}>
+      {/* Top bar — flow title + close */}
+      <div style={{
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+        gap: 14, marginBottom: 18,
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontSize: 10, fontWeight: 600, letterSpacing: 2,
+            textTransform: 'uppercase', color: 'rgba(255, 253, 247, 0.5)',
+            marginBottom: 4,
+          }}>
+            Teach mode
+          </div>
+          <div style={{
+            fontFamily: '"Playfair Display", Georgia, serif',
+            fontSize: 22, fontWeight: 500, color: '#fffdf7',
+            letterSpacing: '-0.01em', lineHeight: 1.2,
+            overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box',
+            WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+          }}>
+            {flow.title}
+          </div>
+          {(flow.classType || totalDuration > 0) && (
+            <div style={{
+              fontSize: 12, color: 'rgba(255, 253, 247, 0.55)', marginTop: 4,
+              fontFamily: '"Playfair Display", Georgia, serif', fontStyle: 'italic',
+            }}>
+              {flow.classType}
+              {flow.classType && totalDuration > 0 ? ' · ' : ''}
+              {totalDuration > 0 ? `${totalDuration} min total` : ''}
+            </div>
+          )}
+        </div>
+        <button onClick={onClose} className="salus-btn" style={{
+          background: 'rgba(255, 253, 247, 0.08)',
+          border: '1px solid rgba(255, 253, 247, 0.14)',
+          color: '#fffdf7', borderRadius: '50%', width: 36, height: 36,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0, cursor: 'pointer', padding: 0,
+          fontFamily: 'inherit',
+        }} aria-label="Close teach mode">
+          <X size={16} strokeWidth={2} />
+        </button>
+      </div>
+
+      {/* Section progress dots */}
+      <div style={{ display: 'flex', gap: 5, marginBottom: 24, justifyContent: 'center' }}>
+        {sections.map((_, i) => (
+          <button
+            key={i}
+            onClick={() => setIdx(i)}
+            className="salus-btn"
+            style={{
+              flex: '1 1 0', maxWidth: 60, height: 4,
+              background: i === idx ? '#c6926a' : i < idx ? 'rgba(255, 253, 247, 0.35)' : 'rgba(255, 253, 247, 0.12)',
+              border: 'none', borderRadius: 999,
+              cursor: 'pointer', padding: 0,
+            }}
+            aria-label={`Jump to section ${i + 1}`}
+          />
+        ))}
+      </div>
+
+      {/* Current section — large readable */}
+      <div style={{
+        flex: 1, minHeight: 0,
+        display: 'flex', flexDirection: 'column',
+        overflow: 'hidden',
+      }}>
+        <div style={{
+          fontSize: 10, fontWeight: 700, letterSpacing: 2.5,
+          textTransform: 'uppercase', color: '#c6926a',
+          marginBottom: 8,
+        }}>
+          Section {idx + 1} of {sections.length}
+        </div>
+        <div style={{
+          display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+          gap: 14, marginBottom: 18,
+        }}>
+          <div style={{
+            fontFamily: '"Playfair Display", Georgia, serif',
+            fontSize: 32, fontWeight: 500, color: '#fffdf7',
+            letterSpacing: '-0.02em', lineHeight: 1.1,
+            flex: 1, minWidth: 0,
+            overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
+            {cur.title || 'Untitled section'}
+          </div>
+          {cur.durationMinutes != null && (
+            <div style={{
+              fontFamily: '"Playfair Display", Georgia, serif',
+              fontSize: 28, fontVariantNumeric: 'tabular-nums',
+              color: remaining != null && remaining < 60 ? '#c8442a' : '#c6926a',
+              flexShrink: 0,
+            }}>
+              {remaining != null ? fmtClock(remaining) : `${cur.durationMinutes}m`}
+            </div>
+          )}
+        </div>
+
+        <div style={{
+          flex: 1, minHeight: 0, overflow: 'auto',
+          fontFamily: 'Inter, system-ui, sans-serif',
+          fontSize: 18, lineHeight: 1.6,
+          color: 'rgba(255, 253, 247, 0.92)',
+          whiteSpace: 'pre-wrap',
+          paddingBottom: 20,
+        }}>
+          {cur.content || (
+            <span style={{
+              color: 'rgba(255, 253, 247, 0.35)',
+              fontFamily: '"Playfair Display", Georgia, serif',
+              fontStyle: 'italic', fontSize: 16,
+            }}>
+              No notes for this section.
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Bottom controls */}
+      <div style={{
+        display: 'flex', gap: 12, marginTop: 14, paddingTop: 14,
+        borderTop: '1px solid rgba(255, 253, 247, 0.08)',
+      }}>
+        <button
+          onClick={() => setIdx(i => Math.max(0, i - 1))}
+          disabled={idx === 0}
+          className="salus-btn"
+          style={{
+            flex: 1, padding: '14px 16px',
+            background: 'rgba(255, 253, 247, 0.08)',
+            border: '1px solid rgba(255, 253, 247, 0.14)',
+            color: '#fffdf7', borderRadius: 14,
+            fontSize: 13, fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase',
+            cursor: idx === 0 ? 'not-allowed' : 'pointer',
+            opacity: idx === 0 ? 0.4 : 1,
+            fontFamily: 'inherit',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          }}
+        >
+          <ChevronLeft size={16} /> Back
+        </button>
+        <button
+          onClick={() => setIdx(i => Math.min(sections.length - 1, i + 1))}
+          disabled={idx >= sections.length - 1}
+          className="salus-btn"
+          style={{
+            flex: 2, padding: '14px 16px',
+            background: '#c6926a', color: '#1a2620',
+            border: 'none', borderRadius: 14,
+            fontSize: 13, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+            cursor: idx >= sections.length - 1 ? 'not-allowed' : 'pointer',
+            opacity: idx >= sections.length - 1 ? 0.4 : 1,
+            fontFamily: 'inherit',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          }}
+        >
+          {idx >= sections.length - 1 ? 'Done' : 'Next section'} <ChevronRight size={16} />
+        </button>
+      </div>
+    </div>,
+    document.body
+  );
 }
 
 // ─── SketchCanvas — finger-paint drawing tool ────────────────────────────
@@ -11870,12 +12406,32 @@ function HomeHero({ data, currentUser, isManager, brandPhoto, onClassClick }) {
           borderRadius: 22,
           overflow: 'hidden',
           marginBottom: 26,
-          backgroundImage: `url(${heroPhoto})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
+          // Warm placeholder gradient that sits BEHIND the image. If the
+          // image is still loading or fails, this is what the user sees —
+          // never a blank rectangle. Once the img loads, it covers this.
+          background: 'linear-gradient(180deg, #3d3027 0%, #1a2620 100%)',
           boxShadow: '0 4px 16px rgba(26, 38, 32, 0.12)',
           cursor: upNext ? 'pointer' : 'default',
         }}>
+        {/* Real <img> tag rather than CSS background-image — lets the
+            browser pre-fetch as a high-priority resource (we also added
+            <link rel="preload"> for the brand photos in <head>), and
+            fade in once decoded so it never pops. */}
+        <img
+          src={heroPhoto}
+          alt=""
+          fetchpriority="high"
+          decoding="async"
+          loading="eager"
+          style={{
+            position: 'absolute', inset: 0,
+            width: '100%', height: '100%',
+            objectFit: 'cover',
+            opacity: 0,
+            transition: 'opacity 320ms ease',
+          }}
+          onLoad={(e) => { e.currentTarget.style.opacity = '1'; }}
+        />
         {/* Gradient — heavier at the bottom for legibility */}
         <div style={{
           position: 'absolute', inset: 0,
@@ -13367,21 +13923,61 @@ function TotalHoursWidget({ data, currentUser }) {
 }
 
 // ─── Daily quote widget ──────────────────────────────────────────────────
+// ─── Daily quotes ──────────────────────────────────────────────────────
+// Curated for the opening screen + Quote of the day widget. All in Salus
+// House voice — affirmations and intentions rewritten in the same tone
+// as the studio's editorial voice. Inspired by the modern wellness
+// affirmation tradition (Camille Styles, Cleo Wade, Yung Pueblo,
+// Tricia Hersey) but rephrased so they read as the studio speaking,
+// not borrowed quotes. Stable per-day rotation via day-of-year mod
+// length, so the line is the same throughout the day, fresh tomorrow.
 const QUOTES = [
-  { text: "The body achieves what the mind believes.", author: "Napoleon Hill" },
-  { text: "Take care of your body. It's the only place you have to live.", author: "Jim Rohn" },
-  { text: "Movement is a medicine for creating change in a person's physical, emotional, and mental states.", author: "Carol Welch" },
-  { text: "Pilates is complete coordination of body, mind, and spirit.", author: "Joseph Pilates" },
-  { text: "Change happens through movement and movement heals.", author: "Joseph Pilates" },
-  { text: "A few well-designed movements, properly performed in a balanced sequence, are worth hours of doing sloppy calisthenics.", author: "Joseph Pilates" },
-  { text: "Strength does not come from the body. It comes from the will.", author: "Mahatma Gandhi" },
-  { text: "Be kind to yourself. Push your limits but listen to your body.", author: "Unknown" },
-  { text: "Every expert was once a beginner.", author: "Helen Hayes" },
-  { text: "Small daily improvements are the key to staggering long-term results.", author: "Robin Sharma" },
-  { text: "What you do today can improve all your tomorrows.", author: "Ralph Marston" },
-  { text: "The only bad workout is the one that didn't happen.", author: "Unknown" },
-  { text: "Wellness is not a state of being, it is a way of doing.", author: "Unknown" },
-  { text: "The groundwork for all happiness is good health.", author: "Leigh Hunt" },
+  // ─── Morning + presence ───
+  { text: "You are exactly where you need to be.",                              author: "Salus House" },
+  { text: "You can always begin again.",                                        author: "Salus House" },
+  { text: "Today is yours to shape.",                                           author: "Salus House" },
+  { text: "Begin again, today.",                                                author: "Salus House" },
+  { text: "Slow down. You're not behind.",                                      author: "Salus House" },
+  { text: "Inhale the future. Exhale the past.",                                author: "Salus House" },
+
+  // ─── Strength + becoming ───
+  { text: "You've made it through every day before this.",                      author: "Salus House" },
+  { text: "Trust yourself. You've made it through every hard day so far.",      author: "Salus House" },
+  { text: "You are enough. You've always been enough.",                         author: "Salus House" },
+  { text: "You're becoming someone you'll be proud of.",                        author: "Salus House" },
+  { text: "Strong is a way of being.",                                          author: "Salus House" },
+  { text: "Stand in your truth. Softly, fully.",                                author: "Salus House" },
+  { text: "Show up. The rest follows.",                                         author: "Salus House" },
+
+  // ─── Softness + self-trust ───
+  { text: "Soft is not weak. Soft is steady.",                                  author: "Salus House" },
+  { text: "Today, choose softness.",                                            author: "Salus House" },
+  { text: "Bloom in your own time.",                                            author: "Salus House" },
+  { text: "The flower doesn't ask permission.",                                 author: "Salus House" },
+  { text: "Self-love is a practice, not a destination.",                        author: "Salus House" },
+  { text: "Your needs are not negotiable.",                                     author: "Salus House" },
+
+  // ─── Body + healing ───
+  { text: "Your body knows how to heal.",                                       author: "Salus House" },
+  { text: "Listen to your body. It's always speaking.",                         author: "Salus House" },
+  { text: "Thank your body. It carries you.",                                   author: "Salus House" },
+  { text: "Movement is medicine. Stillness is too.",                            author: "Salus House" },
+  { text: "Healing isn't linear. Neither is becoming.",                         author: "Salus House" },
+
+  // ─── Peace + boundaries ───
+  { text: "Protect your peace like it pays rent.",                              author: "Salus House" },
+  { text: "Be the calm in the room.",                                           author: "Salus House" },
+  { text: "Your energy is the room you walk into.",                             author: "Salus House" },
+  { text: "Let go of what isn't yours to carry.",                               author: "Salus House" },
+  { text: "Peace is always within reach.",                                      author: "Salus House" },
+  { text: "Calm is something you can build.",                                   author: "Salus House" },
+
+  // ─── Manifestation + receiving ───
+  { text: "Receive what you've been asking for.",                               author: "Salus House" },
+  { text: "Good things are coming. Stay open.",                                 author: "Salus House" },
+  { text: "Where you focus, you flow.",                                         author: "Salus House" },
+  { text: "Rejection is redirection.",                                          author: "Salus House" },
+  { text: "Whatever this is, it will pass.",                                    author: "Salus House" },
 ];
 function QuoteWidget() {
   // Stable across the day — pick based on day of year
@@ -17501,11 +18097,22 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
     <div style={styles.mePageRoot}>
       {/* ─── HERO ─── full-bleed photo, centered avatar, name, motto ─── */}
       <div className="salus-me-bleed" style={styles.meHero}>
-        <div
+        {/* Real <img> for fast prefetched loading (preloaded in <head>),
+            sits on the dark forest hero background — never a blank flash. */}
+        <img
+          src={currentUser.homePhotoUrl || '/brand/reformer.jpg'}
+          alt=""
+          fetchpriority="high"
+          decoding="async"
+          loading="eager"
           style={{
-            ...styles.meHeroPhoto,
-            backgroundImage: `url(${currentUser.homePhotoUrl || '/brand/reformer.jpg'})`,
+            position: 'absolute', inset: 0,
+            width: '100%', height: '100%',
+            objectFit: 'cover',
+            opacity: 0,
+            transition: 'opacity 320ms ease',
           }}
+          onLoad={(e) => { e.currentTarget.style.opacity = '1'; }}
         />
         <div style={styles.meHeroGradient} />
 
@@ -17533,9 +18140,6 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
 
       {/* ─── BODY ─── grouped cards ─── */}
       <div style={styles.meBody}>
-
-        {/* Push notifications — kept as embedded section */}
-        <PushNotificationsSection />
 
         {/* ── GROUP: Studio admin (manager only) ── */}
         {isManager && (() => {
@@ -19503,6 +20107,13 @@ function SettingsModal({ user, isManager, onClose, onSave }) {
             Emails will be sent to the address above once Phase 2 deployment is complete.
             Your preferences are saved now and will apply automatically on first email.
           </span>
+        </div>
+
+        {/* Push notifications — lives in settings rather than the Me page
+            so the prompt only appears when the user actively goes looking
+            for it. Less aggressive, more deliberate. */}
+        <div style={{ marginTop: 18 }}>
+          <PushNotificationsSection />
         </div>
 
         <div style={{ display: 'flex', gap: 8, marginTop: 22 }}>
