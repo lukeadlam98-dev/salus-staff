@@ -2248,6 +2248,7 @@ export default function SalusStaff() {
             data={data}
             currentUser={currentUser}
             isManager={isManager}
+            previewingAsStaff={previewingAsStaff}
             onReload={reloadData}
             onClassClick={(classId) => {
               const cls = data.classes.find(c => c.id === classId);
@@ -13079,7 +13080,7 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
   );
 }
 
-function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestCover, onHireStudio, onClaim, onExpressInterest, onViewAllCover, onViewChat, onCreateTask, onOpenTask, onOpenAllTasks, onOpenTour, onCreateMaintenance, onOpenMaintenance, onCreateFeedback, onOpenFeedback, onMarkBroadcastRead, onLogWellbeing, onClearWellbeing, onAddTodo, onToggleTodo, onDeleteTodo, onClearDoneTodos, onFohClockIn, onFohClockOut, onToggleDailyJob, onUndoRecurringJob, onTickAllDailyJobs }) {
+function Home({ data, currentUser, isManager, previewingAsStaff, onReload, onClassClick, onRequestCover, onHireStudio, onClaim, onExpressInterest, onViewAllCover, onViewChat, onCreateTask, onOpenTask, onOpenAllTasks, onOpenTour, onCreateMaintenance, onOpenMaintenance, onCreateFeedback, onOpenFeedback, onMarkBroadcastRead, onLogWellbeing, onClearWellbeing, onAddTodo, onToggleTodo, onDeleteTodo, onClearDoneTodos, onFohClockIn, onFohClockOut, onToggleDailyJob, onUndoRecurringJob, onTickAllDailyJobs }) {
   const now = new Date();
   const hour = now.getHours();
   const greeting = hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening';
@@ -13184,11 +13185,14 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
     }}>
       {/* FOH clipboard — clock in/out + daily jobs. Shows at the very top
           for Front of House staff, above the photo hero, because when
-          they open the app on shift this is the thing they need. */}
-      {currentUser.isFoh && (
+          they open the app on shift this is the thing they need.
+          Also shown to managers in "view as staff" preview mode so they
+          can see exactly what FOH sees. */}
+      {(currentUser.isFoh || previewingAsStaff) && (
         <FohClipboard
           data={data}
           currentUser={currentUser}
+          preview={previewingAsStaff && !currentUser.isFoh}
           onClockIn={onFohClockIn}
           onClockOut={onFohClockOut}
           onToggleJob={onToggleDailyJob}
@@ -13823,7 +13827,7 @@ function MemberRequestModal({ currentUser, onClose, onSubmit }) {
 // jobs checklist (grouped Opening / During / Closing) with tick-all.
 // Shows at the top of Home for FOH staff. Realtime means the manager
 // dashboard reflects every tick the instant it happens.
-function FohClipboard({ data, currentUser, onClockIn, onClockOut, onToggleJob, onUndoJob, onTickAll }) {
+function FohClipboard({ data, currentUser, preview, onClockIn, onClockOut, onToggleJob, onUndoJob, onTickAll }) {
   const today = new Date().toISOString().slice(0, 10);
   const openShift = (data.fohShifts || []).find(s => s.userId === currentUser.id && !s.clockOutAt);
   const onShift = !!openShift;
@@ -13878,6 +13882,18 @@ function FohClipboard({ data, currentUser, onClockIn, onClockOut, onToggleJob, o
 
   return (
     <div style={{ marginBottom: 22 }}>
+      {preview && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          background: '#f4efe2', border: '1px solid #e5dcc4', borderRadius: 12,
+          padding: '10px 14px', marginBottom: 14,
+        }}>
+          <Eye size={15} color="#c6926a" />
+          <span style={{ fontSize: 12, color: '#5c4a38', lineHeight: 1.4 }}>
+            <b>Preview</b> — this is exactly what Front of House staff see on their home screen.
+          </span>
+        </div>
+      )}
       {/* ── Clock card ── */}
       <div style={{
         background: onShift
