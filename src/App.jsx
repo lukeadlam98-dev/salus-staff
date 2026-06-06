@@ -39,6 +39,10 @@ import {
   onboardingStepFromDb,
   expenseFromDb,
   flowFromDb,
+  fohShiftFromDb,
+  dailyJobFromDb,
+  dailyJobLogFromDb,
+  memberRequestFromDb,
 } from './lib/transformers';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -101,6 +105,10 @@ const EMPTY_DATA = {
   externalIncome: [],
   wellbeingCheckins: [],
   personalTodos: [],
+  fohShifts: [],
+  dailyJobs: [],
+  dailyJobLogs: [],
+  memberRequests: [],
 };
 
 const CLASS_TYPES = {
@@ -428,6 +436,13 @@ export default function SalusStaff() {
     return () => window.removeEventListener('salus:openAdmin', handler);
   }, []);
 
+  // Listen for "log a member request" requests from any staff surface
+  useEffect(() => {
+    const handler = () => setModal({ type: 'memberRequest' });
+    window.addEventListener('salus:logMemberRequest', handler);
+    return () => window.removeEventListener('salus:logMemberRequest', handler);
+  }, []);
+
   // Listen for tab switch requests from child components (e.g. home avatar tap → Me)
   useEffect(() => {
     const handler = (e) => {
@@ -532,7 +547,7 @@ export default function SalusStaff() {
     if (!session) return;
     if (!silent) setLoading(true);
     try {
-      const [profilesRes, classesRes, coverReqRes, coverCmRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes, emailIntRes, stockRes, storeCardsRes, broadcastsRes, broadcastReadsRes, incidentsRes, onboardingStepsRes, expensesRes, flowsRes, extIncomeRes, wellbeingRes, personalTodosRes] = await Promise.all([
+      const [profilesRes, classesRes, coverReqRes, coverCmRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes, emailIntRes, stockRes, storeCardsRes, broadcastsRes, broadcastReadsRes, incidentsRes, onboardingStepsRes, expensesRes, flowsRes, extIncomeRes, wellbeingRes, personalTodosRes, fohShiftsRes, dailyJobsRes, dailyJobLogsRes, memberRequestsRes] = await Promise.all([
         supabase.from('profiles').select('*'),
         supabase.from('classes').select('*'),
         supabase.from('cover_requests').select('*'),
@@ -570,6 +585,14 @@ export default function SalusStaff() {
         supabase.from('wellbeing_checkins').select('*').gte('checked_in_on', new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)).order('checked_in_on', { ascending: false }).then(r => r, () => ({ data: [], error: null })),
         // Personal to-do list — coach-private. Graceful fallback pre-migration.
         supabase.from('personal_todos').select('*').eq('user_id', session.user?.id).order('done', { ascending: true }).order('position', { ascending: true }).order('created_at', { ascending: false }).then(r => r, () => ({ data: [], error: null })),
+        // FOH shifts — last 60 days for payroll + today's clock status. Graceful fallback.
+        supabase.from('foh_shifts').select('*').gte('shift_date', new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)).order('clock_in_at', { ascending: false }).then(r => r, () => ({ data: [], error: null })),
+        // Daily jobs — active templates. Graceful fallback.
+        supabase.from('daily_jobs').select('*').order('category', { ascending: true }).order('sort_order', { ascending: true }).then(r => r, () => ({ data: [], error: null })),
+        // Daily job logs — today's completions only (the checklist resets daily). Graceful fallback.
+        supabase.from('daily_job_logs').select('*').eq('log_date', new Date().toISOString().slice(0, 10)).then(r => r, () => ({ data: [], error: null })),
+        // Member requests — the structured "leave a note" queue. Graceful fallback.
+        supabase.from('member_requests').select('*').order('created_at', { ascending: false }).then(r => r, () => ({ data: [], error: null })),
       ]);
 
       const errors = [profilesRes, classesRes, coverReqRes, swapReqRes, messagesRes, shiftsRes, tasksRes, taskCmRes, shiftNotesRes, toursRes, maintRes, fbRes, postsRes, postRxRes, postCmRes, bookingsRes, dmsRes]
@@ -646,6 +669,11 @@ export default function SalusStaff() {
           createdAt: r.created_at,
           updatedAt: r.updated_at,
         })),
+        // FOH operations
+        fohShifts: (fohShiftsRes?.data || []).map(fohShiftFromDb),
+        dailyJobs: (dailyJobsRes?.data || []).map(dailyJobFromDb),
+        dailyJobLogs: (dailyJobLogsRes?.data || []).map(dailyJobLogFromDb),
+        memberRequests: (memberRequestsRes?.data || []).map(memberRequestFromDb),
       });
     } catch (e) {
       console.error('Failed to load data:', e);
@@ -693,6 +721,10 @@ export default function SalusStaff() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'external_income' }, silentReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'wellbeing_checkins' }, silentReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'personal_todos' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'foh_shifts' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'daily_jobs' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'daily_job_logs' }, silentReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'member_requests' }, silentReload)
       .subscribe();
     return () => { supabase.removeChannel(channel); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1113,6 +1145,187 @@ export default function SalusStaff() {
       .eq('user_id', session.user.id)
       .eq('done', true);
     if (error) console.error('clearDonePersonalTodos', error);
+    else await reloadData(true);
+    return { error };
+  };
+
+  // ───────────────────────────────────────────────────────────────────
+  // FOH OPERATIONS — clock in/out + daily jobs
+  // ───────────────────────────────────────────────────────────────────
+  const fohClockIn = async () => {
+    if (!session?.user?.id) return { error: new Error('Not signed in') };
+    // Guard: don't open a second shift if one is already open today
+    const open = (data.fohShifts || []).find(s => s.userId === session.user.id && !s.clockOutAt);
+    if (open) return { error: null };
+    const { error } = await supabase.from('foh_shifts').insert({
+      user_id: session.user.id,
+      clock_in_at: new Date().toISOString(),
+      shift_date: new Date().toISOString().slice(0, 10),
+    });
+    if (error) console.error('fohClockIn', error);
+    else await reloadData(true);
+    return { error };
+  };
+
+  const fohClockOut = async () => {
+    if (!session?.user?.id) return { error: new Error('Not signed in') };
+    const open = (data.fohShifts || []).find(s => s.userId === session.user.id && !s.clockOutAt);
+    if (!open) return { error: new Error('Not clocked in') };
+    const { error } = await supabase.from('foh_shifts')
+      .update({ clock_out_at: new Date().toISOString() })
+      .eq('id', open.id);
+    if (error) console.error('fohClockOut', error);
+    else await reloadData(true);
+    return { error };
+  };
+
+  const toggleDailyJob = async (jobId) => {
+    if (!session?.user?.id) return { error: new Error('Not signed in') };
+    const today = new Date().toISOString().slice(0, 10);
+    const job = (data.dailyJobs || []).find(j => j.id === jobId);
+    const isRecurring = job?.recurrence === 'recurring';
+
+    // Recurring jobs: every tap logs a fresh occurrence (walk-around, bins…)
+    if (isRecurring) {
+      const { error } = await supabase.from('daily_job_logs').insert({
+        job_id: jobId,
+        log_date: today,
+        completed_by: session.user.id,
+        completed_at: new Date().toISOString(),
+      });
+      if (error) console.error('logRecurringJob', error);
+      else await reloadData(true);
+      return { error };
+    }
+
+    // Once-a-day jobs: toggle the single log
+    const existing = (data.dailyJobLogs || []).find(l => l.jobId === jobId && l.logDate === today);
+    if (existing) {
+      const { error } = await supabase.from('daily_job_logs').delete().eq('id', existing.id);
+      if (error) console.error('untickDailyJob', error);
+      else await reloadData(true);
+      return { error };
+    }
+    const { error } = await supabase.from('daily_job_logs').insert({
+      job_id: jobId,
+      log_date: today,
+      completed_by: session.user.id,
+      completed_at: new Date().toISOString(),
+    });
+    if (error) console.error('tickDailyJob', error);
+    else await reloadData(true);
+    return { error };
+  };
+
+  // Undo the most recent occurrence of a recurring job today
+  const undoRecurringJob = async (jobId) => {
+    if (!session?.user?.id) return { error: new Error('Not signed in') };
+    const today = new Date().toISOString().slice(0, 10);
+    const occurrences = (data.dailyJobLogs || [])
+      .filter(l => l.jobId === jobId && l.logDate === today)
+      .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));
+    if (occurrences.length === 0) return { error: null };
+    const { error } = await supabase.from('daily_job_logs').delete().eq('id', occurrences[0].id);
+    if (error) console.error('undoRecurringJob', error);
+    else await reloadData(true);
+    return { error };
+  };
+
+  const tickAllDailyJobs = async (jobIds) => {
+    if (!session?.user?.id) return { error: new Error('Not signed in') };
+    const today = new Date().toISOString().slice(0, 10);
+    const doneIds = new Set((data.dailyJobLogs || []).filter(l => l.logDate === today).map(l => l.jobId));
+    // Tick-all only applies to once-a-day jobs that aren't done. Recurring
+    // jobs (walk-arounds, bin checks) are logged individually as they happen.
+    const onceJobIds = new Set((data.dailyJobs || []).filter(j => j.recurrence !== 'recurring').map(j => j.id));
+    const toInsert = (jobIds || [])
+      .filter(id => onceJobIds.has(id) && !doneIds.has(id))
+      .map(id => ({
+        job_id: id,
+        log_date: today,
+        completed_by: session.user.id,
+        completed_at: new Date().toISOString(),
+      }));
+    if (toInsert.length === 0) return { error: null };
+    const { error } = await supabase.from('daily_job_logs').insert(toInsert);
+    if (error) console.error('tickAllDailyJobs', error);
+    else await reloadData(true);
+    return { error };
+  };
+
+  // Manager: manage the job templates
+  const addDailyJob = async ({ title, category }) => {
+    if (!title?.trim()) return { error: new Error('Empty') };
+    const sameCategory = (data.dailyJobs || []).filter(j => j.category === (category || 'during'));
+    const maxOrder = sameCategory.length ? Math.max(...sameCategory.map(j => j.sortOrder || 0)) : 0;
+    const { error } = await supabase.from('daily_jobs').insert({
+      title: title.trim(),
+      category: category || 'during',
+      sort_order: maxOrder + 1,
+      created_by: session?.user?.id,
+    });
+    if (error) console.error('addDailyJob', error);
+    else await reloadData(true);
+    return { error };
+  };
+
+  const updateDailyJob = async (id, patch) => {
+    const dbPatch = {};
+    if (patch.title != null) dbPatch.title = patch.title;
+    if (patch.category != null) dbPatch.category = patch.category;
+    if (patch.active != null) dbPatch.active = patch.active;
+    if (patch.sortOrder != null) dbPatch.sort_order = patch.sortOrder;
+    const { error } = await supabase.from('daily_jobs').update(dbPatch).eq('id', id);
+    if (error) console.error('updateDailyJob', error);
+    else await reloadData(true);
+    return { error };
+  };
+
+  const deleteDailyJob = async (id) => {
+    const { error } = await supabase.from('daily_jobs').delete().eq('id', id);
+    if (error) console.error('deleteDailyJob', error);
+    else await reloadData(true);
+    return { error };
+  };
+
+  // ───────────────────────────────────────────────────────────────────
+  // MEMBER REQUESTS — the structured "leave a note"
+  // ───────────────────────────────────────────────────────────────────
+  const createMemberRequest = async ({ memberName, type, detail }) => {
+    if (!memberName?.trim()) return { error: new Error('Member name required') };
+    const { error } = await supabase.from('member_requests').insert({
+      member_name: memberName.trim(),
+      type: type || 'other',
+      detail: (detail || '').trim() || null,
+      status: 'open',
+      raised_by: session?.user?.id,
+    });
+    if (error) console.error('createMemberRequest', error);
+    else await reloadData(true);
+    return { error };
+  };
+
+  const resolveMemberRequest = async (id) => {
+    const { error } = await supabase.from('member_requests')
+      .update({ status: 'resolved', resolved_by: session?.user?.id, resolved_at: new Date().toISOString() })
+      .eq('id', id);
+    if (error) console.error('resolveMemberRequest', error);
+    else await reloadData(true);
+    return { error };
+  };
+
+  const reopenMemberRequest = async (id) => {
+    const { error } = await supabase.from('member_requests')
+      .update({ status: 'open', resolved_by: null, resolved_at: null })
+      .eq('id', id);
+    if (error) console.error('reopenMemberRequest', error);
+    else await reloadData(true);
+    return { error };
+  };
+
+  const deleteMemberRequest = async (id) => {
+    const { error } = await supabase.from('member_requests').delete().eq('id', id);
+    if (error) console.error('deleteMemberRequest', error);
     else await reloadData(true);
     return { error };
   };
@@ -2066,6 +2279,11 @@ export default function SalusStaff() {
             onToggleTodo={togglePersonalTodo}
             onDeleteTodo={deletePersonalTodo}
             onClearDoneTodos={clearDonePersonalTodos}
+            onFohClockIn={fohClockIn}
+            onFohClockOut={fohClockOut}
+            onToggleDailyJob={toggleDailyJob}
+            onUndoRecurringJob={undoRecurringJob}
+            onTickAllDailyJobs={tickAllDailyJobs}
           />
         )}
 
@@ -2520,6 +2738,13 @@ export default function SalusStaff() {
           currentUser={currentUser}
           kind={modal.kind}
           onClose={() => setModal(null)}
+        />
+      )}
+      {modal?.type === 'memberRequest' && (
+        <MemberRequestModal
+          currentUser={currentUser}
+          onClose={() => setModal(null)}
+          onSubmit={createMemberRequest}
         />
       )}
       {modal?.type === 'adminSection' && (
@@ -8965,6 +9190,7 @@ function AdminSectionModal({ section, data, currentUser, isManager, emailIntegra
     bookings: 'Studio bookings',
     incidents: 'Incidents',
     invoices: 'Pay run',
+    foh: 'Front of House',
   };
   const eyebrowMap = {
     reports: 'Studio admin',
@@ -8975,6 +9201,7 @@ function AdminSectionModal({ section, data, currentUser, isManager, emailIntegra
     bookings: 'Studio admin',
     incidents: 'Studio admin',
     invoices: 'Pay run',
+    foh: 'Front of House',
   };
 
   return createPortal(
@@ -9010,6 +9237,13 @@ function AdminSectionModal({ section, data, currentUser, isManager, emailIntegra
             />
           )}
           {section === 'cancellations' && <AdminCancellationsSection />}
+          {section === 'foh' && (
+            <FohManagerDashboard
+              data={data}
+              currentUser={currentUser}
+              onReload={onReload}
+            />
+          )}
           {section === 'tours' && <AdminToursSection data={data} currentUser={currentUser} />}
           {section === 'stock' && (
             <AdminStockSection
@@ -12845,7 +13079,7 @@ function MyDayHero({ data, currentUser, isManager, onClassClick }) {
   );
 }
 
-function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestCover, onHireStudio, onClaim, onExpressInterest, onViewAllCover, onViewChat, onCreateTask, onOpenTask, onOpenAllTasks, onOpenTour, onCreateMaintenance, onOpenMaintenance, onCreateFeedback, onOpenFeedback, onMarkBroadcastRead, onLogWellbeing, onClearWellbeing, onAddTodo, onToggleTodo, onDeleteTodo, onClearDoneTodos }) {
+function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestCover, onHireStudio, onClaim, onExpressInterest, onViewAllCover, onViewChat, onCreateTask, onOpenTask, onOpenAllTasks, onOpenTour, onCreateMaintenance, onOpenMaintenance, onCreateFeedback, onOpenFeedback, onMarkBroadcastRead, onLogWellbeing, onClearWellbeing, onAddTodo, onToggleTodo, onDeleteTodo, onClearDoneTodos, onFohClockIn, onFohClockOut, onToggleDailyJob, onUndoRecurringJob, onTickAllDailyJobs }) {
   const now = new Date();
   const hour = now.getHours();
   const greeting = hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening';
@@ -12948,6 +13182,21 @@ function Home({ data, currentUser, isManager, onReload, onClassClick, onRequestC
       paddingLeft: 28,
       paddingRight: 28,
     }}>
+      {/* FOH clipboard — clock in/out + daily jobs. Shows at the very top
+          for Front of House staff, above the photo hero, because when
+          they open the app on shift this is the thing they need. */}
+      {currentUser.isFoh && (
+        <FohClipboard
+          data={data}
+          currentUser={currentUser}
+          onClockIn={onFohClockIn}
+          onClockOut={onFohClockOut}
+          onToggleJob={onToggleDailyJob}
+          onUndoJob={onUndoRecurringJob}
+          onTickAll={onTickAllDailyJobs}
+        />
+      )}
+
       {/* Editorial hero — big photo, greeting overlay, next class overlay.
           The ONLY fixed home element — sets the brand. Everything else
           below is a widget the coach chooses to see (or hide). */}
@@ -13440,6 +13689,983 @@ function WellbeingCheckin({ data, currentUser, onLog, onClear }) {
             </button>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Member requests — quick canned actions ─────────────────────────────
+// The preset buttons staff tap instead of free-typing. Each has a phrase
+// that builds the noted message ("Callum — wants to cancel this month").
+const MEMBER_REQUEST_TYPES = [
+  { key: 'cancel',    label: 'Cancel this month',  icon: X,             phrase: 'wants to cancel this month',                    tone: '#c8442a' },
+  { key: 'guest',     label: 'Bring a guest',      icon: Users,         phrase: 'wants to bring a guest in',                     tone: '#7a8c5c' },
+  { key: 'pause',     label: 'Pause membership',   icon: Clock,         phrase: 'wants to pause their membership',               tone: '#c6926a' },
+  { key: 'upgrade',   label: 'Change / upgrade',   icon: TrendingUp,    phrase: 'wants to change or upgrade their membership',   tone: '#7a8c5c' },
+  { key: 'billing',   label: 'Billing question',   icon: CreditCard,    phrase: 'has a billing or payment question',             tone: '#5c4a38' },
+  { key: 'complaint', label: 'Complaint / issue',  icon: AlertCircle,   phrase: 'has raised an issue',                           tone: '#c8442a' },
+  { key: 'injury',    label: 'Injury / to note',   icon: Heart,         phrase: 'has an injury or modification to note',         tone: '#c6926a' },
+  { key: 'callback',  label: 'Wants a callback',   icon: Phone,         phrase: 'would like a callback from the team',           tone: '#5c4a38' },
+  { key: 'other',     label: 'Other note',         icon: MessageCircle, phrase: '',                                              tone: '#a59478' },
+];
+const memberRequestPhrase = (type) => MEMBER_REQUEST_TYPES.find(t => t.key === type)?.phrase || '';
+const memberRequestLabel = (type) => MEMBER_REQUEST_TYPES.find(t => t.key === type)?.label || 'Note';
+
+// Staff modal — log what a member needs in a few taps.
+function MemberRequestModal({ currentUser, onClose, onSubmit }) {
+  const [memberName, setMemberName] = useState('');
+  const [type, setType] = useState(null);
+  const [detail, setDetail] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const canSubmit = memberName.trim() && type;
+  const preview = type
+    ? `${memberName.trim() || 'Member'}${memberRequestPhrase(type) ? ' — ' + memberRequestPhrase(type) : ''}`
+    : '';
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setBusy(true);
+    const { error } = await onSubmit({ memberName, type, detail });
+    setBusy(false);
+    if (!error) onClose();
+  };
+
+  return createPortal(
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(26,38,32,0.55)', zIndex: 9998 }} />
+      <div style={{
+        position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 9999,
+        background: '#fffdf7', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+        maxHeight: '92vh', overflowY: 'auto', padding: '8px 20px 28px',
+        boxShadow: '0 -12px 40px rgba(26,38,32,0.25)',
+      }}>
+        <div style={{ width: 40, height: 4, borderRadius: 2, background: '#e5dcc4', margin: '8px auto 18px' }} />
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: '#c6926a', marginBottom: 6 }}>
+          Member request
+        </div>
+        <div style={{ fontFamily: '"Playfair Display", Georgia, serif', fontSize: 24, color: '#1a2620', marginBottom: 18 }}>
+          What do they need?
+        </div>
+
+        {/* Member name */}
+        <input
+          value={memberName}
+          onChange={e => setMemberName(e.target.value)}
+          placeholder="Member's name — e.g. Callum"
+          style={{ ...styles.loginInput, marginBottom: 16 }}
+          autoFocus
+        />
+
+        {/* Quick-action grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
+          {MEMBER_REQUEST_TYPES.map(t => {
+            const Icon = t.icon;
+            const active = type === t.key;
+            return (
+              <button key={t.key} onClick={() => setType(t.key)} className="salus-btn"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 9, padding: '13px 12px',
+                  borderRadius: 13, textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit',
+                  border: active ? `1.5px solid ${t.tone}` : '1px solid #efe7d2',
+                  background: active ? '#fcf8ee' : '#fffdf7',
+                  boxShadow: active ? `0 2px 10px ${t.tone}22` : 'none',
+                }}>
+                <Icon size={16} color={t.tone} strokeWidth={1.9} />
+                <span style={{ fontSize: 12.5, fontWeight: 500, color: '#1a2620', lineHeight: 1.2 }}>{t.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Optional detail */}
+        <textarea
+          value={detail}
+          onChange={e => setDetail(e.target.value)}
+          placeholder="Anything to add? (optional)"
+          rows={2}
+          style={{ ...styles.loginInput, resize: 'none', marginBottom: 14, fontFamily: 'inherit' }}
+        />
+
+        {/* Preview of what gets noted */}
+        {preview && (
+          <div style={{
+            background: '#f4efe2', borderRadius: 12, padding: '12px 14px', marginBottom: 16,
+            fontSize: 13.5, color: '#5c4a38', fontStyle: 'italic',
+            fontFamily: '"Playfair Display", Georgia, serif',
+          }}>
+            “{preview}{detail.trim() ? ` — ${detail.trim()}` : ''}”
+          </div>
+        )}
+
+        <button onClick={submit} disabled={!canSubmit || busy} className="salus-btn"
+          style={{
+            width: '100%', padding: '15px', borderRadius: 999,
+            background: '#1a2620', color: '#fffdf7', border: 'none',
+            fontSize: 13, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
+            cursor: (!canSubmit || busy) ? 'not-allowed' : 'pointer',
+            opacity: (!canSubmit || busy) ? 0.4 : 1, fontFamily: 'inherit',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          }}>
+          <Send size={15} /> Send to the team
+        </button>
+        <div style={{ fontSize: 11, color: '#a59478', textAlign: 'center', marginTop: 12, fontStyle: 'italic' }}>
+          Goes to the manager &amp; heads of staff to sort.
+        </div>
+      </div>
+    </>,
+    document.body
+  );
+}
+
+// ─── FOH Clipboard ──────────────────────────────────────────────────────
+// The digital clipboard for Front of House. Clock in/out + the daily
+// jobs checklist (grouped Opening / During / Closing) with tick-all.
+// Shows at the top of Home for FOH staff. Realtime means the manager
+// dashboard reflects every tick the instant it happens.
+function FohClipboard({ data, currentUser, onClockIn, onClockOut, onToggleJob, onUndoJob, onTickAll }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const openShift = (data.fohShifts || []).find(s => s.userId === currentUser.id && !s.clockOutAt);
+  const onShift = !!openShift;
+
+  const jobs = (data.dailyJobs || []).filter(j => j.active);
+  const todayLogs = (data.dailyJobLogs || []).filter(l => l.logDate === today);
+  // For once-jobs: done if any log exists. For recurring: count occurrences.
+  const doneIds = new Set(todayLogs.map(l => l.jobId));
+  const occByJob = new Map();
+  const lastByJob = new Map();
+  todayLogs.forEach(l => {
+    occByJob.set(l.jobId, (occByJob.get(l.jobId) || 0) + 1);
+    const prev = lastByJob.get(l.jobId);
+    if (!prev || new Date(l.completedAt) > new Date(prev)) lastByJob.set(l.jobId, l.completedAt);
+  });
+
+  const [busy, setBusy] = useState(false);
+
+  const groups = [
+    { key: 'opening', label: 'Opening' },
+    { key: 'during',  label: 'During the day' },
+    { key: 'closing', label: 'Closing' },
+  ].map(g => ({
+    ...g,
+    items: jobs.filter(j => j.category === g.key).sort((a, b) => {
+      if (a.priority !== b.priority) return a.priority ? -1 : 1; // priority first
+      return (a.sortOrder || 0) - (b.sortOrder || 0);
+    }),
+  })).filter(g => g.items.length > 0);
+
+  // Progress counts only once-a-day jobs (recurring don't have a "done" end state)
+  const onceJobs = jobs.filter(j => j.recurrence !== 'recurring');
+  const onceDone = onceJobs.filter(j => doneIds.has(j.id)).length;
+  const onceJobIds = onceJobs.map(j => j.id);
+  const allOnceDone = onceJobs.length > 0 && onceDone === onceJobs.length;
+
+  const fmtTime = (iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  const elapsedLabel = () => {
+    if (!openShift) return '';
+    const mins = Math.floor((Date.now() - new Date(openShift.clockInAt).getTime()) / 60000);
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  };
+
+  const handleClock = async () => {
+    setBusy(true);
+    if (onShift) await onClockOut?.();
+    else await onClockIn?.();
+    setBusy(false);
+  };
+
+  return (
+    <div style={{ marginBottom: 22 }}>
+      {/* ── Clock card ── */}
+      <div style={{
+        background: onShift
+          ? 'linear-gradient(180deg, #232f29 0%, #1a2620 100%)'
+          : '#fffdf7',
+        border: onShift ? 'none' : '1px solid #efe7d2',
+        borderRadius: 20,
+        padding: '20px 22px',
+        marginBottom: 16,
+        boxShadow: onShift
+          ? '0 12px 30px rgba(26, 38, 32, 0.22)'
+          : '0 4px 14px rgba(92, 74, 56, 0.05)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
+      }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase',
+            color: onShift ? '#c6926a' : '#a59478', marginBottom: 6,
+          }}>
+            {onShift ? 'On shift' : 'Front of house'}
+          </div>
+          {onShift ? (
+            <div>
+              <div style={{
+                fontFamily: '"Playfair Display", Georgia, serif',
+                fontSize: 22, color: '#fffdf7', lineHeight: 1.1,
+              }}>
+                Since {fmtTime(openShift.clockInAt)}
+              </div>
+              <div style={{ fontSize: 12, color: 'rgba(255,253,247,0.6)', marginTop: 3 }}>
+                {elapsedLabel()} on the clock
+              </div>
+            </div>
+          ) : (
+            <div style={{
+              fontFamily: '"Playfair Display", Georgia, serif',
+              fontSize: 22, color: '#1a2620', lineHeight: 1.1,
+            }}>
+              Ready when you are
+            </div>
+          )}
+        </div>
+        <button
+          onClick={handleClock}
+          disabled={busy}
+          className="salus-btn"
+          style={{
+            flexShrink: 0,
+            padding: '14px 22px', borderRadius: 999,
+            background: onShift ? 'rgba(255,253,247,0.12)' : '#1a2620',
+            border: onShift ? '1px solid rgba(255,253,247,0.2)' : 'none',
+            color: '#fffdf7', fontSize: 13, fontWeight: 600,
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit',
+            opacity: busy ? 0.6 : 1,
+          }}
+        >
+          {onShift ? 'Clock out' : 'Clock in'}
+        </button>
+      </div>
+
+      {/* ── Daily jobs ── */}
+      {jobs.length > 0 && (
+        <div style={{
+          background: '#fffdf7', border: '1px solid #efe7d2', borderRadius: 20,
+          padding: '18px 20px 14px',
+          boxShadow: '0 4px 14px rgba(92, 74, 56, 0.05)',
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+            marginBottom: 14,
+          }}>
+            <div style={{ fontFamily: '"Playfair Display", Georgia, serif', fontSize: 18, color: '#1a2620' }}>
+              Today's jobs
+            </div>
+            <div style={{
+              fontSize: 11, color: allOnceDone ? '#7a8c5c' : '#a59478', fontWeight: 700,
+              letterSpacing: '0.06em', textTransform: 'uppercase', fontVariantNumeric: 'tabular-nums',
+            }}>
+              {onceDone} / {onceJobs.length} done
+            </div>
+          </div>
+
+          {/* Tick all (once-jobs only) */}
+          {!allOnceDone && onceJobs.length > 0 && (
+            <button
+              onClick={() => onTickAll?.(onceJobIds)}
+              className="salus-btn"
+              style={{
+                width: '100%', marginBottom: 14, padding: '11px',
+                background: '#f4efe2', border: '1px solid #e5dcc4', borderRadius: 12,
+                color: '#5c4a38', fontSize: 12, fontWeight: 600,
+                letterSpacing: '0.06em', textTransform: 'uppercase',
+                cursor: 'pointer', fontFamily: 'inherit',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              }}
+            >
+              <Check size={14} strokeWidth={2.5} /> Tick off opening & closing
+            </button>
+          )}
+
+          {/* Grouped job list */}
+          {groups.map((g, gi) => (
+            <div key={g.key} style={{ marginBottom: gi < groups.length - 1 ? 18 : 0 }}>
+              <div style={{
+                fontSize: 9.5, fontWeight: 700, letterSpacing: '0.14em',
+                textTransform: 'uppercase', color: '#a59478', marginBottom: 6,
+              }}>
+                {g.label}
+              </div>
+              {g.items.map(job => {
+                const recurring = job.recurrence === 'recurring';
+                const count = occByJob.get(job.id) || 0;
+                const done = doneIds.has(job.id);
+                const last = lastByJob.get(job.id);
+
+                if (recurring) {
+                  // Recurring: a "Done" button that logs each occurrence, with a count
+                  return (
+                    <div key={job.id} style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '11px 4px', borderBottom: '1px solid #f5f0e0',
+                    }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{
+                          fontSize: 14, lineHeight: 1.35,
+                          color: job.priority ? '#c8442a' : '#1a2620',
+                          fontWeight: job.priority ? 600 : 400,
+                        }}>
+                          {job.priority && '★ '}{job.title}
+                        </div>
+                        <div style={{ fontSize: 11, color: '#a59478', marginTop: 3 }}>
+                          {count > 0
+                            ? `${count}× today · last ${fmtTime(last)}`
+                            : (job.priority ? 'Not done yet — priority' : 'Not done yet')}
+                          {count > 0 && (
+                            <button onClick={() => onUndoJob?.(job.id)} className="salus-btn"
+                              style={{
+                                background: 'transparent', border: 'none', padding: '0 0 0 8px',
+                                color: '#c4b8a0', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit',
+                                textDecoration: 'underline',
+                              }}>
+                              undo
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <button onClick={() => onToggleJob?.(job.id)} className="salus-btn"
+                        style={{
+                          flexShrink: 0, padding: '8px 16px', borderRadius: 999,
+                          background: job.priority ? '#c8442a' : '#1a2620', color: '#fffdf7',
+                          border: 'none', fontSize: 12, fontWeight: 600,
+                          letterSpacing: '0.04em', cursor: 'pointer', fontFamily: 'inherit',
+                        }}>
+                        Done
+                      </button>
+                    </div>
+                  );
+                }
+
+                // Once-a-day: checkbox toggle
+                return (
+                  <button
+                    key={job.id}
+                    onClick={() => onToggleJob?.(job.id)}
+                    className="salus-btn"
+                    style={{
+                      width: '100%', textAlign: 'left',
+                      display: 'flex', alignItems: 'center', gap: 12,
+                      padding: '11px 4px', background: 'transparent', border: 'none',
+                      borderBottom: '1px solid #f5f0e0', cursor: 'pointer', fontFamily: 'inherit',
+                    }}
+                  >
+                    <span style={{
+                      width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
+                      border: done ? '1.5px solid #7a8c5c' : '1.5px solid #c4b8a0',
+                      background: done ? '#7a8c5c' : 'transparent',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      transition: 'background 0.15s, border-color 0.15s',
+                    }}>
+                      {done && <Check size={12} color="#fffdf7" strokeWidth={3} />}
+                    </span>
+                    <span style={{
+                      flex: 1, fontSize: 14,
+                      color: done ? '#a59478' : '#1a2620',
+                      textDecoration: done ? 'line-through' : 'none',
+                      lineHeight: 1.4,
+                    }}>
+                      {job.title}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Log a member request — quick canned actions */}
+      <button
+        onClick={() => window.dispatchEvent(new CustomEvent('salus:logMemberRequest'))}
+        className="salus-btn"
+        style={{
+          width: '100%', marginTop: 14, padding: '14px',
+          background: '#fffdf7', border: '1px dashed #d8cdb8', borderRadius: 16,
+          color: '#5c4a38', fontSize: 13, fontWeight: 500,
+          cursor: 'pointer', fontFamily: 'inherit',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9,
+        }}
+      >
+        <Plus size={16} color="#c6926a" /> Note a member request
+      </button>
+    </div>
+  );
+}
+
+// ─── FOH Manager Dashboard ──────────────────────────────────────────────
+// The clipboard-from-across-the-room view. Three tabs:
+//   • Today   — who's on shift + live job completion across the team
+//   • Jobs    — add / edit / remove the daily job templates
+//   • Payroll — hours worked per person over a period × their rate
+function FohManagerDashboard({ data, currentUser, onReload }) {
+  const [tab, setTab] = useState('today');
+  const today = new Date().toISOString().slice(0, 10);
+
+  const fohStaff = (data.users || []).filter(u => u.isFoh);
+  const jobs = (data.dailyJobs || []).filter(j => j.active);
+  const todayLogs = (data.dailyJobLogs || []).filter(l => l.logDate === today);
+  const doneIds = new Set(todayLogs.map(l => l.jobId));
+  const logByJob = new Map(todayLogs.map(l => [l.jobId, l]));
+  // Occurrence counts + latest log for recurring jobs
+  const occByJob = new Map();
+  const latestByJob = new Map();
+  todayLogs.forEach(l => {
+    occByJob.set(l.jobId, (occByJob.get(l.jobId) || 0) + 1);
+    const prev = latestByJob.get(l.jobId);
+    if (!prev || new Date(l.completedAt) > new Date(prev.completedAt)) latestByJob.set(l.jobId, l);
+  });
+
+  // Who's clocked in right now
+  const openShifts = (data.fohShifts || []).filter(s => !s.clockOutAt && s.shiftDate === today);
+  const onShiftUserIds = new Set(openShifts.map(s => s.userId));
+
+  const userName = (id) => (data.users.find(u => u.id === id)?.name) || 'Someone';
+  const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—';
+
+  // Progress counts once-a-day jobs only
+  const onceJobs = jobs.filter(j => j.recurrence !== 'recurring');
+  const totalDone = onceJobs.filter(j => doneIds.has(j.id)).length;
+
+  return (
+    <div>
+      {/* Tab switcher */}
+      <div style={{
+        display: 'flex', gap: 6, marginBottom: 18,
+        background: '#f4efe2', padding: 4, borderRadius: 12,
+      }}>
+        {[['today', 'Today'], ['jobs', 'Jobs'], ['requests', 'Requests'], ['payroll', 'Payroll']].map(([key, label]) => {
+          const openCount = key === 'requests'
+            ? (data.memberRequests || []).filter(r => r.status === 'open').length
+            : 0;
+          return (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            className="salus-btn"
+            style={{
+              flex: 1, padding: '9px', borderRadius: 9,
+              background: tab === key ? '#fffdf7' : 'transparent',
+              border: 'none',
+              color: tab === key ? '#1a2620' : '#a59478',
+              fontSize: 12, fontWeight: 600, letterSpacing: '0.04em',
+              cursor: 'pointer', fontFamily: 'inherit', position: 'relative',
+              boxShadow: tab === key ? '0 1px 4px rgba(92,74,56,0.10)' : 'none',
+            }}
+          >
+            {label}
+            {openCount > 0 && (
+              <span style={{
+                marginLeft: 5, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                minWidth: 16, height: 16, padding: '0 4px', borderRadius: 999,
+                background: '#c8442a', color: '#fffdf7', fontSize: 10, fontWeight: 700,
+                verticalAlign: 'middle',
+              }}>{openCount}</span>
+            )}
+          </button>
+          );
+        })}
+      </div>
+
+      {/* ════ TODAY ════ */}
+      {tab === 'today' && (
+        <div>
+          {/* Summary band */}
+          <div style={{
+            display: 'flex', gap: 10, marginBottom: 18,
+          }}>
+            <div style={{
+              flex: 1, background: 'linear-gradient(180deg, #232f29 0%, #1a2620 100%)',
+              borderRadius: 16, padding: '16px 18px', color: '#fffdf7',
+            }}>
+              <div style={{ fontSize: 28, fontFamily: '"Playfair Display", Georgia, serif', lineHeight: 1 }}>
+                {onShifts(openShifts).count}
+              </div>
+              <div style={{ fontSize: 11, color: 'rgba(255,253,247,0.6)', marginTop: 6, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                On shift now
+              </div>
+            </div>
+            <div style={{
+              flex: 1, background: '#fffdf7', border: '1px solid #efe7d2',
+              borderRadius: 16, padding: '16px 18px',
+            }}>
+              <div style={{ fontSize: 28, fontFamily: '"Playfair Display", Georgia, serif', lineHeight: 1, color: totalDone === onceJobs.length && onceJobs.length > 0 ? '#7a8c5c' : '#1a2620' }}>
+                {totalDone}<span style={{ fontSize: 16, color: '#c4b8a0' }}>/{onceJobs.length}</span>
+              </div>
+              <div style={{ fontSize: 11, color: '#a59478', marginTop: 6, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                Opening/closing done
+              </div>
+            </div>
+          </div>
+
+          {/* On shift list */}
+          <SectionLabel>On shift</SectionLabel>
+          {openShifts.length === 0 ? (
+            <div style={{
+              padding: '16px', background: '#faf6ec', borderRadius: 12,
+              color: '#a59478', fontSize: 13, fontStyle: 'italic', marginBottom: 18,
+              fontFamily: '"Playfair Display", Georgia, serif',
+            }}>
+              Nobody's clocked in right now.
+            </div>
+          ) : (
+            <div style={{ marginBottom: 18 }}>
+              {openShifts.map(s => {
+                const mins = Math.floor((Date.now() - new Date(s.clockInAt).getTime()) / 60000);
+                const h = Math.floor(mins / 60), m = mins % 60;
+                return (
+                  <div key={s.id} style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '12px 14px', marginBottom: 8,
+                    background: '#fffdf7', border: '1px solid #efe7d2', borderRadius: 12,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#7a8c5c' }} />
+                      <span style={{ fontSize: 14, fontWeight: 500, color: '#1a2620' }}>{userName(s.userId)}</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: '#a59478', fontVariantNumeric: 'tabular-nums' }}>
+                      in at {fmtTime(s.clockInAt)} · {h > 0 ? `${h}h ${m}m` : `${m}m`}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Job status — who did what */}
+          <SectionLabel>Job status</SectionLabel>
+          {jobs.length === 0 ? (
+            <div style={{ color: '#a59478', fontSize: 13, fontStyle: 'italic' }}>
+              No jobs set up yet. Add some in the Jobs tab.
+            </div>
+          ) : (
+            <div style={{
+              background: '#fffdf7', border: '1px solid #efe7d2', borderRadius: 14,
+              overflow: 'hidden',
+            }}>
+              {jobs.sort((a, b) => {
+                const order = { opening: 0, during: 1, closing: 2 };
+                if (order[a.category] !== order[b.category]) return order[a.category] - order[b.category];
+                if (a.priority !== b.priority) return a.priority ? -1 : 1;
+                return (a.sortOrder || 0) - (b.sortOrder || 0);
+              }).map((job, idx) => {
+                const recurring = job.recurrence === 'recurring';
+                const count = occByJob.get(job.id) || 0;
+                const done = recurring ? count > 0 : doneIds.has(job.id);
+                const log = recurring ? latestByJob.get(job.id) : logByJob.get(job.id);
+                return (
+                  <div key={job.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    padding: '12px 14px',
+                    borderBottom: idx < jobs.length - 1 ? '1px solid #f5f0e0' : 'none',
+                  }}>
+                    <span style={{
+                      width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
+                      border: done ? `1.5px solid ${job.priority ? '#c8442a' : '#7a8c5c'}` : '1.5px solid #d8cdb8',
+                      background: done ? (job.priority ? '#c8442a' : '#7a8c5c') : 'transparent',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      {done && <Check size={11} color="#fffdf7" strokeWidth={3} />}
+                    </span>
+                    <span style={{
+                      flex: 1, fontSize: 13.5,
+                      color: done ? '#7a6f5f' : (job.priority ? '#c8442a' : '#5c4a38'),
+                      fontWeight: job.priority && !done ? 600 : 400,
+                    }}>
+                      {job.priority && '★ '}{job.title}
+                      {recurring && (
+                        <span style={{ color: '#a59478', fontWeight: 400 }}>
+                          {count > 0 ? `  ·  ${count}×` : '  ·  not yet'}
+                        </span>
+                      )}
+                    </span>
+                    {done && log && (
+                      <span style={{ fontSize: 11, color: '#a59478', flexShrink: 0 }}>
+                        {log.completedBy ? userName(log.completedBy).split(' ')[0] : ''} · {fmtTime(log.completedAt)}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ════ JOBS ════ */}
+      {tab === 'jobs' && (
+        <FohJobsEditor data={data} currentUser={currentUser} onReload={onReload} />
+      )}
+
+      {/* ════ REQUESTS ════ */}
+      {tab === 'requests' && (
+        <FohRequestsPanel
+          data={data}
+          onResolve={async (id) => { await supabase.from('member_requests').update({ status: 'resolved', resolved_by: currentUser.id, resolved_at: new Date().toISOString() }).eq('id', id); onReload?.(true); }}
+          onReopen={async (id) => { await supabase.from('member_requests').update({ status: 'open', resolved_by: null, resolved_at: null }).eq('id', id); onReload?.(true); }}
+          onDelete={async (id) => { if (confirm('Delete this request?')) { await supabase.from('member_requests').delete().eq('id', id); onReload?.(true); } }}
+        />
+      )}
+
+      {/* ════ PAYROLL ════ */}
+      {tab === 'payroll' && (
+        <FohPayroll data={data} fohStaff={fohStaff} />
+      )}
+    </div>
+  );
+}
+
+// Small helper to keep the JSX above clean
+function onShifts(openShifts) {
+  return { count: openShifts.length };
+}
+
+// ─── FOH Jobs editor (manager) ──────────────────────────────────────────
+function FohJobsEditor({ data, currentUser, onReload }) {
+  const [newTitle, setNewTitle] = useState('');
+  const [newCategory, setNewCategory] = useState('opening');
+  const [newRecurring, setNewRecurring] = useState(false);
+  const [newPriority, setNewPriority] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const jobs = (data.dailyJobs || []);
+  const cats = [['opening', 'Opening'], ['during', 'During the day'], ['closing', 'Closing']];
+
+  const add = async () => {
+    if (!newTitle.trim()) return;
+    setBusy(true);
+    const sameCategory = jobs.filter(j => j.category === newCategory);
+    const maxOrder = sameCategory.length ? Math.max(...sameCategory.map(j => j.sortOrder || 0)) : 0;
+    const { error } = await supabase.from('daily_jobs').insert({
+      title: newTitle.trim(), category: newCategory,
+      recurrence: newRecurring ? 'recurring' : 'once',
+      priority: newPriority,
+      sort_order: maxOrder + 1, created_by: currentUser.id,
+    });
+    setBusy(false);
+    if (!error) { setNewTitle(''); setNewPriority(false); onReload?.(true); }
+  };
+
+  const remove = async (id) => {
+    if (!confirm('Delete this job?')) return;
+    const { error } = await supabase.from('daily_jobs').delete().eq('id', id);
+    if (!error) onReload?.(true);
+  };
+
+  const toggleActive = async (job) => {
+    const { error } = await supabase.from('daily_jobs').update({ active: !job.active }).eq('id', job.id);
+    if (!error) onReload?.(true);
+  };
+
+  return (
+    <div>
+      {/* Add new */}
+      <div style={{
+        background: '#fffdf7', border: '1px solid #efe7d2', borderRadius: 14,
+        padding: 16, marginBottom: 18,
+      }}>
+        <SectionLabel>Add a job</SectionLabel>
+        <input
+          value={newTitle}
+          onChange={e => setNewTitle(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') add(); }}
+          placeholder="e.g. Wipe down reformers"
+          style={{ ...styles.loginInput, marginBottom: 10 }}
+        />
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+          {cats.map(([key, label]) => (
+            <button key={key} onClick={() => setNewCategory(key)} className="salus-btn"
+              style={{
+                flex: 1, padding: '8px', borderRadius: 9, fontSize: 11, fontWeight: 600,
+                border: newCategory === key ? '1px solid #5c4a38' : '1px solid #e5dcc4',
+                background: newCategory === key ? '#5c4a38' : 'transparent',
+                color: newCategory === key ? '#fffdf7' : '#5c4a38',
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+          <button onClick={() => setNewRecurring(v => !v)} className="salus-btn"
+            style={{
+              flex: 1, padding: '8px', borderRadius: 9, fontSize: 11, fontWeight: 600,
+              border: newRecurring ? '1px solid #7a8c5c' : '1px solid #e5dcc4',
+              background: newRecurring ? '#eef1e6' : 'transparent',
+              color: newRecurring ? '#5a6b3e' : '#a59478',
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}>
+            {newRecurring ? '✓ ' : ''}Repeats through day
+          </button>
+          <button onClick={() => setNewPriority(v => !v)} className="salus-btn"
+            style={{
+              flex: 1, padding: '8px', borderRadius: 9, fontSize: 11, fontWeight: 600,
+              border: newPriority ? '1px solid #c8442a' : '1px solid #e5dcc4',
+              background: newPriority ? '#fbe5dd' : 'transparent',
+              color: newPriority ? '#c8442a' : '#a59478',
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}>
+            {newPriority ? '★ ' : ''}Priority
+          </button>
+        </div>
+        <button onClick={add} disabled={busy || !newTitle.trim()} className="salus-btn"
+          style={{
+            width: '100%', padding: '11px', borderRadius: 10,
+            background: '#1a2620', color: '#fffdf7', border: 'none',
+            fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+            cursor: (busy || !newTitle.trim()) ? 'not-allowed' : 'pointer',
+            opacity: (busy || !newTitle.trim()) ? 0.4 : 1, fontFamily: 'inherit',
+          }}>
+          Add job
+        </button>
+      </div>
+
+      {/* Existing jobs by category */}
+      {cats.map(([key, label]) => {
+        const items = jobs.filter(j => j.category === key).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+        if (items.length === 0) return null;
+        return (
+          <div key={key} style={{ marginBottom: 18 }}>
+            <SectionLabel>{label}</SectionLabel>
+            <div style={{ background: '#fffdf7', border: '1px solid #efe7d2', borderRadius: 14, overflow: 'hidden' }}>
+              {items.map((job, idx) => (
+                <div key={job.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '11px 14px',
+                  borderBottom: idx < items.length - 1 ? '1px solid #f5f0e0' : 'none',
+                  opacity: job.active ? 1 : 0.45,
+                }}>
+                  <span style={{
+                    flex: 1, fontSize: 13.5, color: '#1a2620',
+                    textDecoration: job.active ? 'none' : 'line-through',
+                  }}>
+                    {job.title}
+                  </span>
+                  <button onClick={() => toggleActive(job)} className="salus-btn"
+                    style={{
+                      background: 'transparent', border: 'none', padding: '4px 8px',
+                      fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                      color: job.active ? '#a59478' : '#7a8c5c', cursor: 'pointer', fontFamily: 'inherit',
+                    }}>
+                    {job.active ? 'Hide' : 'Show'}
+                  </button>
+                  <button onClick={() => remove(job.id)} className="salus-btn"
+                    style={{ background: 'transparent', border: 'none', padding: 4, color: '#c4b8a0', cursor: 'pointer' }}>
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── FOH Payroll (manager) ──────────────────────────────────────────────
+// Hours worked per FOH staff member over a chosen period × their rate.
+function FohPayroll({ data, fohStaff }) {
+  const [days, setDays] = useState(7); // 7 | 14 | 30
+
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const shifts = (data.fohShifts || []).filter(s => s.shiftDate >= since && s.clockOutAt);
+
+  // Build per-person totals. Hours are rounded to the nearest whole hour
+  // on purpose — counting staff to the minute feels like surveillance.
+  // Rounding says "we trust you," which is the whole Salus tone.
+  const rows = fohStaff.map(u => {
+    const mine = shifts.filter(s => s.userId === u.id);
+    const totalMs = mine.reduce((acc, s) => acc + (new Date(s.clockOutAt) - new Date(s.clockInAt)), 0);
+    const rawHours = totalMs / 3600000;
+    const hours = Math.round(rawHours);           // round to the hour
+    const ratePence = u.hourlyRatePence ?? u.hourly_rate_pence ?? null;
+    const pay = ratePence != null ? (hours * ratePence) / 100 : null;
+    return { user: u, hours, shiftCount: mine.length, pay, ratePence };
+  }).filter(r => r.shiftCount > 0 || r.ratePence != null);
+
+  const totalPay = rows.reduce((acc, r) => acc + (r.pay || 0), 0);
+  const fmtHours = (h) => `${h}h`;                // whole hours, no minutes
+  const fmtGbp = (n) => `£${n.toFixed(2)}`;
+
+  return (
+    <div>
+      {/* Period switch */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 18, background: '#f4efe2', padding: 4, borderRadius: 12 }}>
+        {[[7, 'Last 7 days'], [14, 'Last 14 days'], [30, 'Last 30 days']].map(([d, label]) => (
+          <button key={d} onClick={() => setDays(d)} className="salus-btn"
+            style={{
+              flex: 1, padding: '9px', borderRadius: 9, fontSize: 11.5, fontWeight: 600,
+              background: days === d ? '#fffdf7' : 'transparent', border: 'none',
+              color: days === d ? '#1a2620' : '#a59478', cursor: 'pointer', fontFamily: 'inherit',
+              boxShadow: days === d ? '0 1px 4px rgba(92,74,56,0.10)' : 'none',
+            }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {rows.length === 0 ? (
+        <div style={{ color: '#a59478', fontSize: 13, fontStyle: 'italic', padding: 16, textAlign: 'center' }}>
+          No completed shifts in this period.
+        </div>
+      ) : (
+        <>
+          <div style={{ background: '#fffdf7', border: '1px solid #efe7d2', borderRadius: 14, overflow: 'hidden', marginBottom: 14 }}>
+            {rows.map((r, idx) => (
+              <div key={r.user.id} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '14px', borderBottom: idx < rows.length - 1 ? '1px solid #f5f0e0' : 'none',
+              }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 500, color: '#1a2620' }}>{r.user.name}</div>
+                  <div style={{ fontSize: 11.5, color: '#a59478', marginTop: 2 }}>
+                    {fmtHours(r.hours)} · {r.shiftCount} shift{r.shiftCount === 1 ? '' : 's'}
+                    {r.ratePence != null ? ` · £${(r.ratePence / 100).toFixed(2)}/hr` : ' · no rate set'}
+                  </div>
+                </div>
+                <div style={{
+                  fontFamily: '"Playfair Display", Georgia, serif', fontSize: 18,
+                  color: r.pay != null ? '#1a2620' : '#c4b8a0', flexShrink: 0,
+                }}>
+                  {r.pay != null ? fmtGbp(r.pay) : '—'}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '14px 16px', background: 'linear-gradient(180deg, #232f29 0%, #1a2620 100%)',
+            borderRadius: 14, color: '#fffdf7',
+          }}>
+            <span style={{ fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(255,253,247,0.7)' }}>
+              Total ({days} days)
+            </span>
+            <span style={{ fontFamily: '"Playfair Display", Georgia, serif', fontSize: 22 }}>
+              {fmtGbp(totalPay)}
+            </span>
+          </div>
+
+          <div style={{ fontSize: 11, color: '#a59478', marginTop: 12, lineHeight: 1.5, fontStyle: 'italic' }}>
+            Hours are rounded to the nearest hour and come from completed clock in/out pairs only — anyone still on shift isn't counted until they clock out. Set each person's hourly rate on their profile.
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── FOH Requests panel (manager) ───────────────────────────────────────
+// The queue of member requests staff have logged. Open ones first.
+function FohRequestsPanel({ data, onResolve, onReopen, onDelete }) {
+  const requests = (data.memberRequests || []);
+  const open = requests.filter(r => r.status === 'open');
+  const resolved = requests.filter(r => r.status === 'resolved').slice(0, 20);
+
+  const userName = (id) => (data.users.find(u => u.id === id)?.name) || 'Someone';
+  const fmtWhen = (iso) => {
+    const d = new Date(iso);
+    const today = new Date().toISOString().slice(0, 10);
+    const isToday = iso?.slice(0, 10) === today;
+    return isToday
+      ? d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+      : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ' · ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const Row = ({ r, done }) => {
+    const t = MEMBER_REQUEST_TYPES.find(x => x.key === r.type) || MEMBER_REQUEST_TYPES.at(-1);
+    const Icon = t.icon;
+    return (
+      <div style={{
+        background: '#fffdf7', border: '1px solid #efe7d2', borderRadius: 14,
+        padding: '14px 16px', marginBottom: 10, opacity: done ? 0.6 : 1,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{
+            width: 34, height: 34, borderRadius: 10, flexShrink: 0,
+            background: `${t.tone}14`, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Icon size={17} color={t.tone} strokeWidth={1.9} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, color: '#1a2620', lineHeight: 1.3 }}>
+              <span style={{ fontWeight: 600 }}>{r.memberName}</span>
+              {memberRequestPhrase(r.type) ? ` — ${memberRequestPhrase(r.type)}` : ` — ${memberRequestLabel(r.type)}`}
+            </div>
+            {r.detail && (
+              <div style={{ fontSize: 13, color: '#5c4a38', marginTop: 4, lineHeight: 1.4 }}>{r.detail}</div>
+            )}
+            <div style={{ fontSize: 11, color: '#a59478', marginTop: 6 }}>
+              {r.raisedBy ? userName(r.raisedBy).split(' ')[0] : 'Someone'} · {fmtWhen(r.createdAt)}
+              {done && r.resolvedBy ? ` · sorted by ${userName(r.resolvedBy).split(' ')[0]}` : ''}
+            </div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          {!done ? (
+            <button onClick={() => onResolve(r.id)} className="salus-btn"
+              style={{
+                flex: 1, padding: '9px', borderRadius: 10, background: '#1a2620', color: '#fffdf7',
+                border: 'none', fontSize: 12, fontWeight: 600, letterSpacing: '0.04em',
+                cursor: 'pointer', fontFamily: 'inherit',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              }}>
+              <Check size={14} /> Mark sorted
+            </button>
+          ) : (
+            <button onClick={() => onReopen(r.id)} className="salus-btn"
+              style={{
+                flex: 1, padding: '9px', borderRadius: 10, background: 'transparent', color: '#5c4a38',
+                border: '1px solid #e5dcc4', fontSize: 12, fontWeight: 600,
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}>
+              Reopen
+            </button>
+          )}
+          <button onClick={() => onDelete(r.id)} className="salus-btn"
+            style={{
+              padding: '9px 12px', borderRadius: 10, background: 'transparent', color: '#c4b8a0',
+              border: '1px solid #efe7d2', cursor: 'pointer', fontFamily: 'inherit',
+            }}>
+            <X size={14} />
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      {open.length === 0 && resolved.length === 0 ? (
+        <div style={{
+          padding: '28px 16px', textAlign: 'center', color: '#a59478',
+          fontFamily: '"Playfair Display", Georgia, serif', fontStyle: 'italic', fontSize: 15,
+        }}>
+          No member requests yet.<br/>
+          <span style={{ fontSize: 12.5, fontStyle: 'normal' }}>Staff log them from their home screen.</span>
+        </div>
+      ) : (
+        <>
+          <SectionLabel>To sort{open.length > 0 ? ` · ${open.length}` : ''}</SectionLabel>
+          {open.length === 0 ? (
+            <div style={{ color: '#7a8c5c', fontSize: 13, fontStyle: 'italic', marginBottom: 18, padding: '4px 2px' }}>
+              All caught up. Nothing waiting.
+            </div>
+          ) : (
+            <div style={{ marginBottom: 18 }}>
+              {open.map(r => <Row key={r.id} r={r} done={false} />)}
+            </div>
+          )}
+
+          {resolved.length > 0 && (
+            <>
+              <SectionLabel>Recently sorted</SectionLabel>
+              {resolved.map(r => <Row key={r.id} r={r} done={true} />)}
+            </>
+          )}
+        </>
       )}
     </div>
   );
@@ -18144,6 +19370,7 @@ function MePage({ data, currentUser, isManager, realIsManager, viewAsStaff, onTo
         {/* ── GROUP: Studio admin (manager only) ── */}
         {isManager && (() => {
           const items = [
+            { key: 'foh',           icon: ListChecks,   label: 'Front of House',  sub: 'Shifts, daily jobs & payroll' },
             { key: 'reports',       icon: BarChart3,    label: 'Reports',         sub: 'Email triage and overview' },
             { key: 'inbox',         icon: Inbox,        label: 'Inbox',           sub: 'Member messages' },
             { key: 'cancellations', icon: AlertCircle,  label: 'Cancellations',   sub: 'Booking cancellation tracking' },
