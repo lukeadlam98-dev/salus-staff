@@ -356,6 +356,19 @@ export default function SalusStaff() {
   const [authError, setAuthError] = useState(null);
   const [tab, setTab] = useState('home');
   const [tabInitialized, setTabInitialized] = useState(false);
+  // Floating nav shrinks while scrolling down, returns when scrolling up
+  // (like Instagram). navCompact drives the scale; lastScrollY tracks direction.
+  const [navCompact, setNavCompact] = useState(false);
+  const lastScrollY = useRef(0);
+  const handleMainScroll = (e) => {
+    const y = e.target.scrollTop;
+    const last = lastScrollY.current;
+    if (y < 28) setNavCompact(false);            // always full near the top
+    else if (y > last + 6) setNavCompact(true);  // scrolling down → shrink
+    else if (y < last - 6) setNavCompact(false); // scrolling up → expand
+    lastScrollY.current = y;
+  };
+  useEffect(() => { setNavCompact(false); lastScrollY.current = 0; }, [tab]);
   const [modal, setModal] = useState(null);
   const [scheduleView, setScheduleView] = useState('studio'); // 'studio' | 'foh'
   const [lastViewed, setLastViewed] = useState({ chat: 0, cover: 0 });
@@ -2231,6 +2244,7 @@ export default function SalusStaff() {
       {/* Main */}
       <main
         className={tab === 'chat' ? 'salus-main salus-main-chat' : 'salus-main'}
+        onScroll={handleMainScroll}
         style={(() => {
           if (tab === 'chat') return styles.mainChat;
           // Layer the tab-specific theme (if any) on top of the default
@@ -2365,7 +2379,7 @@ export default function SalusStaff() {
       </main>
 
       {/* Bottom nav */}
-      <nav style={styles.bottomNav}>
+      <nav style={{ ...styles.bottomNav, ...(navCompact ? styles.bottomNavCompact : {}) }}>
         <BottomTab icon={HomeIcon} label="Home" active={tab==='home'} onClick={() => setTab('home')} />
         <BottomTab icon={CoverIcon} label="Cover" active={tab==='cover'} onClick={() => setTab('cover')} badge={(data.coverRequests || []).filter(r => r.status === 'open' || r.status === 'pending').length} />
         <BottomTab icon={Calendar} label="Schedule" active={tab==='timetable'} onClick={() => setTab('timetable')} />
@@ -2930,13 +2944,15 @@ function BottomTab({ icon: Icon, label, active, onClick, badge }) {
   return (
     <button
       onClick={onClick}
+      aria-label={label}
       style={{ ...styles.bottomTab, ...(active ? styles.bottomTabActive : {}) }}
       className="salus-btn"
     >
-      <Icon size={22} strokeWidth={active ? 2.4 : 2} />
-      <span style={{ ...styles.bottomTabLabel, ...(active ? styles.bottomTabLabelActive : {}) }}>
-        {label}
-      </span>
+      <Icon
+        size={23}
+        strokeWidth={active ? 2.3 : 1.9}
+        color={active ? '#fffdf7' : 'rgba(255, 253, 247, 0.6)'}
+      />
       {badge > 0 && <span style={styles.bottomTabBadge}>{badge}</span>}
     </button>
   );
@@ -13183,11 +13199,22 @@ function Home({ data, currentUser, isManager, previewingAsStaff, onReload, onCla
       paddingLeft: 28,
       paddingRight: 28,
     }}>
-      {/* FOH clipboard — clock in/out + daily jobs. Shows at the very top
-          for Front of House staff, above the photo hero, because when
-          they open the app on shift this is the thing they need.
-          Also shown to managers in "view as staff" preview mode so they
-          can see exactly what FOH sees. */}
+      {/* Editorial hero — big photo, greeting overlay, next class overlay.
+          The ONLY fixed home element — sets the brand. For FOH staff this
+          keeps the page opening with the warm greeting + image + the alerts
+          and settings at the top, same as everyone else. */}
+      <HomeHero
+        data={data}
+        currentUser={currentUser}
+        isManager={isManager}
+        brandPhoto={brandPhoto}
+        onClassClick={onClassClick}
+      />
+
+      {/* FOH clipboard — clock in/out + daily jobs. Sits right under the
+          greeting/hero so Front of House staff still get the profile +
+          image first, then their shift tools. Also shown to managers in
+          "view as staff" preview mode so they see exactly what FOH sees. */}
       {(currentUser.isFoh || previewingAsStaff) && (
         <FohClipboard
           data={data}
@@ -13200,17 +13227,6 @@ function Home({ data, currentUser, isManager, previewingAsStaff, onReload, onCla
           onTickAll={onTickAllDailyJobs}
         />
       )}
-
-      {/* Editorial hero — big photo, greeting overlay, next class overlay.
-          The ONLY fixed home element — sets the brand. Everything else
-          below is a widget the coach chooses to see (or hide). */}
-      <HomeHero
-        data={data}
-        currentUser={currentUser}
-        isManager={isManager}
-        brandPhoto={brandPhoto}
-        onClassClick={onClassClick}
-      />
 
       {/* Render widgets in user's chosen order */}
       {widgets.map(widgetKey => {
@@ -13227,6 +13243,9 @@ function Home({ data, currentUser, isManager, previewingAsStaff, onReload, onCla
             );
 
           case 'todos':
+            // FOH staff don't use the personal to-do list — their day is
+            // the daily jobs checklist on the clipboard above.
+            if (currentUser.isFoh) return null;
             return (
               <PersonalTodos
                 key="todos"
@@ -14011,45 +14030,80 @@ function FohClipboard({ data, currentUser, preview, onClockIn, onClockOut, onTog
                 const last = lastByJob.get(job.id);
 
                 if (recurring) {
-                  // Recurring: a "Done" button that logs each occurrence, with a count
+                  // Recurring jobs (walk-arounds, bin checks) show a row of
+                  // 6 blocks that fill in each time the job's done — a visual
+                  // tally across the shift. "Done" fills the next block.
+                  const BLOCKS = 6;
+                  const filled = Math.min(count, BLOCKS);
+                  const tone = job.priority ? '#c8442a' : '#7a8c5c';
                   return (
                     <div key={job.id} style={{
-                      display: 'flex', alignItems: 'center', gap: 10,
-                      padding: '11px 4px', borderBottom: '1px solid #f5f0e0',
+                      padding: '13px 4px', borderBottom: '1px solid #f5f0e0',
                     }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <div style={{
-                          fontSize: 14, lineHeight: 1.35,
+                          flex: 1, minWidth: 0, fontSize: 14, lineHeight: 1.35,
                           color: job.priority ? '#c8442a' : '#1a2620',
                           fontWeight: job.priority ? 600 : 400,
                         }}>
                           {job.priority && '★ '}{job.title}
                         </div>
-                        <div style={{ fontSize: 11, color: '#a59478', marginTop: 3 }}>
-                          {count > 0
-                            ? `${count}× today · last ${fmtTime(last)}`
-                            : (job.priority ? 'Not done yet — priority' : 'Not done yet')}
-                          {count > 0 && (
-                            <button onClick={() => onUndoJob?.(job.id)} className="salus-btn"
-                              style={{
-                                background: 'transparent', border: 'none', padding: '0 0 0 8px',
-                                color: '#c4b8a0', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit',
-                                textDecoration: 'underline',
-                              }}>
-                              undo
-                            </button>
-                          )}
-                        </div>
+                        <button onClick={() => onToggleJob?.(job.id)} className="salus-btn"
+                          style={{
+                            flexShrink: 0, padding: '9px 20px', borderRadius: 999,
+                            background: job.priority
+                              ? 'linear-gradient(180deg, #d4583f 0%, #c8442a 100%)'
+                              : 'linear-gradient(180deg, #2a392f 0%, #1a2620 100%)',
+                            color: '#fffdf7', border: 'none', fontSize: 12.5, fontWeight: 600,
+                            letterSpacing: '0.04em', cursor: 'pointer', fontFamily: 'inherit',
+                            boxShadow: job.priority
+                              ? '0 2px 7px rgba(200,68,42,0.32), inset 0 1px 0 rgba(255,255,255,0.16)'
+                              : '0 2px 7px rgba(26,38,32,0.28), inset 0 1px 0 rgba(255,255,255,0.12)',
+                          }}>
+                          Tick
+                        </button>
                       </div>
-                      <button onClick={() => onToggleJob?.(job.id)} className="salus-btn"
+
+                      {/* 6-block progress tally — tap the blocks to fill the next one */}
+                      <div
+                        onClick={() => onToggleJob?.(job.id)}
                         style={{
-                          flexShrink: 0, padding: '8px 16px', borderRadius: 999,
-                          background: job.priority ? '#c8442a' : '#1a2620', color: '#fffdf7',
-                          border: 'none', fontSize: 12, fontWeight: 600,
-                          letterSpacing: '0.04em', cursor: 'pointer', fontFamily: 'inherit',
+                          display: 'flex', gap: 6, marginTop: 12, cursor: 'pointer',
+                          padding: '4px 0',
                         }}>
-                        Done
-                      </button>
+                        {Array.from({ length: BLOCKS }).map((_, i) => (
+                          <div key={i} style={{
+                            flex: 1, height: 12, borderRadius: 4,
+                            background: i < filled ? tone : '#e6dcc7',
+                            boxShadow: i < filled
+                              ? 'inset 0 1px 0 rgba(255,255,255,0.25)'
+                              : 'inset 0 1px 2px rgba(92,74,56,0.10)',
+                            transition: 'background 0.2s ease',
+                          }} />
+                        ))}
+                      </div>
+
+                      {/* meta line */}
+                      <div style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        marginTop: 7,
+                      }}>
+                        <span style={{ fontSize: 11, color: count > 0 ? '#7a6f5f' : '#a59478' }}>
+                          {count > 0
+                            ? `Done ${count}× · last ${fmtTime(last)}`
+                            : (job.priority ? 'Priority — not done yet' : 'Not done yet')}
+                        </span>
+                        {count > 0 && (
+                          <button onClick={() => onUndoJob?.(job.id)} className="salus-btn"
+                            style={{
+                              background: 'transparent', border: 'none', padding: 0,
+                              color: '#c4b8a0', fontSize: 11, cursor: 'pointer',
+                              fontFamily: 'inherit', textDecoration: 'underline',
+                            }}>
+                            undo
+                          </button>
+                        )}
+                      </div>
                     </div>
                   );
                 }
@@ -15225,18 +15279,71 @@ function QuoteWidget() {
   // Stable across the day — pick based on day of year
   const dayOfYear = Math.floor((Date.now() / 86400000)) % QUOTES.length;
   const q = QUOTES[dayOfYear];
+  // Rotate the backdrop photo with the day too, so it feels fresh
+  const photos = ['/brand/reformer.jpg', '/brand/cardio.jpg', '/brand/exterior.jpg', '/brand/sign.jpg'];
+  const photo = photos[dayOfYear % photos.length];
+  const [liked, setLiked] = useState(false);
+  const [imgOk, setImgOk] = useState(true);
+
+  const share = async () => {
+    try {
+      if (navigator.share) await navigator.share({ text: `${q.text}\n\n— Salus House` });
+    } catch (_) { /* user cancelled */ }
+  };
+
   return (
     <div style={{
-      ...styles.tile, padding: 16,
-      background: '#fef7e8', borderColor: '#efe7d2',
+      position: 'relative', borderRadius: 22, overflow: 'hidden',
+      minHeight: 320, marginBottom: 16,
+      boxShadow: '0 10px 28px rgba(92, 74, 56, 0.14)',
+      // Warm dawn gradient as the base (and fallback if the photo is missing)
+      background: 'linear-gradient(180deg, #8a9a86 0%, #b8a48c 45%, #e9d9c4 100%)',
     }}>
-      <div style={{ fontSize: 11, color: '#a59478', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
-        Quote of the day
+      {imgOk && (
+        <img
+          src={photo}
+          alt=""
+          onError={() => setImgOk(false)}
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+        />
+      )}
+      {/* Soft wash so the words always read */}
+      <div style={{
+        position: 'absolute', inset: 0,
+        background: 'linear-gradient(180deg, rgba(26,38,32,0.28) 0%, rgba(26,38,32,0.18) 45%, rgba(26,38,32,0.58) 100%)',
+      }} />
+
+      <div style={{
+        position: 'relative', padding: '32px 26px 22px',
+        display: 'flex', flexDirection: 'column', minHeight: 320,
+      }}>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{
+            fontFamily: '"Playfair Display", Georgia, serif',
+            fontSize: 27, lineHeight: 1.32, fontWeight: 500,
+            color: '#fffdf7', textAlign: 'center',
+            textShadow: '0 2px 18px rgba(0,0,0,0.32)',
+            letterSpacing: '0.005em',
+          }}>
+            {q.text}
+          </div>
+        </div>
+
+        {/* Minimal affordances, like the reference cards */}
+        <div style={{ display: 'flex', gap: 22, justifyContent: 'center', alignItems: 'center', marginTop: 20 }}>
+          <button onClick={share} className="salus-btn"
+            style={{ background: 'transparent', border: 'none', padding: 6, cursor: 'pointer', lineHeight: 0 }}
+            aria-label="Share">
+            <Bookmark size={20} color="rgba(255,253,247,0.92)" strokeWidth={1.8} />
+          </button>
+          <button onClick={() => setLiked(v => !v)} className="salus-btn"
+            style={{ background: 'transparent', border: 'none', padding: 6, cursor: 'pointer', lineHeight: 0 }}
+            aria-label="Favourite">
+            <Heart size={20} color="rgba(255,253,247,0.92)" strokeWidth={1.8}
+              fill={liked ? '#fffdf7' : 'none'} />
+          </button>
+        </div>
       </div>
-      <div style={{ fontFamily: '"Playfair Display", serif', fontSize: 16, color: '#1a2620', lineHeight: 1.4, fontStyle: 'italic' }}>
-        "{q.text}"
-      </div>
-      <div style={{ fontSize: 11, color: '#7a8270', marginTop: 8 }}>— {q.author}</div>
     </div>
   );
 }
@@ -26785,26 +26892,39 @@ const styles = {
 
   // ─── BOTTOM NAV ───
   bottomNav: {
-    position: 'fixed', bottom: 0, left: 0, right: 0,
-    background: 'rgba(255, 253, 247, 0.95)', backdropFilter: 'blur(12px)',
-    borderTop: '1px solid #efe7d2',
-    display: 'flex', padding: '10px 12px 8px',
-    paddingBottom: 'calc(10px + env(safe-area-inset-bottom))',
+    position: 'fixed', left: 16, right: 16,
+    bottom: 'calc(14px + env(safe-area-inset-bottom, 0px))',
+    background: 'rgba(26, 38, 32, 0.88)', backdropFilter: 'blur(18px)',
+    WebkitBackdropFilter: 'blur(18px)',
+    borderRadius: 30,
+    border: '1px solid rgba(255, 253, 247, 0.10)',
+    display: 'flex', alignItems: 'center', justifyContent: 'space-around',
+    padding: '9px 10px',
+    boxShadow: '0 10px 30px rgba(26, 38, 32, 0.34)',
+    maxWidth: 460, marginLeft: 'auto', marginRight: 'auto',
     zIndex: 100,
+    transform: 'scale(1)', transformOrigin: 'center bottom',
+    transition: 'transform 0.28s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.28s ease',
+  },
+  bottomNavCompact: {
+    transform: 'scale(0.74)',
+    opacity: 0.95,
   },
   bottomTab: {
-    flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-    padding: 4, color: '#a59478', background: 'none', border: 'none',
-    fontFamily: 'inherit', cursor: 'pointer', position: 'relative',
-    transition: 'color 0.15s ease',
+    position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    width: 56, height: 42, borderRadius: 999,
+    background: 'transparent', border: 'none',
+    fontFamily: 'inherit', cursor: 'pointer',
+    transition: 'background 0.18s ease',
   },
-  bottomTabActive: { color: '#1a2620' },
-  bottomTabLabel: { fontSize: 10, fontWeight: 500, letterSpacing: '0.05em' },
-  bottomTabLabelActive: { fontWeight: 600 },
+  bottomTabActive: { background: 'rgba(255, 253, 247, 0.16)' },
+  bottomTabLabel: { display: 'none' },
+  bottomTabLabelActive: { display: 'none' },
   bottomTabBadge: {
-    position: 'absolute', top: 0, right: '28%',
-    background: '#c8442a', color: '#fffdf7', fontSize: 9, fontWeight: 600,
+    position: 'absolute', top: 4, right: 8,
+    background: '#c8442a', color: '#fffdf7', fontSize: 9, fontWeight: 700,
     minWidth: 16, height: 16, borderRadius: 8,
+    border: '1.5px solid rgba(26,38,32,0.9)',
     display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px',
   },
 
